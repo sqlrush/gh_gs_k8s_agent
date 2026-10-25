@@ -1,0 +1,9 @@
+name: perf.bgwriter
+description: 检查点与后台写统计（pg_stat_bgwriter）
+sql: |
+  select checkpoints_timed, checkpoints_req,
+         checkpoint_write_time, checkpoint_sync_time,
+         buffers_checkpoint, buffers_clean, maxwritten_clean,
+         buffers_backend, buffers_backend_fsync, buffers_alloc,
+         to_char(stats_reset,'YYYY-MM-DD HH24:MI:SS') as stats_reset
+  from pg_stat_bgwriter;

@@ -1,0 +1,30 @@
+# 线程池用量 —— openGauss 开着线程池时,真正的并发上限是池大小,不是 max_connections。
+#
+# **为什么不能只看 max_connections(og5 实测):** og5 上
+# `max_connections = 1000` 而 `thread_pool_attr = '800, 2, (nobind)'` ——
+# 先碰到的是 800 这个池上限。池满之后新请求排队,现场表现是「库没响应」,
+# 而连接数看起来离 1000 还很远,于是连接维度一片绿。
+#
+# **`sessionid <> 0` 不是可选的过滤(踩过,见 tools/faultlab)。** 开线程池后
+# `pg_stat_activity` 里会有一批**空闲工作线程**的行,它们 `sessionid = 0`、
+# 没有 client_port、不持有任何锁。把它们算进会话数,og5 上会把 12 个真实会话
+# 报成几十个,占比直接虚高。只有 `sessionid <> 0` 的行才是真实会话。
+#
+# thread_pool_attr 的第一个数字是池大小,格式 '<线程数>, <组数>, (绑核策略)'。
+# 解析放在 python 侧(collectors.py)—— 在 SQL 里 split_part 一层层剥,
+# 格式一变就静默给出错的分母。
+name: health.thread_pool
+description: 线程池是否开启、池大小与真实会话数
+readonly: true
+sql: |
+  SELECT 'enable_thread_pool' AS item,
+         COALESCE((SELECT setting FROM pg_settings WHERE name='enable_thread_pool'),'') AS value
+  UNION ALL
+  SELECT 'thread_pool_attr' AS item,
+         COALESCE((SELECT setting FROM pg_settings WHERE name='thread_pool_attr'),'') AS value
+  UNION ALL
+  SELECT 'max_connections' AS item,
+         COALESCE((SELECT setting FROM pg_settings WHERE name='max_connections'),'') AS value
+  UNION ALL
+  SELECT 'real_sessions' AS item,
+         (SELECT count(*)::text FROM pg_stat_activity WHERE sessionid <> 0) AS value;

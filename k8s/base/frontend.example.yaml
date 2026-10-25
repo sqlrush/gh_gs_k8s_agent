@@ -1,0 +1,46 @@
+# 前端的部署样例(前端方填镜像后自己 apply;不在 kustomization 里)。
+#
+# 本仓库不带前端。前端方的页面如果部署在本集群、经网关同源访问,按下面三条对齐即可,网关与网络策略都不用改:
+#   ① Service 名 frontend、端口 80 —— 网关把 /dash/* 原样转发到 <FRONTEND_SERVICE>.<命名空间>.svc:80
+#      (gateway-config 的 FRONTEND_SERVICE 可改名);
+#   ② Pod 带标签 app: gaussdb-frontend、容器监听 8080 —— networkpolicy.yaml 只放行网关 → 这个标签的 8080;
+#   ③ 页面经网关取数据(/reports/*、opencode 接口),不直接访问用户 Pod。
+# 前端部署在集群外(贵方门户)时不需要这个文件,见 docs/前端对接接口说明.md 第 2 章。
+#
+# 它只端页面文件,**不读任何人的报告**:所以无状态、不挂 NAS、不持口令、不调 k8s API、出网一条都不放(见 networkpolicy)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: gaussdb-agent
+  labels: {app: gaussdb-frontend}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: gaussdb-frontend}
+  template:
+    metadata:
+      labels: {app: gaussdb-frontend}
+    spec:
+      # 别把命名空间里别的 Service 注进环境变量
+      enableServiceLinks: false
+      securityContext: {runAsNonRoot: true}
+      containers:
+        - name: web
+          image: <前端镜像>:<标签>
+          imagePullPolicy: IfNotPresent
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          ports: [{containerPort: 8080, name: http}]
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: "200m", memory: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend                       # 网关 /dash/* 代理到 <FRONTEND_SERVICE>.<ns>.svc:80,默认就是这个名字
+  namespace: gaussdb-agent
+  labels: {app: gaussdb-frontend}
+spec:
+  selector: {app: gaussdb-frontend}
+  ports: [{port: 80, targetPort: 8080, name: http}]

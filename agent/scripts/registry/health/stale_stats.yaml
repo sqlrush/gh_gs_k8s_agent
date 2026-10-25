@@ -1,0 +1,72 @@
+# 统计信息新鲜度 —— **带证据**，不只给一个表名。
+#
+# 原先这条只返回 tbl_name 一列，报告里就写「数据已变更未 analyze」。读的人
+# 无从判断这个结论可不可信：凭哪些数？差多少？上次什么时候做的？
+#
+# **判据也换了。** 原先用
+#   last_analyze IS NULL OR last_data_changed > last_analyze
+# 而这两列都来自统计收集器，会被 pg_stat_reset() 清掉，或在重启时丢失 ——
+# 而 ANALYZE 的成果存在 pg_statistic 里，不受影响。og5 上实测：
+# gsbench.fact_sales 报 last_analyze=never、n_live_tup=0，但 pg_stats 里
+# 实实在在有 8 列统计信息。**统计完好的表会被判成「从未分析」并建议去 ANALYZE。**
+#
+# 改用两个不会被独立重置的信号：
+#   relpages（pg_class 冻结值）vs 实时页数   ← 表在那之后长大了多少
+#   pg_stats 里有几列                        ← 到底有没有被 ANALYZE 覆盖过
+# 页数比正是规划器换算行数用的那个值：页数没变，规划器用的行数就等于 reltuples。
+#
+# last_analyze / n_live_tup 照样返回，供报告作**参考信息**呈现，不参与判定。
+#
+# 返回所有够大的表（不只是判定为陈旧的），判定放在 collectors.py —— 这样
+# 报告能把「查了哪些、各自什么状况」一并摆出来，而不是只给一份结论名单。
+#
+# **候选怎么取（2026-10-24 faultlab 改）。** 原先 `reltuples > min_rows ORDER BY relpages DESC
+# LIMIT n`：从没 ANALYZE 过的表 reltuples、relpages 都是 0 —— 门槛就过不去，排序也在最后，
+# **最该报的表恰好进不了候选**（V7 的 fl.import_stage：导入 50 万行、没做 ANALYZE，不在表里）。
+# og5 这种大表多的库，前 n 张全是统计完好的大表。现在：
+#   门槛  冻结行数够大，**或实时页数够大**（min_pages）。实时页数取自文件大小，不靠统计收集器 ——
+#         n_live_tup 不能用：og5 线程池模式下，导入的会话还连着时它一直是 0（实测 6 万行、n_live_tup=0）。
+#   排序  ① 没有统计列、或冻结页数为 0 的表（判定会报的两类）排最前；
+#         ② 冻结页数与实时页数偏离比例（判定用的同一个量）从高到低；③ 实时页数从大到小。
+# pg_stats 的列数要参与排序，所以挪进了子查询，对每张候选表都数一次（og5 36 张候选 36 毫秒）。
+name: health.stale_stats
+description: 表的统计信息新鲜度证据（页数漂移 + 统计列数 + 上次 ANALYZE）
+sql: |
+  SELECT tbl_name, frozen_pages, cur_pages, frozen_tuples, live_tuples,
+         stat_columns, last_analyze, last_autoanalyze
+  FROM (
+    SELECT n.nspname || '.' || c.relname AS tbl_name,
+           c.relpages AS frozen_pages,
+           pg_relation_size(c.oid) / current_setting('block_size')::bigint AS cur_pages,
+           c.reltuples::bigint AS frozen_tuples,
+           COALESCE(t.n_live_tup, 0) AS live_tuples,
+           (SELECT count(*) FROM pg_stats s
+             WHERE s.schemaname = n.nspname AND s.tablename = c.relname) AS stat_columns,
+           COALESCE(to_char(t.last_analyze, 'YYYY-MM-DD HH24:MI:SS'), 'never') AS last_analyze,
+           COALESCE(to_char(t.last_autoanalyze, 'YYYY-MM-DD HH24:MI:SS'), 'never') AS last_autoanalyze
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    LEFT JOIN pg_stat_user_tables t ON t.relid = c.oid
+    WHERE c.relkind = 'r' AND n.nspname NOT IN {{schema_filter}}
+      AND (c.reltuples > {{min_rows}}
+           OR pg_relation_size(c.oid) / current_setting('block_size')::bigint > {{min_pages}})
+  ) x
+  ORDER BY (stat_columns = 0 OR frozen_pages = 0) DESC,
+           CASE WHEN frozen_pages > 0
+                THEN CAST(abs(cur_pages - frozen_pages) AS float8) / frozen_pages
+                ELSE 0 END DESC,
+           cur_pages DESC
+  LIMIT {{limit}};
+params:
+  - key: min_rows
+    type: INTEGER
+    description: 行数下限
+  - key: min_pages
+    type: INTEGER
+    description: 实时页数下限（冻结行数为 0 / 偏小的表靠它进候选）
+  - key: schema_filter
+    type: String
+    description: 要排除的模式列表，形如 ('a','b')。须来自受控常量
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

@@ -1,0 +1,29 @@
+# SQL 取自 common/sql.py 的 skill_wdr_006。
+#
+# **这一条故意保留内连接,不要跟着 top_sql / file_io / cache 一起改成外连接。**
+# 它按 `snap_node_name` 连,而节点是**同一个对象**,不是窗口里新建的东西。
+# 改成外连接的后果比现在糟:节点一改名(或两端快照来自不同节点),起始端按 0 计,
+# 于是把实例整个生命周期的累计 checkpoint 次数当成这 20 分钟的增量报出来 ——
+# 那是一个大得离谱却看不出错的数字。内连接在这里返回 0 行、维度标成不可用,
+# 是**诚实**的降级。
+#
+# 判据是「新出现的键是不是一个新对象」:新表 / 新文件 / 新库 → 是,外连接正确;
+# 节点改名 → 不是,外连接会把历史当增量。
+# **改动：两个 COALESCE(...) 加了别名 timed / req。**
+name: wdr.checkpoint
+description: 窗口内检查点次数增量（定时触发 / 请求触发）
+sql: |
+  WITH b AS (SELECT snap_node_name, snap_checkpoints_timed AS timed, snap_checkpoints_req AS req
+               FROM snapshot.snap_global_bgwriter_stat WHERE snapshot_id={{b}}),
+       e AS (SELECT snap_node_name, snap_checkpoints_timed AS timed, snap_checkpoints_req AS req
+               FROM snapshot.snap_global_bgwriter_stat WHERE snapshot_id={{e}})
+  SELECT COALESCE(SUM(e.timed-b.timed),0) AS checkpoints_timed,
+         COALESCE(SUM(e.req-b.req),0)     AS checkpoints_req
+  FROM e JOIN b USING (snap_node_name);
+params:
+  - key: b
+    type: INTEGER
+    description: 起始快照 ID
+  - key: e
+    type: INTEGER
+    description: 结束快照 ID

@@ -1,0 +1,19 @@
+# 探测目标内核有没有 GaussDB 私有函数(gs_get_explain / gs_get_kernel_info)。
+#
+# 一次往返同时带回 version():「该有而没有」只对 GaussDB 成立(openGauss 从来没有这两个函数,
+# og5 5.0.3 / og7 7.0.0 实测),调用方(common/kernel_funcs.py)据 version 决定要不要给中文说明。
+# 行形为 item / detail:
+#   item = 'version'                  detail = version() 原文
+#   item = 'func:gs_get_explain'      detail = pg_get_function_arguments(),如 'integer'
+#   item = 'func:gs_get_kernel_info'  detail = ''(无参)
+# 函数不存在时对应行不出现——调用方按缺行判定,不按 detail 判定。
+# 只查 pg_proc + version(),任何版本都能跑,是这组脚本里唯一无条件安全的一条。
+name: explain.kernel_funcs
+description: 探测 GaussDB 私有内核函数(gs_get_explain / gs_get_kernel_info)是否存在,并带回 version()
+readonly: true
+sql: |
+  SELECT 'version' AS item, version() AS detail
+  UNION ALL
+  SELECT 'func:' || p.proname AS item, pg_get_function_arguments(p.oid) AS detail
+    FROM pg_proc p
+   WHERE p.proname IN ('gs_get_explain', 'gs_get_kernel_info');

@@ -1,0 +1,24 @@
+# DML 规范
+- id: GS-DML-003
+  severity: error
+  check: advisory
+  rule: 对账户类表的更新必须按主键升序、每 5000 行一个事务;多表更新固定顺序 客户表→额度表→账户表
+  criteria: 批量作业 SQL 与存储过程的更新顺序
+  keywords:
+  - 更新顺序
+  - 死锁
+  - 互锁
+  - 分批
+  - DEADLOCKS
+  - LOCK_WAIT_LONG
+  source: 《开发规范》v3 §5.1
+- id: GS-DML-006
+  severity: warn
+  check: deterministic
+  rule: 分区表查询条件不得对分区键使用函数或表达式
+  keywords:
+  - 分区裁剪
+  - 分区键
+  - to_char
+  - 全分区扫描
+  source: 《开发规范》v3 §5.3

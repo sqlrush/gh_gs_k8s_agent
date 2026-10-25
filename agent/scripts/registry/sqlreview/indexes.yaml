@@ -1,0 +1,44 @@
+# SQL 取自 common/sql.py 的 skill_sqlreview_002。
+#
+# 原注释保留其意：indkey 是 int2vector。openGauss 基于 PostgreSQL 9.2，
+# 没有 WITH ORDINALITY（9.4+），用 generate_series 展开向量以保住列顺序。
+# 表达式索引的列（attnum 0）会被 JOIN 掉。
+#
+# **改动一：%s 绑定变量换成 {{schema}}，并手工补上引号**（同 tables.yaml）。
+# **改动二：列数组外面套了 array_to_string(..., ',')**，括号内一字未动。
+#   理由与 tables.yaml 相同：数组的字符串化形式协议未定义，让数据库直接
+#   吐文本是唯一在直连/本机中间件/客户中间件三边都稳定的形式。
+#
+# 七个列名原本就唯一且有意义，未加别名。
+# is_unique / is_primary 是布尔列，取回来是 't'/'f'，调用方用 _as_bool 判断。
+name: sqlreview.indexes
+description: 某模式下的索引清单（列顺序/唯一性/扫描次数）
+sql: |
+  SELECT
+    n.nspname::text                                              AS schema,
+    t.relname::text                                              AS table,
+    i.relname::text                                              AS name,
+    array_to_string(
+      COALESCE((SELECT array_agg(a.attname::text ORDER BY k.ord)
+                FROM (SELECT s AS ord,
+                             (string_to_array(ix.indkey::text, ' '))[s]::smallint AS attnum
+                      FROM generate_series(
+                             1,
+                             array_length(string_to_array(ix.indkey::text, ' '), 1)) s) k
+                JOIN pg_attribute a
+                  ON a.attrelid = t.oid AND a.attnum = k.attnum),
+               ARRAY[]::text[]), ',')                            AS columns,
+    ix.indisunique                                               AS is_unique,
+    ix.indisprimary                                              AS is_primary,
+    COALESCE(s.idx_scan, 0)                                      AS scans
+  FROM pg_index ix
+  JOIN pg_class i     ON i.oid = ix.indexrelid
+  JOIN pg_class t     ON t.oid = ix.indrelid
+  JOIN pg_namespace n ON n.oid = t.relnamespace
+  LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = ix.indexrelid
+  WHERE n.nspname = '{{schema}}'
+  ORDER BY t.relname, i.relname;
+params:
+  - key: schema
+    type: String
+    description: 模式名

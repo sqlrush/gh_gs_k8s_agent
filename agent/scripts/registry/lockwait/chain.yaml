@@ -1,0 +1,15 @@
+# 阻塞关系的**边**：谁在等谁。根由 python 侧顺着这些边上溯算出来。
+#
+# 不在 SQL 里递归求根：递归 CTE 遇到环（死锁）会无限展开，而死锁恰恰是
+# 这个 skill 最该报出来的情形。上溯放在 python 里，环能被检测并当场报出，
+# 而不是让数据库先跑爆。
+name: lockwait.chain
+description: 阻塞关系的边（会话 → 阻塞它的会话）
+readonly: true
+sql: |
+  SELECT w.sessionid       AS sessionid,
+         w.block_sessionid AS block_sessionid
+    FROM pg_thread_wait_status w
+   WHERE w.block_sessionid IS NOT NULL
+     AND w.block_sessionid <> 0
+     AND w.block_sessionid <> w.sessionid;

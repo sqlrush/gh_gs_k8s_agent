@@ -1,0 +1,15 @@
+name: perf.table_stat
+description: 表级统计与膨胀比例，按死元组倒序（pg_stat_user_tables）
+sql: |
+  select schemaname||'.'||relname as tbl, seq_scan, idx_scan,
+         n_live_tup, n_dead_tup,
+         round(n_dead_tup*100.0/nullif(n_live_tup+n_dead_tup,0), 2) as dead_pct,
+         to_char(last_autovacuum,'YYYY-MM-DD HH24:MI:SS') as last_autovacuum
+  from pg_stat_user_tables
+  where n_live_tup > 0
+  order by n_dead_tup desc
+  limit {{limit}};
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

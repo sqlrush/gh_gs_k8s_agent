@@ -1,0 +1,6 @@
+# 原来是 snaps.py 里的 db.scalar("SHOW enable_wdr_snapshot")，不在模板里。
+# 白名单模型下任何 SQL 都得先注册，这条也不例外。
+name: wdr.wdr_enabled
+description: WDR 快照功能是否开启
+sql: |
+  SHOW enable_wdr_snapshot;

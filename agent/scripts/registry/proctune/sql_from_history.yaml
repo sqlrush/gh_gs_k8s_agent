@@ -1,0 +1,21 @@
+# SQL 取自 common/sql.py 的 skill_proctune_006，{sid} 换成 {{sid}}，其余未动。
+#
+# 与 sqlfetch.from_history 是同一条 SQL，两个 skill 各注册各的 —— 逻辑名是
+# 跨环境的匹配键，共用一条会让本 skill 的脚本清单依赖另一个 skill 的发布。
+#
+# 注：本 skill 里 sqlfetch.py 只有 count_placeholders() 被 verify.py 用到，
+# sql_fetch() 目前没有调用方。仍一并迁移 —— 留一条走 common.sql 的旧路径，
+# 等 common/sql.py 里的常量被清理时会在 import 期炸掉 verify.py。
+name: proctune.sql_from_history
+description: 按 unique_query_id 从 SQL 历史里取最近一条完整语句
+sql: |
+  SELECT schema_name, query
+  FROM dbe_perf.statement_history
+  WHERE unique_query_id = {{sid}}
+    AND query NOT LIKE '/* missing SQL statement%'
+  ORDER BY start_time DESC
+  LIMIT 1;
+params:
+  - key: sid
+    type: INTEGER
+    description: unique_query_id

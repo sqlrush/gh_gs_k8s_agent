@@ -1,0 +1,36 @@
+# 死元组清单 —— 触发线（threshold + scale_factor × reltuples）由 python 侧
+# 结合 autovac_settings.yaml 的 GUC 现值算，这里只管取数。
+#
+# last_autovacuum_age_s / last_vacuum_age_s **故意不 COALESCE 成 0**：
+# 从没跑过 autovacuum/vacuum 的表，这两列在协议里回来是空串（即 NULL）。
+# "0 秒前刚跑过"和"从没跑过"是相反的意思，折成 0 会让最该管的表看起来
+# 刚被服务过，掩盖它正是 vacuum_count=0、autovacuum_count=0 的那一类表。
+#
+# 系统 schema 排除表照抄 scripts/registry/health/bloat.yaml 的清单，
+# 避免系统表的死元组把真正的风险表挤出 LIMIT。
+name: vacuum.dead_tuples
+description: 用户表死元组清单（含存活/死元组数、表大小、autovacuum 服务历史）
+readonly: true
+sql: |
+  SELECT n.nspname AS schema,
+         t.relname AS "table",
+         t.n_live_tup AS n_live_tup,
+         t.n_dead_tup AS n_dead_tup,
+         c.reltuples AS reltuples,
+         pg_total_relation_size(c.oid) AS table_bytes,
+         EXTRACT(EPOCH FROM (now()-t.last_autovacuum)) AS last_autovacuum_age_s,
+         EXTRACT(EPOCH FROM (now()-t.last_vacuum)) AS last_vacuum_age_s,
+         t.vacuum_count AS vacuum_count,
+         t.autovacuum_count AS autovacuum_count,
+         CASE WHEN 'autovacuum_enabled=false' = ANY(c.reloptions) THEN false ELSE true END AS autovac_enabled,
+         COALESCE(array_to_string(c.reloptions, ','), '') AS reloptions
+    FROM pg_stat_user_tables t
+    JOIN pg_class c ON c.oid = t.relid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname NOT IN ('pg_catalog','information_schema','snapshot','dbe_perf','dbe_pldeveloper','cstore')
+   ORDER BY t.n_dead_tup DESC
+   LIMIT {{limit}};
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

@@ -1,0 +1,22 @@
+# SQL 取自 common/sql.py 的 skill_proctune_004。
+#
+# **改动：COALESCE(unit,'') 加了别名 unit。** 原来列名是 coalesce，
+# 虽不重名，但作为 JSON 键毫无意义，取值代码要写 r["coalesce"]。
+#
+# 与 procinfo.key_gucs 是同一条 SQL，两个 skill 各注册各的 —— 逻辑名是
+# 跨环境的匹配键，共用一条会让某个 skill 的脚本清单依赖另一个 skill 的发布。
+# cpu_tuple_cost / cpu_index_tuple_cost / cpu_operator_cost 是代价推演的输入，
+# 随 sqltune.key_gucs 一起加 —— 本组三份必须逐字相同（test_registry_drift_units）。
+name: proctune.key_gucs
+description: 与执行计划相关的关键 GUC 参数
+sql: |
+  SELECT name, setting, COALESCE(unit, '') AS unit
+  FROM pg_settings
+  WHERE name IN (
+    'work_mem', 'maintenance_work_mem', 'shared_buffers',
+    'effective_cache_size', 'random_page_cost', 'seq_page_cost',
+    'cpu_tuple_cost', 'cpu_index_tuple_cost', 'cpu_operator_cost', 'block_size',
+    'query_dop',
+    'max_parallel_workers_per_gather', 'from_collapse_limit',
+    'join_collapse_limit', 'geqo_threshold', 'default_statistics_target')
+  ORDER BY name;

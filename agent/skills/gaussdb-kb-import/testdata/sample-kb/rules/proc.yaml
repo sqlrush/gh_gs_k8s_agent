@@ -1,0 +1,22 @@
+# 存储过程规范
+- id: GS-PROC-001
+  severity: warn
+  check: advisory
+  rule: 存储过程循环内不得逐条提交,每 5000 行批量提交;动态 SQL 必须绑定变量;exception 分支必须回滚
+  keywords:
+  - 存储过程
+  - 批量提交
+  - 绑定变量
+  - exception
+  - SLOWSQL_TOP
+  - PARSE_TIME
+  source: 《开发规范》v3 §6
+- id: GS-PROC-002
+  severity: warn
+  check: advisory
+  rule: 存储过程内临时表灌数后必须 ANALYZE 再参与关联
+  keywords:
+  - 临时表
+  - ANALYZE
+  - 存过慢
+  source: 《开发规范》v3 §6.4

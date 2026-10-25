@@ -1,0 +1,5 @@
+# 原来内联在 collectors.py collect_logs 里。白名单模型下也得注册。
+name: health.bgwriter
+description: 检查点计数（定时/请求触发）
+sql: |
+  SELECT checkpoints_timed, checkpoints_req FROM pg_stat_bgwriter;

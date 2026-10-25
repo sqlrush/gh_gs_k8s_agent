@@ -1,0 +1,14 @@
+# SQL 取自 common/sql.py 的 skill_sqlreview_004，{sid} 换成 {{sid}}，其余未动。
+# 历史里查不到时的兜底来源。单独注册（不复用 sqlfetch.*）的理由见 from_history.yaml。
+name: sqlreview.from_statement
+description: 按 unique_sql_id 从 SQL 统计视图里取语句正文
+sql: |
+  SELECT query, user_name FROM dbe_perf.statement
+  WHERE unique_sql_id = {{sid}}
+    AND query IS NOT NULL
+    AND LENGTH(TRIM(query)) > 0
+  LIMIT 1;
+params:
+  - key: sid
+    type: INTEGER
+    description: unique_sql_id

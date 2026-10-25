@@ -1,0 +1,30 @@
+# SQL 取自 common/sql.py 的 skill_sqltune_004。
+#
+# **改动：COALESCE(unit,'') 加了别名 unit。** 原列名是 coalesce —— 不重名，
+# 但作为 JSON 键毫无意义，取值代码要写 r["coalesce"]。
+#
+# 正文与 procinfo.key_gucs 逐字相同（common/sql.py 里 skill_sqltune_004 与
+# skill_procinfo_002 本来就是两份相同的常量）。**刻意不复用同一个逻辑名**：
+# 逻辑名按 skill 分域，客户侧审批与作废也按域走；共用一条的话，procinfo
+# 哪天要加一个 GUC，sqltune 的证据包会跟着变而没人知道。
+# **cpu_tuple_cost / cpu_index_tuple_cost / cpu_operator_cost 是代价推演的输入。**
+# 少了它们就只能拿 PostgreSQL 的默认值(0.01/0.005/0.0025)去算 —— 实例上真调过
+# 这三个值的话，复算出来的 cost 会与 EXPLAIN 对不上，而对不上正是校准闸判定
+# 「模型不可信、不出建议」的依据。用默认值顶替等于让闸门失灵。
+# **query_dop 是并行度，openGauss 特有，实测必须要。**
+# og5 上 query_dop=2 时 Seq Scan 的代价是 base/2 + 1000，dop=4 时是
+# base/4 + 3000 —— 即 base/dop + 1000×(dop−1)。少了这个 GUC，复算值会差一倍，
+# 而校准闸只会报「模型不适用」，不会告诉你少的是并行度。
+name: sqltune.key_gucs
+description: 与执行计划相关的关键 GUC 参数（证据包 ## Key Parameters）
+sql: |
+  SELECT name, setting, COALESCE(unit, '') AS unit
+  FROM pg_settings
+  WHERE name IN (
+    'work_mem', 'maintenance_work_mem', 'shared_buffers',
+    'effective_cache_size', 'random_page_cost', 'seq_page_cost',
+    'cpu_tuple_cost', 'cpu_index_tuple_cost', 'cpu_operator_cost', 'block_size',
+    'query_dop',
+    'max_parallel_workers_per_gather', 'from_collapse_limit',
+    'join_collapse_limit', 'geqo_threshold', 'default_statistics_target')
+  ORDER BY name;

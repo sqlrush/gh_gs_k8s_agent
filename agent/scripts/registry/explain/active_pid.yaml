@@ -1,0 +1,20 @@
+# 按 unique_sql_id 找一个**正在执行**该 SQL 的会话——给运行态计划(gs_get_explain)定位 pid 用。
+#
+# 只取 active 且不是本连接自己的会话;多条时取开始最早的(跑得最久的那条最值得看)。
+# 没有活跃会话是常态(SQL 早跑完了),返回空行,调用方退回按 SQL 文本 EXPLAIN,不报错。
+# 与 sqlfetch 那条链路互补:sqlfetch 拿文本,这里拿"此刻谁在跑它"。
+name: explain.active_pid
+description: 按 unique_sql_id 定位正在执行该 SQL 的会话(pid / query / query_start)
+readonly: true
+sql: |
+  SELECT pid, unique_sql_id, query, query_start
+    FROM pg_stat_activity
+   WHERE unique_sql_id = {{sql_id}}
+     AND state = 'active'
+     AND pid <> pg_backend_pid()
+   ORDER BY query_start
+   LIMIT 1;
+params:
+  - key: sql_id
+    type: INTEGER
+    description: unique_sql_id(整数,可为负)

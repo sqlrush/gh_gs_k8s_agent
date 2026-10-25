@@ -1,0 +1,17 @@
+# 统计计数器的观测窗口 —— 读 idx_scan 之类累计值之前必须先拿到它。
+#
+# pg_stat_* 里的 idx_scan / seq_scan / n_tup_* 全是**自上次重置以来**的累计值。
+# 不知道「以来」是多久，这些数就没法解释：
+#
+#   窗口 7 天、idx_scan=0  → 一周没被用过，值得关注
+#   窗口 5 分钟、idx_scan=0 → 什么都说明不了
+#
+# 统计刚重置或实例刚重启时，**全库索引都是 0** —— 此时「无用索引」那条结论
+# 会把整库索引都点名。og5 实测窗口是 7.4 天，报告里必须写出来。
+name: health.stats_window
+description: 统计计数器上次重置的时间与至今时长（解释一切累计值的前提）
+sql: |
+  SELECT COALESCE(to_char(stats_reset, 'YYYY-MM-DD HH24:MI:SS'), 'never') AS stats_reset,
+         COALESCE(EXTRACT(EPOCH FROM (now() - stats_reset)), -1) AS window_seconds
+  FROM pg_stat_database
+  WHERE datname = current_database();

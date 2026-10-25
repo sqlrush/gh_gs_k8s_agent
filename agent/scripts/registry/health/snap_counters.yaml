@@ -1,0 +1,53 @@
+# 某一个 WDR 快照时刻的库级累计计数 —— 健康检查回看「某个时间段 / 最近 N 分钟」用。
+#
+# **为什么是键值形式、一条脚本取齐。** 时段体检要的是几族计数器各自在两个时刻的差:
+# DB time / CPU(instance_time)、提交 / 回滚 / 死锁 / 临时溢出 / 命中(stat_database)、
+# 检查点(bgwriter)。拆成三条脚本,客户的白名单评审就要多看三条;合成一条键值输出,
+# 判定侧按键名取,加一个计数器也不用改列。
+#
+# 每一项与 health.live_counters 里**同名的键一一对应**,两边单位一致(og5 实测核对过:
+# 实时值 >= 快照值,DB_TIME 都是微秒)。stat_database 跨库求和 —— 时段体检看的是实例。
+#
+# snap_at 是快照时刻(精确到秒),判定侧拿它和用户要的时间段比,决定这个快照能不能当
+# 窗口的一端。
+name: health.snap_counters
+description: 指定快照时刻的库级累计计数（DB time / 事务 / 死锁 / 溢出 / 命中 / 检查点）
+readonly: true
+params:
+  - key: snap
+    type: INTEGER
+    description: 快照 ID
+sql: |
+  SELECT 'snap_at' AS item,
+         to_char((SELECT start_ts FROM snapshot.snapshot WHERE snapshot_id = {{snap}}),
+                 'YYYY-MM-DD HH24:MI:SS') AS value
+  UNION ALL
+  SELECT 'db_time_us', COALESCE(sum(snap_value), 0)::text
+    FROM snapshot.snap_global_instance_time WHERE snapshot_id = {{snap}} AND snap_stat_name = 'DB_TIME'
+  UNION ALL
+  SELECT 'cpu_time_us', COALESCE(sum(snap_value), 0)::text
+    FROM snapshot.snap_global_instance_time WHERE snapshot_id = {{snap}} AND snap_stat_name = 'CPU_TIME'
+  UNION ALL
+  SELECT 'xact_commit', COALESCE(sum(snap_xact_commit), 0)::text
+    FROM snapshot.snap_summary_stat_database WHERE snapshot_id = {{snap}}
+  UNION ALL
+  SELECT 'xact_rollback', COALESCE(sum(snap_xact_rollback), 0)::text
+    FROM snapshot.snap_summary_stat_database WHERE snapshot_id = {{snap}}
+  UNION ALL
+  SELECT 'deadlocks', COALESCE(sum(snap_deadlocks), 0)::text
+    FROM snapshot.snap_summary_stat_database WHERE snapshot_id = {{snap}}
+  UNION ALL
+  SELECT 'temp_bytes', COALESCE(sum(snap_temp_bytes), 0)::text
+    FROM snapshot.snap_summary_stat_database WHERE snapshot_id = {{snap}}
+  UNION ALL
+  SELECT 'blks_read', COALESCE(sum(snap_blks_read), 0)::text
+    FROM snapshot.snap_summary_stat_database WHERE snapshot_id = {{snap}}
+  UNION ALL
+  SELECT 'blks_hit', COALESCE(sum(snap_blks_hit), 0)::text
+    FROM snapshot.snap_summary_stat_database WHERE snapshot_id = {{snap}}
+  UNION ALL
+  SELECT 'ckpt_timed', COALESCE(sum(snap_checkpoints_timed), 0)::text
+    FROM snapshot.snap_global_bgwriter_stat WHERE snapshot_id = {{snap}}
+  UNION ALL
+  SELECT 'ckpt_req', COALESCE(sum(snap_checkpoints_req), 0)::text
+    FROM snapshot.snap_global_bgwriter_stat WHERE snapshot_id = {{snap}};

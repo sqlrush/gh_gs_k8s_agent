@@ -1,0 +1,33 @@
+# 按名字取存储过程/函数的定义。**包(Package)内的过程也在这里**:openGauss / GaussDB 把包体里的过程
+# 照样登记成 pg_proc 一行,proname 是过程名、prosrc 是过程体、propackageid 指向 gs_package(og5 A 兼容库实测)。
+# 所以联上 gs_package 把包名带回来,并允许按包名过滤——不同包里的同名过程(Oracle 迁移库里很常见)
+# 由调用方(common/procname.py)按候选数判断:不止一个又没指定包就拒绝,不再 LIMIT 1 静默取第一个。
+# LIMIT 5 只是防止异常膨胀;正常情况下候选不会超过几个。
+# 「'{{x}}' IS NULL OR '{{x}}' = ''」两个条件都要:A 兼容库(Oracle 迁移库)里空串就是 NULL,只写 '' = '' 会得到 NULL,
+# 整条 WHERE 变假,过程「找不到」——og5 的 kf_a(DBCOMPATIBILITY='A')实测踩到。
+# gs_package 在 openGauss 3.0+ 与 GaussDB 505 的所有库里都有(PG 兼容库里也有,只是空的)。
+name: procinfo.proc_def
+description: 按名字取存储过程/函数的定义(源码 + 语言 + 形参 + 所属包);支持包内过程与按包名过滤
+sql: |
+  SELECT n.nspname, p.proname, l.lanname, p.prosrc,
+         pg_catalog.pg_get_function_arguments(p.oid) AS args,
+         COALESCE(k.pkgname, '') AS package
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  JOIN pg_language l ON l.oid = p.prolang
+  LEFT JOIN gs_package k ON k.oid = p.propackageid
+  WHERE p.proname = '{{name}}'
+    AND ('{{schema}}' IS NULL OR '{{schema}}' = '' OR n.nspname = '{{schema}}')
+    AND ('{{package}}' IS NULL OR '{{package}}' = '' OR k.pkgname = '{{package}}')
+  ORDER BY (n.nspname = 'public') DESC, n.nspname, k.pkgname
+  LIMIT 5;
+params:
+  - key: name
+    type: String
+    description: 过程/函数名
+  - key: schema
+    type: String
+    description: 模式名;空串表示不限模式
+  - key: package
+    type: String
+    description: 包名;空串表示不限包(包内过程与独立过程都返回)

@@ -1,0 +1,81 @@
+# Mac 本地覆盖:中间件 mock 在宿主上,Pod 经 OrbStack 的宿主网关 0.250.250.254 访问 8781(scripts/tcp-forward.py);
+# 模型服务用真实的 HTTPS 端点(本地端到端),所以放行 443;embedding 用宿主上的 Ollama(11434)。
+# 只放行这些——8779(mock 本身)与其他端口仍被挡,verify-cluster.sh 用这一点验证策略确实在生效。
+# 客户环境不要用这个文件,用 base 里的地址段。
+#
+# **这个文件整份覆盖 base 的同名策略**(kustomize 按 name 合并):base 里新加的放行条目
+# 必须在这里也加一份,否则本地就是连不通而 base 看着是对的 —— 2026-09-21 加向量库时踩过。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: runtime-policy
+  namespace: gaussdb-agent
+spec:
+  podSelector:
+    matchLabels: {app: gaussdb-agent, role: runtime}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: agent-gateway}}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: agent-gateway}}
+      ports: [{port: 4096, protocol: TCP}, {port: 4097, protocol: TCP}]   # 4097:报告只读端口(与 base 同步)
+  egress:
+    - to: [{namespaceSelector: {}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to: [{ipBlock: {cidr: 0.250.250.254/32}}]      # 宿主网关:中间件 mock 的转发入口
+      ports: [{port: 8781, protocol: TCP}]
+    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]              # 模型服务(HTTPS);客户环境换成实际地址段
+      ports: [{port: 443, protocol: TCP}]
+    - to: [{ipBlock: {cidr: 0.250.250.254/32}}]      # 宿主上的 Ollama:runtime 也要算**查询**向量
+      ports: [{port: 11434, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kb-import-policy
+  namespace: gaussdb-agent
+spec:
+  podSelector:
+    matchLabels: {app: gaussdb-agent, role: kb-import}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: agent-gateway}}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: agent-gateway}}
+      ports: [{port: 4096, protocol: TCP}]
+  egress:
+    - to: [{namespaceSelector: {}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]              # 模型服务(HTTPS)
+      ports: [{port: 443, protocol: TCP}]
+    - to: [{ipBlock: {cidr: 0.250.250.254/32}}]      # 宿主上的 Ollama:索引时算文档向量
+      ports: [{port: 11434, protocol: TCP}]
+---
+# Mac 本地:OrbStack 把 Service ClusterIP 和 Pod IP 放在同一段(192.168.194.0/24),
+# base 里给的 10.96.0.0/12 / 172.16.0.0/12 覆盖不到 —— 网关连 k8s API 会被挡成
+# 「Connection refused」(2026-09-21 真部署时踩到)。客户环境按实际 Service CIDR 填。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-policy
+  namespace: gaussdb-agent
+spec:
+  podSelector:
+    matchLabels: {app: agent-gateway}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{namespaceSelector: {}}, {ipBlock: {cidr: 0.0.0.0/0}}]
+      ports: [{port: 8080, protocol: TCP}]
+  egress:
+    - to: [{namespaceSelector: {}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to: [{podSelector: {matchLabels: {app: gaussdb-agent}}}]     # 转发到用户 Pod:4096 对话,4097 报告只读
+      ports: [{port: 4096, protocol: TCP}, {port: 4097, protocol: TCP}]
+    - to: [{podSelector: {matchLabels: {app: gaussdb-frontend}}}]  # /dash/* 转发到大盘前端(与 base 同步)
+      ports: [{port: 8080, protocol: TCP}]
+    # OrbStack 的 apiserver:Service ClusterIP 在 192.168.194.0/24,但**真实端点**是
+    # 192.168.139.2:26443(不同网段、非 443 端口)。kube-proxy 做 DNAT 之后策略是按
+    # 目的端点判的,所以两段两端口都要放行 —— 只放 ClusterIP 那段会被拒成
+    # 「Connection refused」(2026-09-21 在这上面绕了两轮)。客户环境按实际填。
+    - to: [{ipBlock: {cidr: 192.168.194.0/24}}, {ipBlock: {cidr: 192.168.139.0/24}}]
+      ports: [{port: 443, protocol: TCP}, {port: 26443, protocol: TCP}]

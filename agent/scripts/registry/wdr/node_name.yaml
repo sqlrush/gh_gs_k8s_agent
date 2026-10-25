@@ -1,0 +1,5 @@
+# 原来是 native.py 里的 db.scalar("SHOW pgxc_node_name")。
+name: wdr.node_name
+description: 当前节点名
+sql: |
+  SHOW pgxc_node_name;

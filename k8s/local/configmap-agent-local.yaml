@@ -1,0 +1,23 @@
+# Mac 本地覆盖:中间件 = 宿主上的 GRMP mock(经 scripts/tcp-forward.py 8781 → 8779);
+# 模型服务 = DeepSeek 的 OpenAI 兼容端点(密钥在 Secret model-api,由 scripts/k8s/e2e-web.sh 从本机 0600 文件创建,不进仓库)。
+# 客户环境不要用这个文件。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-config
+  namespace: gaussdb-agent
+data:
+  GRMP_API_HOST: host.docker.internal
+  GRMP_API_PORT: "8781"
+  # 本地 mock 没设 GRMP_PATH_PREFIX 时用样例前缀,这里与它一致
+  GRMP_PATH_PREFIX: /example/grmp/diagnostic/agent
+  # 本地的 mock 开着签名校验(scripts/k8s/local-grmp-signing.sh 起 8782 并把 8781 转发过去,私钥进 Secret grmp-sm2)
+  GRMP_APPKEY: gaussdb-agent
+  # 本地 mock 的 dataIp 映射(local-grmp-signing.sh):10.0.0.9→og5、10.0.0.10→kf-low、10.0.0.11→kf-gauss、10.0.0.12→og-std
+  GRMP_INSTANCE_ALIASES: |
+    og5=10.0.0.9/postgres          # Mac 上的 openGauss 5(测试库)
+    og-std=10.0.0.12/postgres      # 只读备机
+  MODEL_BASE_URL: https://api.deepseek.com/v1
+  MODEL_ID: deepseek-flash
+  MODEL_PROVIDER_NAME: deepseek
+  MODEL_INPUT_MODALITIES: "text,image"

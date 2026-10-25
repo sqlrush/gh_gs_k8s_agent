@@ -1,0 +1,9 @@
+# 过程「找不到」时的排查脚本之一(common/proc_locate.py 按 <skill>.locate_* 拼名):当前连的是哪个库、什么账号、
+# 实例上还有哪些库。现场(客户 2026-09-08):GRMP 一个 dataIp 对一个库,包所在的库未必是会话登录的库——
+# 用户先得知道「现在连的是哪个」,才答得出「该换哪个」。pg_database 普通账号可读(og5 对象隔离下也完整)。
+# procinfo / proctune 各一份,SQL 同体(tests/test_registry_drift_units.py 的 _GROUPS 盯着)。
+name: procinfo.locate_context
+description: 过程找不到时的排查:当前库、当前账号与实例上的库清单
+sql: |
+  SELECT current_database() AS db, current_user AS usr,
+         (SELECT string_agg(datname, ', ' ORDER BY datname) FROM pg_database WHERE NOT datistemplate) AS databases;

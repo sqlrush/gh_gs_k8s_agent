@@ -1,0 +1,144 @@
+# 接入网关:全体共用,2 副本,常驻。它管别人的生死,自己不按人分。
+#
+# RBAC 只给本命名空间内必需的那几样 —— 它要能建/删别人的 Pod,所以权限边界要写死:
+# 不给 pods/exec、不给 secrets 的 list(只给 get/create/patch,拿不到别人的全量口令)、
+# 不给任何集群级权限。
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gateway
+  namespace: gaussdb-agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gateway
+  namespace: gaussdb-agent
+rules:
+  # 按工号建/查/删/缩容用户 Pod
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "create", "patch", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "create", "patch", "update", "delete"]
+  # 口令 Secret:**不给 list**。get 是为了「已有就沿用,不轮换正在用的口令」;
+  # 给了 list 就等于一次请求拿到全体用户的口令。
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "update", "delete"]
+  # 角色表(没有 AD 组时用)
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get"]
+  # 用户 Pod 起不来时读原因(拉不到镜像 / 配置缺失 / 个人目录初始化失败 / NAS 挂不上 / 调度不上):
+  # 只读 Pod 状态与事件。以前没有这两项,用户等满超时只拿到「正在启动」,网关日志里也没有原因。
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
+  # **刻意不给**:pods/exec、pods/attach、pods/log —— 网关没有进用户容器、读用户输出的理由
+  #(初始化容器的失败原因经 terminationMessagePolicy 写进 Pod 状态,读状态就够)
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gateway
+  namespace: gaussdb-agent
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: gateway}
+subjects:
+  - {kind: ServiceAccount, name: gateway, namespace: gaussdb-agent}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: gaussdb-agent
+  labels: {app: agent-gateway}
+spec:
+  selector: {app: agent-gateway}
+  ports:
+    - {name: http, port: 80, targetPort: 8080}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: gaussdb-agent
+spec:
+  replicas: 2                     # 无状态:活动时间记在 Deployment 注解上,不在进程内存里,
+                                  # 所以两个副本同时扫描也只是重复做同一件幂等操作,不需要选主
+  selector:
+    matchLabels: {app: agent-gateway}
+  template:
+    metadata:
+      labels: {app: agent-gateway}
+    spec:
+      serviceAccountName: gateway
+      # **关掉 Service 发现变量注入。** k8s 默认给命名空间里每个 Service 注入
+      # `<SVCNAME>_PORT` 等一组变量;本 Service 叫 gateway,于是 GATEWAY_PORT 被注入成
+      # `tcp://10.x.x.x:80`,和网关自己的配置项撞名 —— 2026-09-21 真部署时因此起不来。
+      # 关掉它既解决冲突,也少几十个没用的变量(用户 Pod 里的模型能读到环境变量,越少越好)。
+      enableServiceLinks: false
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000}
+      containers:
+        - name: gateway
+          # base 是直接 kubectl apply -k 的,**不做占位符渲染** —— 这里写具体标签,
+          # 平台按实际版本改(和 configmap-agent.yaml 里的样例值一个道理)。
+          image: gaussdb-agent-gateway:agent-v1.3.2-oc1.18.27
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            readOnlyRootFilesystem: true        # 网关不写任何东西
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+          env:
+            - {name: GATEWAY_NAMESPACE, value: gaussdb-agent}
+            # **给用户 Pod 用哪个版本的镜像。没有默认值** —— 默认成 latest 会让
+            # 「升级」悄悄发生在下一次用户登录时。升级 = 改这里 + 重启网关。
+            - {name: GATEWAY_IMAGE_TAG, valueFrom: {configMapKeyRef: {name: gateway-config, key: USER_IMAGE_TAG}}}
+            - {name: GATEWAY_IMAGE_REGISTRY, valueFrom: {configMapKeyRef: {name: gateway-config, key: USER_IMAGE_REGISTRY, optional: true}}}
+            - {name: GATEWAY_PULL_POLICY, valueFrom: {configMapKeyRef: {name: gateway-config, key: PULL_POLICY, optional: true}}}
+            - {name: GATEWAY_USER_HEADER, valueFrom: {configMapKeyRef: {name: gateway-config, key: USER_HEADER, optional: true}}}
+            - {name: GATEWAY_ROLES_HEADER, valueFrom: {configMapKeyRef: {name: gateway-config, key: ROLES_HEADER, optional: true}}}
+            - {name: GATEWAY_KB_ADMIN_ROLES, valueFrom: {configMapKeyRef: {name: gateway-config, key: KB_ADMIN_ROLES, optional: true}}}
+            - {name: GATEWAY_REAP_MODE, valueFrom: {configMapKeyRef: {name: gateway-config, key: REAP_MODE, optional: true}}}
+            - {name: GATEWAY_IDLE_SECONDS, valueFrom: {configMapKeyRef: {name: gateway-config, key: IDLE_SECONDS, optional: true}}}
+            - {name: GATEWAY_TRUST_CIDRS, valueFrom: {configMapKeyRef: {name: gateway-config, key: TRUST_CIDRS, optional: true}}}
+            - {name: GATEWAY_FRONTEND_SERVICE, valueFrom: {configMapKeyRef: {name: gateway-config, key: FRONTEND_SERVICE, optional: true}}}
+            # 三个节流参数。代码早就读它们,但清单一直没映射进来 —— 在 ConfigMap 里
+            # 写上去是**静默无效**:值收下了、行为不变、不报错。现在补齐,
+            # gateway/tests 有一条守卫比对「代码读的」与「清单给的」。
+            - {name: GATEWAY_SWEEP_SECONDS, valueFrom: {configMapKeyRef: {name: gateway-config, key: SWEEP_SECONDS, optional: true}}}
+            - {name: GATEWAY_ACTIVITY_INTERVAL_SECONDS, valueFrom: {configMapKeyRef: {name: gateway-config, key: ACTIVITY_INTERVAL_SECONDS, optional: true}}}
+            - {name: GATEWAY_READY_TIMEOUT_SECONDS, valueFrom: {configMapKeyRef: {name: gateway-config, key: READY_TIMEOUT_SECONDS, optional: true}}}
+            # 固定池化(RUNTIME_MODE=pool)。控制密钥与各 Pod 的管家同一把(Secret sandbox-control);
+            # 按需模式用不到,所以 optional —— 没有这个 Secret 的部署照样起得来
+            - {name: GATEWAY_RUNTIME_MODE, valueFrom: {configMapKeyRef: {name: gateway-config, key: RUNTIME_MODE, optional: true}}}
+            - {name: GATEWAY_POOL_SELECTOR, valueFrom: {configMapKeyRef: {name: gateway-config, key: POOL_SELECTOR, optional: true}}}
+            - {name: GATEWAY_POOL_IDLE_SECONDS, valueFrom: {configMapKeyRef: {name: gateway-config, key: POOL_IDLE_SECONDS, optional: true}}}
+            - {name: GATEWAY_POOL_EARLY_IDLE_SECONDS, valueFrom: {configMapKeyRef: {name: gateway-config, key: POOL_EARLY_IDLE_SECONDS, optional: true}}}
+            - {name: GATEWAY_POOL_RETAIN_DAYS, valueFrom: {configMapKeyRef: {name: gateway-config, key: POOL_RETAIN_DAYS, optional: true}}}
+            - {name: GATEWAY_POOL_FREE_SLOTS, valueFrom: {configMapKeyRef: {name: gateway-config, key: POOL_FREE_SLOTS, optional: true}}}
+            - {name: GATEWAY_POOL_SWEEP_SECONDS, valueFrom: {configMapKeyRef: {name: gateway-config, key: POOL_SWEEP_SECONDS, optional: true}}}
+            - {name: GATEWAY_POOL_WAIT_SECONDS, valueFrom: {configMapKeyRef: {name: gateway-config, key: POOL_WAIT_SECONDS, optional: true}}}
+            - {name: GATEWAY_POOL_CONTROL_KEY, valueFrom: {secretKeyRef: {name: sandbox-control, key: KEY, optional: true}}}
+            # 信任凭据与运维密钥走 Secret。**两者一个都没配时网关拒绝启动**
+            # (gateway/config.py):不限制来源就等于「任填工号即可进入任何人的环境」,
+            # 而且从外面看不出异常 —— 宁可起不来。
+            - {name: GATEWAY_TRUST_SECRET, valueFrom: {secretKeyRef: {name: gateway-auth, key: TRUST_SECRET, optional: true}}}
+            - {name: GATEWAY_ADMIN_TOKEN, valueFrom: {secretKeyRef: {name: gateway-auth, key: ADMIN_TOKEN, optional: true}}}
+          ports: [{containerPort: 8080, name: http}]
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8080}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}

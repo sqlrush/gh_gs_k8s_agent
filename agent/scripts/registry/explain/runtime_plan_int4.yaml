@@ -1,0 +1,16 @@
+# 运行态计划——gs_get_explain 签名为 (integer) 的内核用这条(官方文档写法)。
+#
+# 505.2.1.SPC0600 现场实测签名已是 (bigint),走 explain.runtime_plan;这条只为文档签名的老内核保留。
+# 调用侧(common/kernel_funcs.py)按 explain.kernel_funcs 探到的签名二选一,并在打库之前检查 pid
+# 是否在 integer 范围内——pg_stat_activity.pid 是 64 位线程号,超范围时 ::integer 会报 integer out of range,
+# 那时不调,直接说明原因后退回 EXPLAIN。
+# 前提与 explain.runtime_plan 相同:track_activities = on;plan_collect_thresh ≠ -1;分布式只看 CN 的计划。
+name: explain.runtime_plan_int4
+description: 按后台线程 pid 取运行态执行计划(gs_get_explain(integer),文档签名的内核用;不执行 SQL)
+readonly: true
+sql: |
+  SELECT gs_get_explain({{pid}}::integer) AS plan;
+params:
+  - key: pid
+    type: INTEGER
+    description: 后台线程 pid(pg_stat_activity.pid),须在 integer 范围内;脚本内显式转为 integer

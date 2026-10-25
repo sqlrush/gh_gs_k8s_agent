@@ -1,0 +1,63 @@
+# 时段锁回溯涉及的会话:每个等待者 / 阻塞者在时段内最后一次被采到时的状态。
+#
+# 根阻塞者常常是 idle in transaction(事务开着、不干活、锁不放),采样里它没有等待事件,
+# 只有状态 —— 判「空闲事务持锁」靠这一列。xact_start 给出事务从什么时候开始。
+#
+# 样本来源与 lockwait.asp_pairs 相同:落表的 gs_asp + 内存里还没落表的 local_active_session
+# (只取 need_flush_sample、晚于本时段内最后一条落表样本的),理由见 lockwait.asp_status。
+name: lockwait.asp_sessions
+description: 时段内锁阻塞涉及的会话(活跃会话采样:落表的 gs_asp + 内存里的 local_active_session):最后状态、语句、应用、客户端、事务开始时间
+readonly: true
+sql: |
+  WITH t AS (
+    SELECT a.sessionid, a.block_sessionid, a.state, a.event, a.unique_query_id, a.unique_query,
+           a.application_name, a.client_addr, a.xact_start_time, a.sample_time
+      FROM gs_asp a
+     WHERE a.sample_time >= CAST('{{begin_time}}' AS TIMESTAMP)
+       AND a.sample_time <= CAST('{{end_time}}' AS TIMESTAMP)
+  ), a AS (
+    SELECT * FROM t
+    UNION ALL
+    SELECT m.sessionid, m.block_sessionid, m.state, m.event, m.unique_query_id, m.unique_query,
+           m.application_name, m.client_addr, m.xact_start_time, m.sample_time
+      FROM dbe_perf.local_active_session m
+     WHERE m.need_flush_sample
+       AND m.sample_time >= CAST('{{begin_time}}' AS TIMESTAMP)
+       AND m.sample_time <= CAST('{{end_time}}' AS TIMESTAMP)
+       AND m.sample_time > (SELECT COALESCE(max(t.sample_time), CAST('1970-01-01' AS TIMESTAMP)) FROM t)
+  ), w AS (
+    SELECT sessionid, block_sessionid FROM a
+     WHERE block_sessionid IS NOT NULL AND block_sessionid <> 0
+  ), ids AS (
+    SELECT sessionid AS sid FROM w UNION SELECT block_sessionid FROM w
+  ), r AS (
+    SELECT a.sessionid, a.state, a.event, a.unique_query_id, a.unique_query,
+           a.application_name, a.client_addr, a.xact_start_time, a.sample_time,
+           row_number() OVER (PARTITION BY a.sessionid ORDER BY a.sample_time DESC) AS rn,
+           count(*) OVER (PARTITION BY a.sessionid) AS samples
+      FROM a
+     WHERE a.sessionid IN (SELECT sid FROM ids)
+  )
+  SELECT r.sessionid AS sessionid,
+         COALESCE(r.state, '') AS state,
+         COALESCE(r.event, '') AS last_event,
+         r.unique_query_id AS sql_id,
+         substr(COALESCE(r.unique_query, ''), 1, 300) AS query,
+         COALESCE(r.application_name, '') AS application_name,
+         COALESCE(host(r.client_addr), '') AS client_addr,
+         COALESCE(to_char(r.xact_start_time, 'YYYY-MM-DD HH24:MI:SS'), '') AS xact_start,
+         r.samples AS samples
+    FROM r
+   WHERE r.rn = 1
+   ORDER BY r.sessionid
+   LIMIT {{limit}};
+params:
+  - key: begin_time
+    type: DateTime
+    description: 时段起点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss
+  - key: end_time
+    type: DateTime
+    description: 时段终点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

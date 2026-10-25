@@ -1,0 +1,36 @@
+# 事务号回卷水位 —— 每个库的 frozenxid 落后当前事务号多少。
+#
+# **为什么这是最高危的一项：** 冻结水位追到 2^31 时，内核会强制停止写入
+# （"database is not accepting commands to avoid wraparound data loss"），
+# 抢救必须停机做单用户 VACUUM FREEZE。而它在平时的任何监控里都看不出来 ——
+# 没有慢 SQL、没有锁等待、没有膨胀告警，直到突然停写。
+#
+# **`txid_current()` 绝不能用（踩过）。** 它在没有事务号时会**分配一个新的**：
+#   · 对一个只读诊断来说这是写副作用，每次巡检白烧一个事务号；
+#   · 在备库上直接报错（cannot assign TransactionIds during recovery），
+#     于是这项检查在最该跑的备库上反而不可用。
+# 用 `txid_snapshot_xmin(txid_current_snapshot())` —— 取当前快照的 xmin，
+# 不分配任何事务号，备库上也能跑。两种写法都在 og5 上实测过。
+#
+# **`datfrozenxid64` 的两层强制转换不是多余的。** 这个内核上该列是 `xid` 类型，
+# 直接参与算术或 ORDER BY 会报 "could not identify an ordering operator for
+# type xid"（实测）；`::text::numeric` 是能过的写法。openGauss 的事务号是
+# 64 位，所以用 numeric 而不是 bigint 做中间类型，避免边界上溢出。
+#
+# 阈值用 `autovacuum_freeze_max_age` 这个库自己的配置做分母，而不是写死
+# 2^31：客户把它调小（常见做法）时，占比才反映"离 autovacuum 强制冻结还有多远"。
+# 判定在 skills/gaussdb-vacuum/scripts/rules.py。
+name: vacuum.freeze_age
+description: 每个库的事务号回卷水位（frozenxid 落后当前快照多少）
+readonly: true
+sql: |
+  SELECT d.datname,
+         (txid_snapshot_xmin(txid_current_snapshot())
+          - d.datfrozenxid64::text::numeric)::bigint      AS freeze_age,
+         (SELECT setting::numeric FROM pg_settings
+           WHERE name = 'autovacuum_freeze_max_age')::bigint AS max_age,
+         (SELECT setting FROM pg_settings
+           WHERE name = 'vacuum_freeze_table_age')         AS freeze_table_age
+    FROM pg_database d
+   WHERE d.datallowconn
+   ORDER BY freeze_age DESC;

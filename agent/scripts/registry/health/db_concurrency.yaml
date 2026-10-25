@@ -1,0 +1,6 @@
+# 原来内联在 collectors.py collect_concurrency 里。
+name: health.db_concurrency
+description: 当前库的死锁与事务提交/回滚计数
+sql: |
+  SELECT deadlocks, xact_commit, xact_rollback
+  FROM pg_stat_database WHERE datname=current_database();

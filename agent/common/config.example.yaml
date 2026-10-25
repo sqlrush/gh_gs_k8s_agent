@@ -1,0 +1,11 @@
+connection_mode: api
+api_connection:
+  - host: grmp-web.example.internal
+    host_env: GRMP_API_HOST
+    port: 80
+    # 令牌两种放法，**环境变量优先**：
+    #   token_env: 变量名（推荐）—— 令牌是长期有效、无重放保护的静态凭据，
+    #              放环境变量能少一份落盘副本，也不会随配置进版本库
+    #   token:     直接内联（客户的配置格式如此，支持但不推荐）
+    token_env: GRMP_AUTH_TOKEN
+    # token: 省略

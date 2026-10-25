@@ -1,0 +1,6 @@
+# 原来是 collectors.py 里的 db.scalar(...)。
+# **改动：count(*) 加别名 cnt。**
+name: health.invalid_index
+description: 失效索引数量
+sql: |
+  SELECT count(*) AS cnt FROM pg_index WHERE NOT indisvalid;

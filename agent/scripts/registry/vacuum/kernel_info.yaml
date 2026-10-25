@@ -1,0 +1,14 @@
+# 内核事务水位:gs_get_kernel_info()——GaussDB 私有函数,返回 XACT / STANDBY / UNDO / HOTPATH 各模块的
+# 内存态关键指标(node_name / module / name / value 四列),每行一个指标,**不是**每行一个事务。
+#
+# 与 vacuum.oldest_xmin 互补:那条从 pg_stat_activity / pg_prepared_xacts / pg_replication_slots 倒推
+# "谁挡着回收"(能定位到 pid / gid / slot);这条正着读内核水位(recent_global_xmin、
+# global_recycle_xid 等),回答"水位到底卡在哪个 xid"。只在 explain.kernel_funcs 探到该函数存在时调用;
+# openGauss 上没有此函数,vacuum 报告不出这一节。这一节只原样列出,不做判定——没有 GaussDB 环境
+# 可核实各指标语义,凭想象写规则就是编。
+name: vacuum.kernel_info
+description: 内核事务水位(gs_get_kernel_info,GaussDB 私有):XACT / STANDBY / UNDO 各模块内存态指标
+readonly: true
+sql: |
+  SELECT node_name, module, name, value
+    FROM gs_get_kernel_info();

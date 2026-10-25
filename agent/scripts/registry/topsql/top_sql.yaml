@@ -1,0 +1,59 @@
+# **query 列先剥掉开头的注释再截 80 字(2026-10-18 改)。** 原来是先压空白再截 —— 语句开头
+# 只要带一段注释(`-- app=…`、`/* trace … */`),80 个字就全被注释占满,真正的语句一个字都看不到。
+# 只剥**开头**的:中间的注释可能是 hint 或业务标记,不能动。整条都是注释时退回原文
+# (剥成空串会让表格里显示空白,被读成取数失败)。全文要看时走 sqlfetch / WDR 的 SQL 附录。
+# 资源消耗最高的语句。
+#
+# **2026-10-18 改:先按 unique_sql_id 聚合。** dbe_perf.statement 里同一条语句会按**执行用户**
+# 拆成多行(og5 实测 217 行里 29 行是重复的 sql_id,例如 3131332389 = gaussdb 996 次
+# + fl_app 47 次)。不聚合的后果有两个:
+#   · 累计榜上同一个 sql_id 出现两次,各自只是一部分 —— 排名是错的;
+#   · 增量模式(--window / --since-last)按 sql_id 建索引,第二行**覆盖**第一行。两次采样
+#     留下的可能是不同用户的那一行,于是算出凭空的 949 次增量,或者负数 —— 被判成
+#     「统计清零、这个窗口算不出增量」。
+# 聚合放进子查询、保留原列名,这样 {{order}} 的取值(调用方白名单里的 total_elapse_time /
+# n_calls / n_returned_rows / n_blocks_*)不用跟着改。
+#
+# {{order}} 落在 ORDER BY 位，注册时会被标 IDENT_POSITION + STRING_PARAM：
+# 标识符位无法做类型校验。防线在调用方 —— topsql.py 的 _SORT_COLS 白名单，
+# 取值只能来自那张映射表，绝不直接来自用户输入。
+#
+# **2026-10-24 改:多带 cpu_sec / io_sec 两列(聚合子查询里 sum 上 cpu_time / data_io_time)。**
+# faultlab 在 og5 上全量混跑时,总耗时榜首是一条等锁的 UPDATE(6778.9 秒,CPU 0),平均耗时榜首是
+# 一条等锁的 FOR UPDATE(1081 秒,CPU 0)—— 榜上分不出「被锁挡住」和「自己慢」。dbe_perf.statement
+# 里没有锁等待时间列,能拿来区分的只有 CPU 与数据 IO 时间:总耗时减去这两项就是等待(锁 / 轻量锁 /
+# 排队等 CPU 等)。只加列、不改筛选与原有列,原来的 --by 取值照旧;新 --by self / self_avg 按这两列排。
+name: topsql.top_sql
+description: 资源消耗最高的语句（dbe_perf.statement）
+sql: |
+  SELECT
+    unique_sql_id::text,
+    LEFT(REGEXP_REPLACE(COALESCE(NULLIF(REGEXP_REPLACE(query, '^(\s*(--[^\n]*(\n|$)|/\*([^*]|\*+[^*/])*\*+/))+\s*', ''), ''), query),
+                       '\s+', ' ', 'g'), 80) AS query,
+    n_calls AS calls,
+    ROUND(total_elapse_time/1000000::numeric, 2) AS total_sec,
+    ROUND((total_elapse_time/NULLIF(n_calls,0))/1000::numeric, 2) AS avg_ms,
+    n_returned_rows AS rows,
+    ROUND(cpu_time/1000000::numeric, 2) AS cpu_sec,
+    ROUND(data_io_time/1000000::numeric, 2) AS io_sec
+  FROM (SELECT unique_sql_id,
+               max(query)             AS query,
+               sum(n_calls)           AS n_calls,
+               sum(total_elapse_time) AS total_elapse_time,
+               sum(n_returned_rows)   AS n_returned_rows,
+               sum(n_blocks_hit)      AS n_blocks_hit,
+               sum(n_blocks_fetched)  AS n_blocks_fetched,
+               sum(cpu_time)          AS cpu_time,
+               sum(data_io_time)      AS data_io_time
+          FROM dbe_perf.statement
+         GROUP BY unique_sql_id) s
+  WHERE n_calls > 0
+  ORDER BY {{order}}
+  LIMIT {{limit}};
+params:
+  - key: order
+    type: String
+    description: 排序表达式。必须来自调用方的受控白名单，不可直接取用户输入
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

@@ -1,0 +1,21 @@
+# ⚠️ 本文件由 tools/grmp_gen_memanalyze.py 生成，请勿手工编辑。
+#
+# memanalyze 的 SQL 正文取决于目标实例有哪些视图、每个视图有哪些列 ——
+# 探测到什么就查什么，缺的列补 NULL。固定白名单覆盖不了这种形态，
+# 所以脚本名固定、正文按实例生成。
+#
+# 生成依据（来自实例 og）：
+#   视图  gs_wlm_session_statistics
+#   列    datid, dbname, schemaname, nodename, username, application_name, client_addr, client_hostname, client_port, query_band, pid, sessionid, block_time, start_time, duration, estimate_total_time, estimate_left_time, enqueue, resource_pool, control_group, estimate_memory, min_peak_memory, max_peak_memory, average_peak_memory, memory_skew_percent, spill_info, min_spill_size, max_spill_size, average_spill_size, spill_skew_percent, min_dn_time, max_dn_time, average_dn_time, dntime_skew_percent, min_cpu_time, max_cpu_time, total_cpu_time, cpu_skew_percent, min_peak_iops, max_peak_iops, average_peak_iops, iops_skew_percent, warning, queryid, query, query_plan, node_group, top_cpu_dn, top_mem_dn
+#
+# ⚠️ 换一套实例必须重新生成。
+
+name: memanalyze.wlm_sql
+description: SQL 级资源跟踪（实时）
+sql: |
+  SELECT queryid, query, start_time, duration, estimate_memory, NULL AS used_memory, max_peak_memory, average_peak_memory, spill_info FROM gs_wlm_session_statistics
+  ORDER BY max_peak_memory DESC NULLS LAST LIMIT {{limit}};
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

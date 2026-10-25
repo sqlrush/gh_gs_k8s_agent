@@ -1,0 +1,14 @@
+# opencode_skill runtime dependencies.
+#
+# psycopg2 是 C 扩展，不是纯 Python：安装方式二选一。
+#   有 gcc + pg_config（postgresql-devel）：pip install psycopg2==2.9.10
+#   没有编译条件（离线现场常见）：装 psycopg2-binary==2.9.10 的预编译轮子，
+#   轮子按「Python 主次版本 × CPU 架构」精确匹配，x86_64 与鲲鹏 aarch64 各一套。
+# 两者提供同一个 `psycopg2` 模块名，代码不区分。
+psycopg2==2.9.10    # PostgreSQL-wire driver; connects to openGauss & GaussDB
+cryptography>=41    # AES-256-GCM credential decryption (gdaa-compatible)
+PyYAML>=6           # ~/.gdaa/config.yaml parsing
+# 知识库的向量检索(2026-10-23 起取代高斯 / PG 向量库;索引是知识库目录里的 index/store.sqlite)。
+# 未到 1.0,锁定版本;有 x86_64 与 aarch64 的 manylinux 轮子。没装或 Python 不许加载扩展时
+# 知识库照常工作,只是没有向量召回(状态行写「向量:未启用」)。
+sqlite-vec==0.1.9

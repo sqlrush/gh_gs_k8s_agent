@@ -1,0 +1,41 @@
+# 窗口内的 DB time 分解。snapshot 里的值是**累计量**，窗口值 = 后一快照 − 前一快照。
+#
+# wdr 没有这条 —— 它的 registry 里没有任何 instance_time 查询。等待事件那部分
+# 复用 wdr.waits，时间模型这部分是新增的。
+#
+# 实测（og5，实时视图 gs_instance_time）十项：
+#   DB_TIME EXECUTION_TIME CPU_TIME PL_EXECUTION_TIME NET_SEND_TIME
+#   PLAN_TIME PARSE_TIME DATA_IO_TIME PL_COMPILATION_TIME REWRITE_TIME
+#
+# **时间模型里没有「锁」这一项。** 锁与轻量锁的耗时只能从等待事件来，
+# 所以「DB time 花在哪」必须合并 waitevent.events 才答得完整。
+#
+# tools/probe_dbtime_containment.py 实测过（快照 1508-1513，5 个窗口）：
+# 这十项之间画不出完整两层树（CPU+IO+NET 系统性超出 EXECUTION_TIME 15%~24%），
+# 所以这里只平铺返回增量，不在 SQL 里做任何加总/归并 —— 分层判断留给报告层，
+# 且报告层也不该画那棵树（见 probe 工具 docstring 的实测结论）。
+#
+# 若某个窗口的某一项算出负数，说明快照间发生过实例重启（计数器清零重来），
+# 这个窗口的算术结果不可用——调用方必须原样报出「该窗口跨越了实例重启」，
+# 不能当成 0 处理，也不能悄悄跳过不提。
+name: waitevent.instance_time
+description: 窗口内 DB time 各项的增量（snap_global_instance_time 后减前）
+readonly: true
+sql: |
+  WITH b AS (SELECT snap_stat_name AS stat_name, sum(snap_value) AS v
+               FROM snapshot.snap_global_instance_time
+              WHERE snapshot_id = {{b}} GROUP BY snap_stat_name),
+       e AS (SELECT snap_stat_name AS stat_name, sum(snap_value) AS v
+               FROM snapshot.snap_global_instance_time
+              WHERE snapshot_id = {{e}} GROUP BY snap_stat_name)
+  SELECT e.stat_name AS stat_name,
+         (e.v - b.v)  AS delta_us
+    FROM e JOIN b USING (stat_name)
+   ORDER BY delta_us DESC;
+params:
+  - key: b
+    type: INTEGER
+    description: 起始快照 ID
+  - key: e
+    type: INTEGER
+    description: 结束快照 ID

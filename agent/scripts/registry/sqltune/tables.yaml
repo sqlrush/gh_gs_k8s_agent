@@ -1,0 +1,43 @@
+# SQL 取自 common/sql.py 的 skill_sqltune_001。
+#
+# **改动一（必须）：两个表达式列原来都叫 ?column?。**
+#   c.reltuples::bigint                        → 无名列
+#   pg_total_relation_size(c.oid)/1024.0/1024.0 → 无名列
+# 协议按列名做键，两个 ?column? 一个覆盖另一个、且都取不到键 —— 结果是
+# 行数和表大小静默丢失。分别加别名 reltuples / size_mb。
+# 其余列（nspname / relname / relpages / relkind）本来就唯一且有意义，未动。
+#
+# **改动二：`IN {names}` 写成 `IN ({{names}})`。** 括号写在 SQL 里，
+# 取值只给带引号的字面量列表（'a','b'）—— 让「括号在哪一侧」在脚本里
+# 一眼可见，避免出现 IN (('a','b')) 这种双层括号。
+#
+# {{names}} 是 String 型多值位：类型校验对它等于不存在（注册时会标
+# STRING_PARAM + MULTI_VALUE）。防线在调用方 —— evidence.extract_tables()
+# 只产出 [a-z_][\w.]* 形态的标识符，再由 _quoted_list() 转义单引号。
+# **改动三：补 curpages（实时块数）—— 实测发现规划器用的不是 relpages。**
+#
+# c.relpages 冻结在上次 ANALYZE/VACUUM，规划器实际用的是 RelationGetNumberOfBlocks()
+# 拿到的**实时**块数，行数再按密度换算：
+#
+#     density = reltuples / relpages
+#     规划器用的行数 = rint(density × curpages)
+#
+# og5 上实测 snapshot.snap_summary_statement：冻结 49596 页 / 535865 行，
+# 实时 51359 页 → 换算 554914 行，**正是 EXPLAIN 报的 Plan Rows**。
+# 拿冻结值复算的话，这张表的 Seq Scan 代价会差 3.5%，校准闸会判模型不适用
+# —— 而真正的原因是取错了页数来源。
+name: sqltune.tables
+description: SQL 涉及的表的页数/行数/大小（证据包 ## Tables）
+sql: |
+  SELECT n.nspname, c.relname, c.relpages,
+         c.reltuples::bigint AS reltuples,
+         pg_relation_size(c.oid) / current_setting('block_size')::bigint AS curpages,
+         c.relkind,
+         pg_total_relation_size(c.oid) / 1024.0 / 1024.0 AS size_mb
+  FROM pg_class c
+  LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
+  WHERE c.relname IN ({{names}}) AND c.relkind IN ('r','v','p','m');
+params:
+  - key: names
+    type: String
+    description: 带引号的表名字面量列表，如 'orders','items'。取值必须来自调用方已校验的标识符，不可直接取用户输入

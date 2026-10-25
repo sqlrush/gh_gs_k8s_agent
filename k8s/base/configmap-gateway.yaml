@@ -1,0 +1,61 @@
+# 网关的非密配置。密的两样(信任密钥、运维密钥)在 Secret gateway-auth 里。
+#
+# **USER_IMAGE_TAG 是升级开关。** 网关按它给用户建 Pod;改这个值 + 重启网关 =
+# 下一次登录的人用新镜像,已经在用的人不受影响(他们的 Pod 不动)。
+# 故意不给默认值:默认成 latest 会让「升级」悄悄发生在某个人下次登录的时候。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: gaussdb-agent
+data:
+  USER_IMAGE_TAG: "agent-v1.3.2-oc1.18.27"
+  # 用户 Pod 镜像的仓库前缀,与网关镜像推在同一个仓库时填同一个前缀,例如 registry.example/gaussdb-agent
+  # (网关据此建 registry.example/gaussdb-agent/gaussdb-agent-runtime:<USER_IMAGE_TAG>)。
+  # 留空 = 不带前缀,只适用于镜像直接载在每个节点上的环境(kind load / docker load)。
+  USER_IMAGE_REGISTRY: ""
+  PULL_POLICY: "IfNotPresent"
+
+  # 前端的 Service 名(/dash/* 代理到它)。前端由前端方部署(样例 k8s/base/frontend.example.yaml);
+  # 没部署时这条路回 502,不影响对话与报告。
+  FRONTEND_SERVICE: "frontend"
+
+  # 上游 SSO / WAF 把工号放在哪个请求头里。按客户实际填。
+  USER_HEADER: "X-Agent-User"
+  # 角色/组,逗号分隔。另外工号登记在 ConfigMap agent-roles(kb-admins)里的人也算知识库管理员,
+  # SSO 不传角色时就用那张表;两者满足一个即可。
+  ROLES_HEADER: "X-Agent-Roles"
+  # 哪些角色值算「知识库管理员」(会多建一个 kb-import Pod)。逗号分隔,大小写不敏感。
+  KB_ADMIN_ROLES: "kb-admin"
+
+  # 回收模式:
+  #   scale   缩到 0 副本,重连再拉起 —— 省掉镜像拉取与冷启动,代价是占着 Deployment(默认)
+  #   delete  删 Deployment/Service/Secret,下次登录重建。NAS 数据在,不需要「还原」
+  REAP_MODE: "scale"
+  # 闲置多久算没人用。**下限 300 秒**(gateway/config.py 强制):模型跑长任务时
+  # 几分钟不产生流量是正常的,配太短会在用户等结果时把 Pod 收掉。
+  IDLE_SECONDS: "1800"
+
+  # 三个节流参数,一般不用动。留空即用默认值。
+  # 括号里是下限,低于下限网关拒绝启动。
+  SWEEP_SECONDS: "120"              # 回收器多久扫一轮(≥10)
+  ACTIVITY_INTERVAL_SECONDS: "60"   # 活动时间写入节流(≥5);调小会显著增加对 API Server 的写入
+  READY_TIMEOUT_SECONDS: "120"      # 等新 Pod 就绪的上限(≥10);超时用户看到 504
+
+  # 用户的诊断容器怎么来:
+  #   ondemand  按人现建 Pod(默认,v1.3.x 的做法)
+  #   pool      固定池化:部署时建好的 StatefulSet(k8s/tools/render-pool.py 渲染),按槽位分配,闲置转保留
+  # 知识库管理员的导入容器两种模式下都按需建。改模式 = 改这里 + 重启网关;两种模式的 NAS 布局相同,可以来回切。
+  RUNTIME_MODE: "ondemand"
+  # 以下只在 RUNTIME_MODE=pool 时生效。括号里是下限,低于下限网关拒绝启动。
+  POOL_SELECTOR: "app=gaussdb-agent,role=pool"   # 池子 Pod 的标签(与渲染脚本一致)
+  POOL_IDLE_SECONDS: "1800"         # 在用多久没有交互(也没有会话在跑)就转保留:完整写回、停 opencode(≥300)
+  POOL_EARLY_IDLE_SECONDS: "600"    # 满员时,闲置超过这么久的在用者可被提前转保留,腾出的位置给等待的人(≥60,不长于上一项)
+  POOL_RETAIN_DAYS: "7"             # 保留多少天没来就腾挪;下次登录从 NAS 载入,不丢数据(≥1)
+  POOL_FREE_SLOTS: "1"              # 每个 Pod 后台至少留几个空闲槽位给新人(≥0)
+  POOL_SWEEP_SECONDS: "30"          # 清扫多久一轮:报活动、转保留、腾挪、核验(≥5)
+  POOL_WAIT_SECONDS: "60"           # 一次请求为分配最多等多久;等不到回等待页,页面 30 秒自动重试(≥10)
+
+  # 允许携带工号头的来源网段(上游 SSO / Ingress 的地址),逗号分隔。
+  # 与 Secret 里的 TRUST_SECRET 两道门任一即可,但**两者不能都为空** —— 都空网关拒绝启动。
+  TRUST_CIDRS: ""

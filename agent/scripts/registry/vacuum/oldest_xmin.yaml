@@ -1,0 +1,87 @@
+# R4 的数据来源：死元组被更老事务的快照挡住时，手工 VACUUM 是无效建议 ——
+# 跑了也回收不了，得先说清"卡住它的是谁"。三段 UNION ALL，缺一段就会
+# 漏掉一整类根因：
+#
+#   long_xact         —— pg_stat_activity 里活跃/事务中会话的 xact_start。
+#                        本实例这份 pg_stat_activity **没有 backend_xmin 列**
+#                        （实测 information_schema.columns 逐列核对过），
+#                        只能用"事务开始了多久"近似"这个事务挡了多久"，
+#                        与既有的 health.long_xact 口径一致。
+#
+#                        **`pid <> pg_backend_pid()` 是修复过的一个真实缺陷，
+#                        不是可有可无的防御性写法。** 没有这一句时，任何
+#                        经 gsql/libpq 驱动直连发起的这条查询，都会把
+#                        **执行这条 SELECT 本身的会话**当成一条挡着回收的
+#                        长事务报出来——libpq 驱动会给自己这个 session 填上
+#                        非空的 connection_info（形如
+#                        `{"driver_name":"libpq",...}`），走 Python 直连驱动
+#                        （`driver: psycopg2`，当时是 pg8000）发起同一条查询则
+#                        不会（对自己这一行的 connection_info 是空串），已用
+#                        `pg_backend_pid()` 对照两条路径各自的 pg_stat_activity
+#                        自身行核实过；2026-09-07 换成 psycopg2 后在 og5 上复测，
+#                        自身行仍是空串，这条守卫对两条路径都必须留着。后果不是多一行噪音：R4 会因此被点燃，
+#                        报告说"有事务挡着回收，VACUUM 现在跑也没用"——
+#                        这条**压制了本该给出的正确建议**，还会把 DBA 支去
+#                        找一个根本不存在的事务。见
+#                        tools/matrix_vacuum.py 的「gsql 不自证阻塞源」用例。
+#
+#                        **只认客户端会话的条件是 client_port IS NOT NULL，不是
+#                        connection_info 非空（2026-10-24 faultlab 改）。** 原条件
+#                        沿用 health.long_xact，意在排除内核后台线程；但上面说了，
+#                        psycopg2 不填 connection_info —— faultlab 里 V2 的 1118 秒
+#                        可重复读长事务因此整类漏掉，R4 只列出两笔两阶段事务。
+#                        后台线程（workload、WDRSnapshot、Asp 等）的 client_port 都是
+#                        NULL；客户端 TCP 是端口号、本地 Unix socket 是 -1（og5 核对过）。
+#   prepared_xact     —— pg_prepared_xacts：两阶段事务只要 PREPARE 了就
+#                        持有 xmin 且**没有活着的 backend**，long_xact 那段
+#                        查 pg_stat_activity 完全看不到它 —— 这正是本仓库
+#                        另有 health.prepared_xacts 这条脚本存在的场景。
+#                        这张视图**没有 pid 列**（实测
+#                        information_schema.columns 核对过：只有
+#                        transaction/gid/prepared/owner/database），查询本身
+#                        没有办法把自己混进这段结果——不需要、也加不出
+#                        类似 long_xact 那句自证防护。
+#   replication_slot  —— pg_replication_slots：复制槽用 xmin/catalog_xmin
+#                        钉住回收下限，但这张视图**没有任何时间戳列**
+#                        （同样逐列核对过），无法算出秒数。xmin_age_s 这里
+#                        故意留 NULL —— 不编造一个假的秒数；detail 把
+#                        xmin/catalog_xmin 原始值带出来，供后续判断。
+#                        这张视图同样**没有 pid 列**（实测核对过：只有
+#                        slot_name/plugin/slot_type/datoid/database/active/
+#                        xmin/catalog_xmin/restart_lsn/dummy_standby/
+#                        confirmed_flush），一条 ad hoc 查询会话本身也不是
+#                        一个复制槽，同样不存在自证的可能，不需要防护。
+#
+# 末尾 ORDER BY ... NULLS FIRST：未知时长（复制槽那段）排最前、不许沉底，
+# 抄的是 scripts/registry/lockwait/pairs.yaml 里同一条理由 —— 万一以后有人
+# 在这条脚本上加 LIMIT，最该被看到的那一行不能先被挤掉。
+name: vacuum.oldest_xmin
+description: 卡住死元组回收的三类根因（长事务 / 两阶段事务 / 复制槽）
+readonly: true
+sql: |
+  SELECT 'long_xact' AS source,
+         CAST(pid AS text) AS identifier,
+         EXTRACT(EPOCH FROM (now()-xact_start)) AS xmin_age_s,
+         'usename=' || COALESCE(usename,'') || ' state=' || COALESCE(state,'') ||
+           ' query=' || COALESCE(substr(query,1,200),'') AS detail
+    FROM pg_stat_activity
+   WHERE xact_start IS NOT NULL
+     AND state IN ('active','idle in transaction')
+     AND client_port IS NOT NULL
+     AND pid <> pg_backend_pid()
+  UNION ALL
+  SELECT 'prepared_xact' AS source,
+         gid AS identifier,
+         EXTRACT(EPOCH FROM (now()-prepared)) AS xmin_age_s,
+         'owner=' || COALESCE(owner,'') || ' database=' || COALESCE(database,'') AS detail
+    FROM pg_prepared_xacts
+  UNION ALL
+  SELECT 'replication_slot' AS source,
+         slot_name AS identifier,
+         CAST(NULL AS double precision) AS xmin_age_s,
+         'xmin=' || COALESCE(CAST(xmin AS text),'') ||
+           ' catalog_xmin=' || COALESCE(CAST(catalog_xmin AS text),'') ||
+           ' active=' || CAST(active AS text) AS detail
+    FROM pg_replication_slots
+   WHERE xmin IS NOT NULL OR catalog_xmin IS NOT NULL
+  ORDER BY xmin_age_s DESC NULLS FIRST;

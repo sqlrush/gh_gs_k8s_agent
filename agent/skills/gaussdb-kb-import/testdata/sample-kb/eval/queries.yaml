@@ -1,0 +1,67 @@
+- q: INDEX_UNUSED schema gsbench.fact_sales_product_idx 在当前统计窗口内未被使用 idx_scan=0 窗口
+    14.8 天
+  expect:
+  - case:S3-20250210-CBST-未使用索引清理
+  - rule:GS-IDX-005
+  canary: true
+- q: CACHE_LOW 缓存命中率 = 97.54% pg_stat_database blks_hit/read
+  expect:
+  - case:S2-20250405-CBST-缓存命中率低
+  - rule:GS-GUC-004
+  canary: true
+- q: WAIT_LWLOCK_HEAVY LWLOCK_EVENT 耗时占 DB_TIME 20.9% WALWriteLock
+  expect:
+  - case:S1-20250314-CBST-WALWriteLock等待冲高
+  - rule:GS-WAIT-001
+  canary: true
+- q: DBTIME_CPU_HEAVY CPU_TIME 占 DB_TIME = 84.2% snap_global_instance_time
+  expect:
+  - case:S2-20250908-CBST-CPU占比高源于计划跳变
+  - rule:GS-STAT-002
+  canary: true
+- q: 分区表 exchange partition 之后统计信息没更新 执行计划跳变 存过变慢
+  expect:
+  - case:S2-20241105-CBMS-分区表长时间未做analyze
+  canary: true
+- q: DEADLOCKS 死锁累计数 = 4 pg_stat_database.deadlocks
+  expect:
+  - case:S2-20250812-CBMS-死锁频发
+  - rule:GS-DML-003
+  canary: true
+- q: 单条 update 偶发 3s autovacuum 次数异常高 cbst.cosp_asyn_task_dtl
+  expect:
+  - case:S2-20250224-CBST-偶现单条update慢
+- q: LOCK_ROOT_IDLE_XACT 根阻塞会话 idle in transaction 40 分钟
+  expect:
+  - case:S2-20250120-CBST-空闲事务持锁阻塞
+  - rule:GS-XACT-001
+- q: CONN_HIGH 连接数 1650/2000 超过 80%
+  expect:
+  - case:S2-20250725-CBST-连接数逼近上限
+  - rule:GS-GUC-004
+  - rule:GS-CONN-001
+- q: SLOWSQL_TOP 慢 SQL 存储过程 proc_daily_settle 逐条 commit
+  expect:
+  - case:S2-20250303-CBST-存过循环单条提交慢
+- q: 空闲事务持锁阻塞了很多会话怎么办
+  expect:
+  - case:S2-20250120-CBST-空闲事务持锁阻塞
+- q: 有没有分区裁剪失效的案例
+  expect:
+  - case:S2-20250115-CBMS-分区裁剪失效
+- q: 存过循环里单条提交很慢
+  expect:
+  - case:S2-20250303-CBST-存过循环单条提交慢
+- q: 阻塞链根会话要不要直接终止 需要谁审批
+  expect:
+  - runbook:RB-LCK-001
+- q: CBST 活跃会话数平时多少算正常
+  expect:
+  - baseline:BL-CBST-ACTIVE_SESSIONS
+- q: 存储过程 EXCEPTION 块 LockMgrLock 争用 是不是已知缺陷
+  expect:
+  - defect:KD-0001
+- q: WAL 归档失败 archive_command 报错怎么办
+  expect: []
+- q: 备机复制延迟 REPL_LAG 30 秒
+  expect: []

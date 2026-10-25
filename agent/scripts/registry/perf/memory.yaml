@@ -1,0 +1,11 @@
+name: perf.memory
+description: 实例内存分布（dbe_perf.memory_node_detail）
+sql: |
+  select nodename, memorytype, memorymbytes
+  from dbe_perf.memory_node_detail
+  order by memorymbytes desc
+  limit {{limit}};
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

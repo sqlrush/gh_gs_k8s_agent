@@ -1,0 +1,28 @@
+# 凭据与现场配置,永远不进仓库
+*.env
+*.enc
+*.key
+*.pem
+secrets/
+prd/
+
+# 构建与验证产物
+images/
+out/
+*.tar
+*.tar.gz
+*.log
+# 测试夹具里的日志样本是测试数据,要进仓库(漏了它 lockwait 的死锁日志测试收集期就报错)
+!agent/tests/fixtures/**/*.log
+
+# 系统与工具
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# 本地构建产物
+docker/vendor/
+dist/
+

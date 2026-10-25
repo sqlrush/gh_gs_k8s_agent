@@ -1,0 +1,92 @@
+# runtime:入站只放行网关(标签 app=agent-gateway,或命名空间 agent-gateway);出站只放行 DNS、中间件、模型服务。
+# kb-import:入站同上;出站只放行 DNS、模型服务(不接触任何**业务**数据库)。
+# 固定池化的池子(role=pool)的两条策略随清单渲染(k8s/tools/render-pool.py:pool-policy、gateway-to-pool)。
+# 知识库索引是 NAS 上的文件(index/store.sqlite),不经网络,没有单独的向量库组件(2026-10-23 下线)。
+# 中间件与模型服务的地址段是占位(10.0.0.0/8),平台按实际填写。CNI 必须支持 NetworkPolicy(Calico / Cilium);
+# OrbStack 本地集群同样执行(2026-10-23 固定池化端到端实测:标签不对的 Pod 连管家 4098 超时,网关连得上)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: runtime-policy
+  namespace: gaussdb-agent
+spec:
+  podSelector:
+    matchLabels: {app: gaussdb-agent, role: runtime}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: agent-gateway}}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: agent-gateway}}
+      ports: [{port: 4096, protocol: TCP}, {port: 4097, protocol: TCP}]   # 4097:报告只读端口,只有网关能到
+  egress:
+    - to: [{namespaceSelector: {}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to: [{ipBlock: {cidr: 10.0.0.0/8}}]          # 中间件 GRMP:平台改成实际地址段与端口
+      ports: [{port: 8080, protocol: TCP}]
+    - to: [{ipBlock: {cidr: 10.0.0.0/8}}]          # 模型服务:平台改成实际地址段与端口
+      ports: [{port: 443, protocol: TCP}, {port: 80, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kb-import-policy
+  namespace: gaussdb-agent
+spec:
+  podSelector:
+    matchLabels: {app: gaussdb-agent, role: kb-import}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: agent-gateway}}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: agent-gateway}}
+      ports: [{port: 4096, protocol: TCP}]
+  egress:
+    - to: [{namespaceSelector: {}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to: [{ipBlock: {cidr: 10.0.0.0/8}}]          # 模型服务:平台改成实际地址段与端口
+      ports: [{port: 443, protocol: TCP}, {port: 80, protocol: TCP}]
+---
+# 网关:入站放行上游 SSO / Ingress;出站只要 DNS、k8s API、用户 Pod 的 4096 与 4097(报告只读)。
+# 它**不需要**访问中间件、模型服务、数据库 —— 那些是用户 Pod 的事。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-policy
+  namespace: gaussdb-agent
+spec:
+  podSelector:
+    matchLabels: {app: agent-gateway}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # 上游是谁由平台决定:Ingress 控制器、客户的 SSO 反代、或另一个命名空间的网关。
+    # **平台务必按实际收紧这条**:能打到网关就意味着能尝试伪造工号头
+    # (还挡在 TRUST_SECRET 那一层,但少一层暴露更好)。
+    - from: [{namespaceSelector: {}}, {ipBlock: {cidr: 10.0.0.0/8}}]
+      ports: [{port: 8080, protocol: TCP}]
+  egress:
+    - to: [{namespaceSelector: {}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to: [{podSelector: {matchLabels: {app: gaussdb-agent}}}]     # 转发到用户 Pod:4096 对话,4097 报告只读
+      ports: [{port: 4096, protocol: TCP}, {port: 4097, protocol: TCP}]
+    - to: [{podSelector: {matchLabels: {app: gaussdb-frontend}}}]  # /dash/* 转发到大盘前端
+      ports: [{port: 8080, protocol: TCP}]
+    # k8s apiserver。地址段按集群实际填 —— 这里给的是常见的 Service ClusterIP 段。
+    - to: [{ipBlock: {cidr: 10.96.0.0/12}}, {ipBlock: {cidr: 172.16.0.0/12}}]
+      ports: [{port: 443, protocol: TCP}, {port: 6443, protocol: TCP}]
+---
+# 大盘前端:入站只放行网关到 8080;**出站一条都不放**(egress: [] 且 policyTypes 含 Egress = 全拒)。
+# 它是静态站,连 DNS 都不需要 —— 数据由浏览器经网关向用户自己的 Pod 取,不经过它。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-policy
+  namespace: gaussdb-agent
+spec:
+  podSelector:
+    matchLabels: {app: gaussdb-frontend}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: agent-gateway}}
+      ports: [{port: 8080, protocol: TCP}]
+  egress: []

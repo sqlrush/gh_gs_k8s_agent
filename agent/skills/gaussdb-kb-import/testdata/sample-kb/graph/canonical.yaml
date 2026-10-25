@@ -1,0 +1,16 @@
+guc:autovacuum_vacuum_threshold:
+- autovacuum 阈值
+- vacuum 阈值
+guc:shared_buffers:
+- 共享缓冲区
+- shared buffers
+object:cbst.acct_balance:
+- 账户余额表
+- acct_balance
+object:cbst.cosp_asyn_task_dtl:
+- 异步任务明细表
+- cosp_asyn_task_dtl
+- CBST 异步任务表
+object:cbst.trans_journal:
+- 交易流水表
+- trans_journal

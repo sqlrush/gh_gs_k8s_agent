@@ -1,0 +1,13 @@
+# SQL 取自 common/sql.py 的 skill_health_009。
+#
+# **改动（2026-10-24 faultlab）：「真实客户端的活跃语句」改按 client_port 认，不再按 connection_info。**
+# 理由同 health.long_xact 顶部的说明：psycopg2 这类驱动不填 connection_info，原条件下
+# 这类应用的活跃语句一条都进不了分子分母，活跃集中度（ACTIVE_SQL_HOT）对它们永远不判。
+# 内核后台线程（workload、Asp、JobScheduler 等一直 active）的 client_port 是 NULL，照样排除。
+name: health.conn_concentration
+description: 活跃连接是否集中在同一条语句上
+sql: |
+  SELECT COALESCE(query,'') q, count(*) c, sum(count(*)) OVER () AS total
+  FROM pg_stat_activity
+  WHERE state='active' AND COALESCE(query,'')<>'' AND client_port IS NOT NULL
+  GROUP BY query ORDER BY c DESC LIMIT 1;

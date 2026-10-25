@@ -1,0 +1,25 @@
+# SQL 取自 common/sql.py 的 skill_health_003。列名齐全。
+# **改动：两个 %s 绑定变量换成 {{}} 占位符。** 都是数值位，无需补引号。
+name: health.slow_sql
+description: 平均耗时超阈值的语句
+sql: |
+  SELECT
+    unique_sql_id::text,
+    LEFT(REGEXP_REPLACE(query, '\s+', ' ', 'g'), 180) AS query,
+    n_calls AS calls,
+    ROUND((total_elapse_time/NULLIF(n_calls,0))/1000::numeric, 2) AS avg_ms,
+    ROUND(total_elapse_time/1000000::numeric, 2) AS total_sec,
+    ROUND(cpu_time/1000000::numeric, 2) AS cpu_sec,
+    n_returned_rows AS rows
+  FROM dbe_perf.statement
+  WHERE (total_elapse_time/NULLIF(n_calls,0))/1000 > {{threshold_ms}}
+    AND n_calls > 0
+  ORDER BY total_elapse_time/NULLIF(n_calls,0) DESC
+  LIMIT {{limit}};
+params:
+  - key: threshold_ms
+    type: INTEGER
+    description: 平均耗时阈值（毫秒）
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

@@ -1,0 +1,9 @@
+# dataIp → 本机连接名（~/.gdaa/config.yaml 里的 name）
+#
+# 复制到 ~/.gdaa/grmp/instances.yaml 后按本机情况填写。
+# 真实文件不进版本库：里面会是客户测试环境的真实 dataIp。
+#
+# 键写客户环境的 dataIp，值写本机映射到哪个连接 —— 这样同一份 skill 代码
+# 在本机和客户环境用的是同一个 dataIp，不需要为两边各留一套。
+
+10.0.0.9: og

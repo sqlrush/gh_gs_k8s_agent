@@ -1,0 +1,10 @@
+# SQL 取自 skills/gaussdb-sqltune/scripts/evidence.py 里内联的
+# db.scalar("SELECT version()")，是证据包 ## Environment 一节的来源。
+#
+# **改动：给 version() 加了别名 version。** 函数调用位在 openGauss 下列名恰好
+# 也是 version，但那是数据库替我们起的名 —— 协议按列名做键，别名写出来才是
+# 契约，不改语义。
+name: sqltune.version
+description: 数据库版本（证据包的环境行）
+sql: |
+  SELECT version() AS version;

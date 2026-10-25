@@ -1,0 +1,17 @@
+# NAS 的 RWX 卷:所有 Pod 共用一个 claim,各自用 subPath 只挂自己那一层(spec §4)。
+#
+# **这是「申请」,NFS 地址不在这里。** 供给那一边按客户集群现状二选一:
+#   · 已有 RWX 的 StorageClass → 只改下面的 storageClassName,不需要 PV
+#   · 没有 → 用 nas-pv-nfs.example.yaml 填 NFS 地址,先 apply 它
+# Mac 本地用 k8s/local/nas-pv-hostpath.yaml。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nas
+  namespace: gaussdb-agent
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas
+  resources:
+    requests:
+      storage: 500Gi

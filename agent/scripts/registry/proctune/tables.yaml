@@ -1,0 +1,35 @@
+# SQL 取自 common/sql.py 的 skill_proctune_001。
+#
+# **改动一：pg_total_relation_size(...)/1024.0/1024.0 加别名 size_mb，
+# c.reltuples::bigint 加别名 reltuples。** 前者原来的列名是 ?column? ——
+# 协议按列名做键，无名列拿不到键，注册期的列名检查会直接拒掉。
+# 其余列（nspname / relname / relpages / relkind）本来就唯一且有意义，未动。
+#
+# **改动二：`IN {names}` 写成 `IN ({{names}})`。** 括号写在 SQL 里，
+# 取值只给带引号的字面量列表（'a','b'）—— 让「括号在哪一侧」在脚本里
+# 一眼可见，避免出现 IN (('a','b')) 这种双层括号。与 sqltune.tables 同形。
+#
+# ⚠️ 顺带修掉一个既有缺陷（详见 evidence.py 的 _quoted_list）：迁移前调用方传的是
+# **Python 列表**，`.format(names=[...])` 渲染出 `IN ['orders','customers']`，
+# 方括号在 SQL 里是语法错误。实测直连路径今天就是坏的
+# （ERROR: syntax error at or near "["），tune-cursor 的每个游标都在证据采集
+# 这一步失败、进 Skipped Cursors，整条子命令产不出任何一条已验证结论。
+#
+# {{names}} 是 String 型多值位：类型校验对它等于不存在（注册时会标
+# STRING_PARAM）。防线在调用方 —— evidence.extract_tables() 只产出
+# [a-z_][\w.]* 形态的标识符，再由 _quoted_list() 双写单引号。
+name: proctune.tables
+description: 游标 SQL 涉及的表的页数/行数/大小（证据包 ## Tables）
+sql: |
+  SELECT n.nspname, c.relname, c.relpages,
+         c.reltuples::bigint AS reltuples,
+         pg_relation_size(c.oid) / current_setting('block_size')::bigint AS curpages,
+         c.relkind,
+         pg_total_relation_size(c.oid) / 1024.0 / 1024.0 AS size_mb
+  FROM pg_class c
+  LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
+  WHERE c.relname IN ({{names}}) AND c.relkind IN ('r','v','p','m');
+params:
+  - key: names
+    type: String
+    description: 带引号的表名字面量列表，如 'orders','items'。取值必须来自调用方已校验的标识符，不可直接取用户输入

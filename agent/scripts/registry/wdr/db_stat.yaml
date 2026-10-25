@@ -1,0 +1,33 @@
+# SQL 取自 common/sql.py 的 skill_wdr_003。
+#
+# **2026-10-18:同 wdr.top_sql / wdr.file_io 的内连接问题,一并改成外连接。**
+# 键在起始快照里不存在、只在结束快照里有时(窗口中途新建的库),内连接会把它整行丢掉。
+# og5 实测这个键在那个窗口里两端对称(丢 0 行),所以不是现发的故障 —— 但结构上
+# 和 file_io 是同一个坑(那边实测丢了 86%),窗口里真新建了库就会静默少算。
+# 新出现的键在起始端按 0 计是**正确**的:它在窗口之前不存在,全部增量都发生在窗口内。
+# **改动：六个 COALESCE(...) 全部加了别名。**
+# 这是受影响最严重的一条：原来 6 列全叫 coalesce，走中间件后只剩 1 列，
+# 6 个维度的诊断数据静默丢掉 5 个，而且一切看起来正常。
+name: wdr.db_stat
+description: 窗口内库级统计增量（提交/回滚/死锁/临时文件/缓存）
+sql: |
+  WITH b AS (SELECT snap_datname, snap_xact_commit, snap_xact_rollback, snap_deadlocks,
+                    snap_temp_bytes, snap_blks_hit, snap_blks_read
+               FROM snapshot.snap_summary_stat_database WHERE snapshot_id={{b}}),
+       e AS (SELECT snap_datname, snap_xact_commit, snap_xact_rollback, snap_deadlocks,
+                    snap_temp_bytes, snap_blks_hit, snap_blks_read
+               FROM snapshot.snap_summary_stat_database WHERE snapshot_id={{e}})
+  SELECT COALESCE(SUM(e.snap_xact_commit - COALESCE(b.snap_xact_commit, 0)),0)     AS xact_commit,
+         COALESCE(SUM(e.snap_xact_rollback - COALESCE(b.snap_xact_rollback, 0)),0) AS xact_rollback,
+         COALESCE(SUM(e.snap_deadlocks - COALESCE(b.snap_deadlocks, 0)),0)         AS deadlocks,
+         COALESCE(SUM(e.snap_temp_bytes - COALESCE(b.snap_temp_bytes, 0)),0)       AS temp_bytes,
+         COALESCE(SUM(e.snap_blks_hit - COALESCE(b.snap_blks_hit, 0)),0)           AS blks_hit,
+         COALESCE(SUM(e.snap_blks_read - COALESCE(b.snap_blks_read, 0)),0)         AS blks_read
+  FROM e LEFT JOIN b USING (snap_datname);
+params:
+  - key: b
+    type: INTEGER
+    description: 起始快照 ID
+  - key: e
+    type: INTEGER
+    description: 结束快照 ID

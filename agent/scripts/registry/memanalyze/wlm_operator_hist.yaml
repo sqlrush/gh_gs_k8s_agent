@@ -1,0 +1,21 @@
+# ⚠️ 本文件由 tools/grmp_gen_memanalyze.py 生成，请勿手工编辑。
+#
+# memanalyze 的 SQL 正文取决于目标实例有哪些视图、每个视图有哪些列 ——
+# 探测到什么就查什么，缺的列补 NULL。固定白名单覆盖不了这种形态，
+# 所以脚本名固定、正文按实例生成。
+#
+# 生成依据（来自实例 og）：
+#   视图  gs_wlm_operator_history
+#   列    queryid, pid, plan_node_id, plan_node_name, start_time, duration, query_dop, estimated_rows, tuple_processed, min_peak_memory, max_peak_memory, average_peak_memory, memory_skew_percent, min_spill_size, max_spill_size, average_spill_size, spill_skew_percent, min_cpu_time, max_cpu_time, total_cpu_time, cpu_skew_percent, warning
+#
+# ⚠️ 换一套实例必须重新生成。
+
+name: memanalyze.wlm_operator_hist
+description: 算子级资源跟踪（历史）
+sql: |
+  SELECT queryid, plan_node_id, plan_node_name, duration, NULL AS estimate_memory, NULL AS memory_used, max_peak_memory, average_peak_memory, NULL AS spill_size, warning FROM gs_wlm_operator_history
+  ORDER BY max_peak_memory DESC NULLS LAST LIMIT {{limit}};
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

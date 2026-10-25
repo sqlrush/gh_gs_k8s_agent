@@ -1,0 +1,24 @@
+# 变更规范
+- id: GS-CHG-003
+  severity: error
+  check: advisory
+  rule: 生产变更(DROP INDEX / REINDEX / exchange partition / 参数临时调整)一律提变更单,在 23:00–06:00
+    窗口执行,双人复核
+  keywords:
+  - 变更单
+  - 变更窗口
+  - 双人复核
+  - 低峰
+  - REINDEX
+  - DROP INDEX
+  source: 《变更管理办法》§2
+- id: GS-WAIT-001
+  severity: warn
+  check: advisory
+  rule: WALWriteLock 类等待冲高时优先拆批与提交策略,不调 wal_buffers
+  keywords:
+  - WALWriteLock
+  - WAIT_LWLOCK_HEAVY
+  - synchronous_commit
+  - 拆批
+  source: 《运维规范》v5 §8.1

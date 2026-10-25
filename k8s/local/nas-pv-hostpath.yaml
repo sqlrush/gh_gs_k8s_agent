@@ -1,0 +1,21 @@
+# 只在 Mac(OrbStack Kubernetes)上用:hostPath 直接读写 Mac 目录,Pod 内 uid 1000 对应宿主文件属主。
+# 客户环境不要用这个文件。
+#
+# **不要放在 /tmp 下。** macOS 每天 0 点的 com.apple.tmp_cleaner 删掉 /tmp 里访问、修改、状态时间都超过 3 天的文件:
+# 2026-10-24 查到测试环境的报告文件(写一次就不再动)整批被删、索引还在,闲置账号的整个目录也没了。
+# /Users/Shared 每台 Mac 都有、不被清理、不依赖用户名。
+# 另:OrbStack 的共享目录不执行跨 uid 的文件权限(别的 uid 读得到 0600 的文件),客户的 NFS 会执行 ——
+# 固定池化的槽位不挂 users/,各自的盘是节点本地的 emptyDir,不受影响。
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-local
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas
+  hostPath:
+    path: /Users/Shared/agent-nas-k8s
+    type: DirectoryOrCreate

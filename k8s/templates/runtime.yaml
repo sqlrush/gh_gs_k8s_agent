@@ -1,0 +1,137 @@
+# 按工号渲染(scripts/k8s/provision.py):${USER_ID} ${IMAGE} ${IMAGE_PULL_POLICY} ${SUBPATH_ROOT}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: runtime-${USER_ID}
+  namespace: gaussdb-agent
+  labels: {app: gaussdb-agent, role: runtime, user: "${USER_ID}"}
+  annotations:
+    gaussdb-agent/last-activity: ""          # 网关按闲置超时回收时写这里
+spec:
+  replicas: 1
+  strategy: {type: Recreate}                 # 同一用户目录同一时刻只许一个 Pod 打开 opencode.db
+  selector:
+    matchLabels: {app: gaussdb-agent, role: runtime, user: "${USER_ID}"}
+  template:
+    metadata:
+      labels: {app: gaussdb-agent, role: runtime, user: "${USER_ID}"}
+    spec:
+      terminationGracePeriodSeconds: 60
+      # **关掉 Service 发现变量注入 —— 这是一条真实的跨用户泄露。**
+      # 默认开启时,k8s 会把命名空间里**每个** Service 注入成环境变量,于是本 Pod 的 env 里
+      # 有 RUNTIME_<别人工号>_SERVICE_HOST、KB_IMPORT_<别人工号>_SERVICE_HOST。
+      # 用户只要让模型打印环境变量,就能知道还有谁在用这个系统 —— 与「本对话看不到
+      # 别人的会话」那条隔离设计直接矛盾(2026-09-21 在 u9003 的 Pod 里实测到 u9001/u9002)。
+      # 本 Pod 不需要任何 Service 发现:中间件地址来自 ConfigMap,向量库用 DNS 名。
+      enableServiceLinks: false
+      securityContext: {runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, runAsNonRoot: true}
+      # **新工号第一次登录:个人目录还不存在。** 主容器按 subPath 挂 ${SUBPATH_ROOT}/<工号> 时,kubelet 会以 root 建出它,
+      # 而本 Pod 以 uid 1000 运行 → 写不进 → opencode 反复崩溃重启(2026-09-24 客户现场、10-15 全新 NAS 实测;
+      # 以前只能先跑 runtime-doctor.sh <工号> --fix 绕过)。这里以 uid 1000 挂**父目录**先把它建好并确认可写 ——
+      # 挂到工号这一级的话 kubelet 一样会先以 root 建出来。只有这个初始化容器挂得到整个 ${SUBPATH_ROOT}/,模型所在的主容器仍只挂本人那份。
+      # 失败原因写进容器的终止消息,网关在用户等待时读得到(不用等满超时再让人去 describe)。
+      initContainers:
+        - name: prepare-home
+          image: ${IMAGE}
+          imagePullPolicy: ${IMAGE_PULL_POLICY}
+          securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          terminationMessagePolicy: FallbackToLogsOnError
+          command:
+            - sh
+            - -c
+            - |
+              d=/nas/root/${USER_ID}
+              who() { ls -ldn "$$1" 2>/dev/null | awk '{print "属主 "$$3":"$$4"、权限 "$$1}'; }
+              fix="请管理员把它的属主改成 1000:1000、权限 775,或执行 k8s/tools/runtime-doctor.sh ${USER_ID} --fix"
+              if ! err=$$(mkdir -p "$$d" 2>&1); then
+                echo "建不了个人目录 ${SUBPATH_ROOT}/${USER_ID}($$err)。上一层 ${SUBPATH_ROOT}/ 现在是 $$(who /nas/root),本容器以 uid 1000 运行。$$fix" >&2
+                exit 1
+              fi
+              if ! err=$$(touch "$$d/.prepare-home-probe" 2>&1); then
+                why=""; [ "$$(ls -ldn "$$d" | awk '{print $$3}')" = 0 ] && why="多半是之前某次登录时被 kubelet 以 root 建出来的。"
+                echo "个人目录 ${SUBPATH_ROOT}/${USER_ID} 不可写($$(who "$$d"),本容器以 uid 1000 运行)。$$why$$fix" >&2
+                exit 1
+              fi
+              rm -f "$$d/.prepare-home-probe"
+              echo "个人目录 ${SUBPATH_ROOT}/${USER_ID} 就绪"
+          volumeMounts:
+            - {name: nas, mountPath: /nas/root, subPath: ${SUBPATH_ROOT}}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+      containers:
+        - name: opencode
+          image: ${IMAGE}
+          imagePullPolicy: ${IMAGE_PULL_POLICY}
+          securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          ports: [{containerPort: 4096, name: http}, {containerPort: 4097, name: reports}]   # 4097:报告只读端口,大盘的数据口
+          env:
+            - {name: GSDB_USER_ID, value: "${USER_ID}"}
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: OPENCODE_SERVER_PASSWORD, valueFrom: {secretKeyRef: {name: pod-auth-${USER_ID}, key: OPENCODE_SERVER_PASSWORD}}}
+            # 凭据不在这个容器:模型经凭据代理(同 Pod 的 credproxy 容器),中间件经它的套接字
+            - {name: MODEL_PROXY_URL, value: "http://127.0.0.1:4099/model"}
+            - {name: GRMP_PROXY_SOCKET, value: /run/credproxy/credproxy.sock}
+          envFrom:
+            - configMapRef: {name: agent-config}
+          volumeMounts:
+            - {name: nas, mountPath: /nas/me, subPath: ${SUBPATH_ROOT}/${USER_ID}}
+            - {name: nas, mountPath: /nas/kb, subPath: kb, readOnly: true}
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+            - {name: credsock, mountPath: /run/credproxy, readOnly: true}
+          # opencode 开了基本认证后 /global/health 也要口令:探针在容器内带口令 curl,口令只在环境变量里,不进清单
+          readinessProbe:
+            exec: {command: ["sh", "-c", "curl -fsS -u \"opencode:$$OPENCODE_SERVER_PASSWORD\" http://127.0.0.1:4096/global/health"]}
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec: {command: ["sh", "-c", "curl -fsS -u \"opencode:$$OPENCODE_SERVER_PASSWORD\" http://127.0.0.1:4096/global/health"]}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          lifecycle: {preStop: {exec: {command: ["sleep", "5"]}}}
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: "2", memory: 2Gi}
+        # 凭据代理(2026-10-23):中间件令牌、SM2 私钥、模型 Key 只在这个容器里,opencode 那个容器(模型在那里执行命令)
+        # 一样都没有。技能脚本经 /run/credproxy/credproxy.sock 调中间件,opencode 经 127.0.0.1:4099 调模型,
+        # 凭据由它在转发时加上(docker/credproxy.py)。它只跑我方代码,模型碰不到。
+        - name: credproxy
+          image: ${IMAGE}
+          imagePullPolicy: ${IMAGE_PULL_POLICY}
+          command: ["python3", "-u", "/opt/agent/podctl.py", "serve-credproxy"]
+          securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          env:
+            - {name: GSDB_USER_ID, value: "${USER_ID}"}
+            - {name: GRMP_AUTH_TOKEN, valueFrom: {secretKeyRef: {name: grmp-token-${USER_ID}, key: GRMP_AUTH_TOKEN}}}
+            - {name: MODEL_API_KEY, valueFrom: {secretKeyRef: {name: model-api, key: MODEL_API_KEY}}}
+            - {name: GRMP_SM2_PRIVATE_KEY, valueFrom: {secretKeyRef: {name: grmp-sm2, key: GRMP_SM2_PRIVATE_KEY, optional: true}}}
+          envFrom:
+            - configMapRef: {name: agent-config}
+          volumeMounts:
+            - {name: credsock, mountPath: /run/credproxy}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+      volumes:
+        - {name: nas, persistentVolumeClaim: {claimName: nas}}
+        # /data 现在还装**本地态**(/data/state:opencode.db、git 快照、workspace),
+        # 2026-09-21 状态策略变更之后它不只是配置缓存了。
+        #   · 不写 medium → 用节点磁盘,**不是 tmpfs**。写 medium: Memory 会让用户的库
+        #     吃进 Pod 的内存配额,几百 MB 的历史就能把 2Gi 撑爆。
+        #   · sizeLimit 给足:撑爆会让 Pod 被**驱逐**,而驱逐是非优雅终止,
+        #     等于丢掉最后一个同步周期的对话。宁可占磁盘。
+        - {name: data, emptyDir: {sizeLimit: 10Gi}}
+        - {name: tmp, emptyDir: {sizeLimit: 1Gi}}
+        - {name: credsock, emptyDir: {sizeLimit: 1Mi}}     # 凭据代理的套接字
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: runtime-${USER_ID}
+  namespace: gaussdb-agent
+  labels: {app: gaussdb-agent, role: runtime, user: "${USER_ID}"}
+spec:
+  selector: {app: gaussdb-agent, role: runtime, user: "${USER_ID}"}
+  ports: [{port: 4096, targetPort: 4096, name: http}, {port: 4097, targetPort: 4097, name: reports}]

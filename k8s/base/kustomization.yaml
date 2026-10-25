@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - nas-pvc.yaml
+  - configmap-agent.yaml
+  - configmap-agent-roles.yaml
+  - configmap-gateway.yaml
+  - networkpolicy.yaml
+  - gateway.yaml
+# 六个 *.example.yaml 都是样例(frontend.example.yaml 是给前端方的部署样例);平台用 kubectl create secret 创建真实的
+# model-api / grmp-sm2 / gateway-auth;固定池化另要 sandbox-control(管家与网关共用的控制密钥)。
+# 原来的知识库向量库组件(openGauss StatefulSet 与它的 Secret)2026-10-23 下线:索引是 NAS 上知识库目录里的
+# index/store.sqlite(SQLite + sqlite-vec),由 kb-import 写、runtime / 池化槽位只读,不需要单独的组件。
+# 固定池化(GATEWAY_RUNTIME_MODE=pool)的 StatefulSet 与网络策略由 k8s/tools/render-pool.py 渲染,不在这里(docs/从源码构建到K8s运行-完整手册.md 5.12)。

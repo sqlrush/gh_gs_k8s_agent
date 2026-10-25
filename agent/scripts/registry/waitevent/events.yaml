@@ -1,0 +1,41 @@
+# 与 wdr.waits 同源（SQL 取自 common/sql.py 的 skill_wdr_005，两个 CTE 各自
+# 锚定一个快照做减法），但 GROUP BY 多下钻一层到 event —— wdr.waits 只到
+# wait_class，答不了「这一类里具体是哪个等待事件最费时间」；waitevent 这个
+# skill 存在的理由之一就是要下钻。
+#
+# **WHERE upper(e.wait_class) NOT IN ('STATUS','NONE') 必须保留，且必须与
+# wdr.waits 逐字一致。** STATUS（openGauss 里显示为 "wait cmd"）是会话空等
+# 客户端发下一条命令的空闲时间，不是任何工作耗时。实测这一项单独累计
+# 681262104468 us —— 比其余全部等待事件加起来还高出三个数量级。不排除，
+# 按等待事件类型汇总耗时会得出「99.9% 的时间花在 STATUS 上」，技术上不算
+# 错，但没有任何诊断价值，还会把真正该关注的锁等待、IO 等待淹没掉。两个
+# skill（wdr、waitevent）共用这条注册脚本命名空间的设计前提，就是同一个
+# 窗口的「等待事件花了多少时间」不能因为写了两遍谓词而给出两个答案 ——
+# 所以这里不重新措辞，直接照抄 wdr.waits 的谓词写法。
+name: waitevent.events
+description: 窗口内等待事件下钻明细（snap_global_wait_events，按具体 event 聚合，非仅 wait_class）
+readonly: true
+sql: |
+  WITH b AS (SELECT snap_type AS wait_class, snap_event AS event, sum(snap_wait) AS waits, sum(snap_total_wait_time) AS wt
+               FROM snapshot.snap_global_wait_events WHERE snapshot_id={{b}} GROUP BY snap_type, snap_event),
+       e AS (SELECT snap_type AS wait_class, snap_event AS event, sum(snap_wait) AS waits, sum(snap_total_wait_time) AS wt
+               FROM snapshot.snap_global_wait_events WHERE snapshot_id={{e}} GROUP BY snap_type, snap_event)
+  SELECT e.wait_class,
+         e.event,
+         SUM(e.waits-b.waits) AS waits,
+         SUM(e.wt-b.wt)       AS wait_us
+  FROM e JOIN b USING (wait_class, event)
+  WHERE upper(e.wait_class) NOT IN ('STATUS','NONE')
+  GROUP BY e.wait_class, e.event
+  HAVING SUM(e.wt-b.wt) > 0
+  ORDER BY wait_us DESC LIMIT {{top}};
+params:
+  - key: b
+    type: INTEGER
+    description: 起始快照 ID
+  - key: e
+    type: INTEGER
+    description: 结束快照 ID
+  - key: top
+    type: INTEGER
+    description: 返回条数上限

@@ -1,0 +1,15 @@
+# 贴文本没带 --schema 时的 schema 推断(common/schema_infer.py):SQL 里不带 schema 的表名在哪些 schema 下有。
+# 现场(客户 09-09 早):模型贴文本漏了 --schema → 400;命令是模型拼的,提示词只能约束,脚本层自己查一遍目录把这条路走通。
+# 唯一匹配就用,多个候选列出来让用户选(不猜),没有就照旧报表不存在。sqltune 复用它自己的 sqltune.tables,这条是 explain 的。
+# {{names}} 是 String 型多值位:取值只来自 common/sqlqualify.py 识别出的表位置标识符,再由调用方转义单引号。
+name: explain.relation_schemas
+description: 按表名查它们所在的 schema(贴文本没带 --schema 时推断 schema 用)
+sql: |
+  SELECT n.nspname, c.relname
+  FROM pg_class c
+  LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
+  WHERE c.relname IN ({{names}}) AND c.relkind IN ('r','v','p','m','f');
+params:
+  - key: names
+    type: String
+    description: 带引号的表名字面量列表,如 'orders','items'。取值必须来自调用方已校验的标识符,不可直接取用户输入

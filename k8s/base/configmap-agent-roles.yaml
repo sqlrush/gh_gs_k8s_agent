@@ -1,0 +1,14 @@
+# 知识库管理员名单 —— SSO 不传角色(没有 AD 组)时,网关按这张表判定谁是知识库管理员(会多建一个 kb-import Pod)。
+# 管理员 = 角色头(ROLES_HEADER)里带 KB_ADMIN_ROLES 之一,**或**工号登记在这里;两者满足一个即可。
+# 改完不用重启网关:它每 30 秒重读一次。普通用户的「已开通」= 存在 Secret grmp-token-<工号>,与这张表无关。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-roles
+  namespace: gaussdb-agent
+data:
+  # 每行一个工号,`#` 之后是注释。**默认是空的** —— 交付时这里不能带任何样例工号,
+  # 否则那个工号在每一套部署里都成了管理员。示例:
+  #   u2001
+  #   u2002   # 张三,2026-10 起
+  kb-admins: ""

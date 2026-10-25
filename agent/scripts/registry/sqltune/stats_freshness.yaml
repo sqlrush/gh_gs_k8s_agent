@@ -1,0 +1,35 @@
+# 统计信息新鲜度 —— 代价推演的第 0 道门。
+#
+# 推演的全部输入（relpages / reltuples / n_distinct / correlation）都是
+# **上一次 ANALYZE 时冻结的快照**。表在那之后翻了十倍，这些数不会报错、
+# 不会告警，只会让推演算出一个精确的错数。所以在算之前先判新鲜度，
+# 不新鲜就整段作废、不出建议。
+#
+# **不用 n_mod_since_analyze。** 那列是 PostgreSQL 9.4 才有的，openGauss
+# 的内核基线是 9.2.4 —— 用了会在客户环境报「列不存在」，而本地若跑在别的
+# 版本上还测不出来。改用两个 9.2 就有的量交叉比对：
+#
+#   n_live_tup   统计收集器维护，近实时
+#   reltuples    pg_class 里的那份，冻结在上次 ANALYZE/VACUUM
+#
+# 两者背离得越多，说明快照越旧。这个判据其实比 n_mod_since_analyze 更直接：
+# 它衡量的正是「推演要用的那份数」偏了多少，而不是「改过多少行」。
+#
+# **时间列显式 to_char。** 协议把所有值字符串化，timestamptz 会按会话的
+# DateStyle/timezone 渲染，跨环境不一致；且协议下 NULL 与真空串不可区分。
+# 这里格式写死，并把 NULL 显式转成 'never'（从未 ANALYZE 过）—— 让「没查到」
+# 和「查到了，是从来没做过」在取值代码里分得开。取到空串就是协议层出了问题。
+name: sqltune.stats_freshness
+description: SQL 涉及的表的统计信息新鲜度（推演前置门，不新鲜则不出代价结论）
+sql: |
+  SELECT schemaname, relname,
+         n_live_tup, n_dead_tup,
+         COALESCE(to_char(last_analyze, 'YYYY-MM-DD HH24:MI:SS'), 'never') AS last_analyze,
+         COALESCE(to_char(last_autoanalyze, 'YYYY-MM-DD HH24:MI:SS'), 'never') AS last_autoanalyze,
+         analyze_count, autoanalyze_count
+  FROM pg_stat_user_tables
+  WHERE relname IN ({{names}});
+params:
+  - key: names
+    type: String
+    description: 带引号的表名字面量列表，如 'orders','items'。取值必须来自调用方已校验的标识符，不可直接取用户输入

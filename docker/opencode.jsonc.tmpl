@@ -1,0 +1,20 @@
+{
+  // 由 podctl render-opencode-config 按环境变量生成到 /data/oc/opencode.json;本文件只是对照,
+  // 顶层键与 podctl.render_opencode_config 的输出一致(docker/tests/test_podctl.py 盯着)。
+  "$schema": "https://opencode.ai/config.json",
+  "share": "disabled",
+  "autoupdate": false,
+  "permission": { "external_directory": "allow" },
+  "provider": {
+    "model-service": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "model-service",
+      "options": { "baseURL": "{env:MODEL_BASE_URL}", "apiKey": "{env:MODEL_API_KEY}" },
+      // 设了 MODEL_INPUT_MODALITIES(如 text,image)时,模型这一项还会多出
+      //   "modalities": { "input": ["text", "image"], "output": ["text"] }
+      // 不设 = 按纯文本模型处理(read 不会把图片交给模型)
+      "models": { "<MODEL_ID>": { "name": "<MODEL_ID>" } }
+    }
+  },
+  "model": "model-service/<MODEL_ID>"
+}

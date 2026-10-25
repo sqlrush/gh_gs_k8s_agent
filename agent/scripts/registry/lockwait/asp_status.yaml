@@ -1,0 +1,53 @@
+# 时段锁回溯的前提:ASP 是否开启、采样与落表间隔、保留天数,以及时段内两处各采到多少样本。
+#
+# **样本在两个地方。** ASP 先把样本放在内存里(dbe_perf.local_active_session,最多 asp_sample_num 个),
+# **内存写满才**把其中每 asp_flush_rate 个落 1 个进 gs_asp。所以最近一段(样本数不到 asp_sample_num 的
+# 那几个小时)只在内存里;落表不是「约 10 秒延迟」。2026-10-24 og5 实测:09:46–10:06 这一段在 10:07
+# 回看时 gs_asp 一个样本都没有,内存里 5.3 万条;直到 11:25 内存写满才落表。只读 gs_asp 的旧版
+# 把它报成了「回看不了 … 采样当时没开」,而 enable_asp=on。
+#
+# 内存那一侧只数 need_flush_sample 的样本(将来会落表的那一批),与 gs_asp 同一步长;
+# 并且只数晚于本时段内最后一条落表样本的,两处不重复计数。
+# memory_first / memory_last / table_last 是两处各自覆盖到哪,样本数为 0 时据此如实说原因
+# (过了保留期 / 落在文件里 / 正好在两处之间的空档 / 当时没有活跃会话),不猜「没开」。
+name: lockwait.asp_status
+description: 活跃会话采样(ASP)的开关、采样/落表参数、保留天数,时段内落表与内存里各有多少样本、各覆盖到哪
+readonly: true
+sql: |
+  SELECT name AS item, setting AS value
+    FROM pg_settings
+   WHERE name IN ('enable_asp', 'asp_sample_interval', 'asp_flush_rate', 'asp_retention_days',
+                  'asp_flush_mode', 'asp_sample_num')
+  UNION ALL
+  SELECT 'samples_in_window', CAST(count(*) AS text)
+    FROM gs_asp
+   WHERE sample_time >= CAST('{{begin_time}}' AS TIMESTAMP)
+     AND sample_time <= CAST('{{end_time}}' AS TIMESTAMP)
+  UNION ALL
+  SELECT 'memory_samples_in_window', CAST(count(*) AS text)
+    FROM dbe_perf.local_active_session m
+   WHERE m.need_flush_sample
+     AND m.sample_time >= CAST('{{begin_time}}' AS TIMESTAMP)
+     AND m.sample_time <= CAST('{{end_time}}' AS TIMESTAMP)
+     AND m.sample_time > (SELECT COALESCE(max(t.sample_time), CAST('1970-01-01' AS TIMESTAMP))
+                            FROM gs_asp t
+                           WHERE t.sample_time >= CAST('{{begin_time}}' AS TIMESTAMP)
+                             AND t.sample_time <= CAST('{{end_time}}' AS TIMESTAMP))
+  UNION ALL
+  SELECT 'memory_first', COALESCE(to_char(min(sample_time), 'YYYY-MM-DD HH24:MI:SS'), '')
+    FROM dbe_perf.local_active_session
+  UNION ALL
+  SELECT 'memory_last', COALESCE(to_char(max(sample_time), 'YYYY-MM-DD HH24:MI:SS'), '')
+    FROM dbe_perf.local_active_session
+  UNION ALL
+  SELECT 'table_last', COALESCE(to_char(max(sample_time), 'YYYY-MM-DD HH24:MI:SS'), '')
+    FROM gs_asp
+  UNION ALL
+  SELECT 'now', to_char(now(), 'YYYY-MM-DD HH24:MI:SS');
+params:
+  - key: begin_time
+    type: DateTime
+    description: 时段起点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss
+  - key: end_time
+    type: DateTime
+    description: 时段终点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss

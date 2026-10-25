@@ -1,0 +1,11 @@
+# Mac 本地(OrbStack Kubernetes):base + hostPath PV + 本地 agent-config + 放行宿主网关 8781 的 NetworkPolicy。
+# 用法: kubectl --context orbstack apply -k k8s/local   (幂等;之后 provision.py 建 Pod)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
+  - nas-pv-hostpath.yaml
+patches:
+  - path: configmap-agent-local.yaml
+  - path: networkpolicy-local.yaml     # 两个文档按 metadata.name 各自覆盖 base 里的同名策略
+  - path: configmap-agent-roles-local.yaml   # u2001 作知识库管理员(base 是空名单)

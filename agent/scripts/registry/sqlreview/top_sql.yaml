@@ -1,0 +1,17 @@
+# SQL 取自 common/sql.py 的 skill_sqlreview_005，{limit} 换成 {{limit}}，其余未动。
+# limit 是数值位，不补引号。
+#
+# 结果列名实测为 unique_sql_id / query（cast 保留原列名），唯一且有意义，
+# 未加别名。
+name: sqlreview.top_sql
+description: 按总耗时排序的 Top N 线上语句（供静态审查用）
+sql: |
+  SELECT unique_sql_id::text, query
+  FROM dbe_perf.statement
+  WHERE n_calls > 0 AND query IS NOT NULL AND LENGTH(TRIM(query)) > 0
+  ORDER BY total_elapse_time DESC
+  LIMIT {{limit}};
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

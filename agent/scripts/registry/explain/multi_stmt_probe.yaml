@@ -1,0 +1,10 @@
+# 探测:中间件能不能跑一条脚本里的两条语句。
+#
+# *_schema 那组 EXPLAIN 模板是「SET search_path TO "<schema>", public; EXPLAIN …」两条语句——
+# JDBC 本身支持,但客户执行器有没有拦不知道。skill 用这条先验一次(每个连接只验一次,见
+# common/search_path.py):返回 1 就用两语句模板,否则退回单语句模板并在报告里说明,不让它变成新的 400。
+name: explain.multi_stmt_probe
+description: 探测中间件能否在一条脚本里执行两条语句(SET 后 SELECT 1)
+readonly: true
+sql: |
+  SET search_path TO public; SELECT 1 AS ok;

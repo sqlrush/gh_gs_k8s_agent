@@ -1,0 +1,9 @@
+# 原来内联在 evidence.py 里的 db.scalar("SELECT version()")。
+# 白名单模型下任何 SQL 都得先注册，没有例外。
+#
+# **改动：version() 加别名 version。** 数据库给的列名本来就是 version，
+# 这里显式写出来，免得别处的 SELECT 列表改动把它带成 ?column?。
+name: proctune.db_version
+description: 数据库版本串（证据包的 Environment 一节）
+sql: |
+  SELECT version() AS version;

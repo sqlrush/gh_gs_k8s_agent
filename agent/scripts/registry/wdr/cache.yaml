@@ -1,0 +1,34 @@
+# SQL 取自 common/sql.py 的 skill_wdr_007。列名齐全，未改动。
+#
+# **2026-10-18:同 wdr.top_sql / wdr.file_io 的内连接问题,一并改成外连接。**
+# 键在起始快照里不存在、只在结束快照里有时(窗口中途新建的表),内连接会把它整行丢掉。
+# og5 实测这个键在那个窗口里两端对称(丢 0 行),所以不是现发的故障 —— 但结构上
+# 和 file_io 是同一个坑(那边实测丢了 86%),窗口里真新建了表就会静默少算。
+# 新出现的键在起始端按 0 计是**正确**的:它在窗口之前不存在,全部增量都发生在窗口内。
+name: wdr.cache
+description: 窗口内物理读最多的表（snap_summary_statio_all_tables）
+sql: |
+  WITH b AS (SELECT db_name, snap_schemaname, snap_relname,
+                    (COALESCE(snap_heap_blks_read,0)+COALESCE(snap_idx_blks_read,0)) AS phys,
+                    (COALESCE(snap_heap_blks_hit,0)+COALESCE(snap_idx_blks_hit,0))   AS logi
+               FROM snapshot.snap_summary_statio_all_tables WHERE snapshot_id={{b}}),
+       e AS (SELECT db_name, snap_schemaname, snap_relname,
+                    (COALESCE(snap_heap_blks_read,0)+COALESCE(snap_idx_blks_read,0)) AS phys,
+                    (COALESCE(snap_heap_blks_hit,0)+COALESCE(snap_idx_blks_hit,0))   AS logi
+               FROM snapshot.snap_summary_statio_all_tables WHERE snapshot_id={{e}})
+  SELECT e.snap_relname,
+         (e.phys - COALESCE(b.phys, 0)) AS phys_read,
+         (e.logi - COALESCE(b.logi, 0)) AS logical_read
+  FROM e LEFT JOIN b USING (db_name, snap_schemaname, snap_relname)
+  WHERE (e.phys - COALESCE(b.phys, 0)) > 0
+  ORDER BY phys_read DESC LIMIT {{top}};
+params:
+  - key: b
+    type: INTEGER
+    description: 起始快照 ID
+  - key: e
+    type: INTEGER
+    description: 结束快照 ID
+  - key: top
+    type: INTEGER
+    description: 返回条数上限

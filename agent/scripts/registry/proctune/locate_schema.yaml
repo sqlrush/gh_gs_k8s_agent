@@ -1,0 +1,13 @@
+# 过程「找不到」时的排查脚本之二:目标 schema 在不在本库、执行账号有没有 USAGE。
+# og5 实测:对象隔离(ENABLE PRIVATE OBJECT)藏的正是 pg_namespace 这一行——0 行既可能是「本库没有」也可能是
+# 「对执行账号不可见」,靠 locate_search 里 LEFT JOIN 的 nspname 为空来分。有行、usage=f 则是普通的权限不足。
+name: proctune.locate_schema
+description: 过程找不到时的排查:目标 schema 在不在本库、执行账号有没有 USAGE 权限
+sql: |
+  SELECT n.nspname, pg_catalog.has_schema_privilege(n.oid, 'USAGE') AS usage
+  FROM pg_namespace n
+  WHERE n.nspname = '{{schema}}';
+params:
+  - key: schema
+    type: String
+    description: 模式名

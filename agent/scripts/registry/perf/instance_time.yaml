@@ -1,0 +1,7 @@
+# DB_TIME / CPU_TIME / DATA_IO_TIME 等，是判断"时间花在哪"的入口
+name: perf.instance_time
+description: 实例级时间模型（dbe_perf.global_instance_time）
+sql: |
+  select stat_name, value
+  from dbe_perf.global_instance_time
+  order by value desc;

@@ -1,0 +1,16 @@
+# SQL 取自 common/sql.py 的 skill_proctune_007，{sid} 换成 {{sid}}，其余未动。
+# 历史里查不到时的兜底来源。
+#
+# 与 sqlfetch.from_statement 是同一条 SQL，理由同 sql_from_history.yaml。
+name: proctune.sql_from_statement
+description: 按 unique_sql_id 从 SQL 统计视图里取语句正文
+sql: |
+  SELECT query, user_name FROM dbe_perf.statement
+  WHERE unique_sql_id = {{sid}}
+    AND query IS NOT NULL
+    AND LENGTH(TRIM(query)) > 0
+  LIMIT 1;
+params:
+  - key: sid
+    type: INTEGER
+    description: unique_sql_id

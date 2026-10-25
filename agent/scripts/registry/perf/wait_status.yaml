@@ -1,0 +1,14 @@
+# openGauss 诊断的核心视图之一：线程级等待状态，含阻塞关系
+# （block_sessionid 指向阻塞者，是查锁等待链的起点）
+name: perf.wait_status
+description: 线程等待状态与阻塞关系（pg_thread_wait_status）
+sql: |
+  select thread_name, wait_status, wait_event, db_name,
+         sessionid::text, block_sessionid::text
+  from pg_thread_wait_status
+  where wait_status <> 'none'
+  limit {{limit}};
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

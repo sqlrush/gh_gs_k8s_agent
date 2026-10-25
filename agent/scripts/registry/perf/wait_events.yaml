@@ -1,0 +1,12 @@
+name: perf.wait_events
+description: 等待事件汇总，按累计等待时间倒序（dbe_perf.wait_events）
+sql: |
+  select type, event, wait, total_wait_time, avg_wait_time, max_wait_time
+  from dbe_perf.wait_events
+  where wait > 0
+  order by total_wait_time desc
+  limit {{limit}};
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

@@ -1,0 +1,18 @@
+# 原来是 capability.py 里由 GUCS 常量拼出来的固定 IN 列表。
+# 列表内容固定不变，直接展开写死 —— 不需要参数。
+#
+# 2026-10-24 补 enable_resource_record:history 子命令靠它判断 WLM 历史表有没有数据,原来的列表里没有,
+# capability 把「没读到」当成 off,报告写「enable_resource_record = off(需设为 on)」—— og5 上它实际是 on
+# (配置文件里设的),faultlab 第二轮据此记成了「history 因参数关着不可用」,方向全错。
+name: memanalyze.gucs
+description: 与内存相关的 GUC 参数
+sql: |
+  SELECT name, setting
+  FROM pg_settings
+  WHERE name IN (
+    'max_process_memory', 'shared_buffers', 'work_mem', 'maintenance_work_mem',
+    'max_connections', 'enable_memory_limit', 'memory_tracking_mode',
+    'use_workload_manager', 'enable_resource_track', 'resource_track_level',
+    'resource_track_cost', 'resource_track_duration', 'enable_resource_record',
+    'enable_dynamic_workload', 'query_max_mem', 'query_mem')
+  ORDER BY name;

@@ -1,0 +1,9 @@
+name: perf.db_stat
+description: 库级统计与缓存命中率（pg_stat_database）
+sql: |
+  select datname, numbackends, xact_commit, xact_rollback,
+         blks_read, blks_hit,
+         round(blks_hit*100.0/nullif(blks_hit+blks_read,0), 2) as hit_ratio,
+         tup_returned, tup_fetched, deadlocks, conflicts
+  from pg_stat_database
+  order by xact_commit desc;

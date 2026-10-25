@@ -1,0 +1,13 @@
+# 索引规范
+- id: GS-IDX-005
+  severity: warn
+  check: advisory
+  rule: 未使用索引不得直接删除:先登记索引台账、观察满 30 天且覆盖一次月末批量,确认 idx_scan 仍为 0 后提变更单删除
+  criteria: pg_stat_user_indexes.idx_scan=0 且统计窗口 ≥ 30 天
+  keywords:
+  - 未使用索引
+  - INDEX_UNUSED
+  - idx_scan
+  - 删索引
+  - 索引台账
+  source: 《运维规范》v5 §7.1

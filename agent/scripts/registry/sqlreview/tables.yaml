@@ -1,0 +1,47 @@
+# SQL 取自 common/sql.py 的 skill_sqlreview_001。
+#
+# **改动一：%s 绑定变量换成 {{schema}}，并手工补上引号。**
+#   绑定变量下驱动会替字符串加引号，原文写的是 `n.nspname = %s`；换成文本
+#   替换后引号责任回到脚本作者身上，不补就渲染成 `= public`（被当成列名）。
+#   参数是 String 类型，注册时会标 STRING_PARAM —— 类型校验对它无效。
+#   防线在调用方：取值是命令行 --schema 的原值。
+#
+# **改动二：两个数组表达式外面套了 array_to_string(..., ',')。**
+#   括号内一字未动，只是把 text[] 投影成逗号分隔文本。
+#   理由：协议规定所有列值都是字符串，而**数组的字符串化形式协议没有定义**，
+#   完全取决于中间件实现。实测本机（当时是 pg8000 + serialize）给的是 Python 的
+#   列表 repr `"['id', 'k', 'payload']"`，调用方 objects.py 的 _as_tuple
+#   会把它切成 ["['id'", " 'k'", " 'payload']"] —— 一堆带引号的垃圾列名，
+#   **不报错**，只是让命名规范类规则给出整片误报。客户中间件是另一套实现，
+#   只会得到第三种形态。让数据库直接吐文本是唯一在三边都稳定的形式。
+#   代价：列名/约束名里若含逗号（须双引号标识符，极罕见）会被多切一刀。
+#
+# 列名 schema/table/has_pk/fks/columns 原本就唯一且有意义，未加别名。
+# has_pk 是布尔列，取回来是 't'/'f'（或 'true'/'false'，取决于中间件的
+# 布尔渲染），调用方必须用 _as_bool 判断 —— bool('f') 是 True。
+name: sqlreview.tables
+description: 某模式下的表清单（主键/外键/列名）
+sql: |
+  SELECT
+    n.nspname::text                                              AS schema,
+    c.relname::text                                              AS table,
+    EXISTS (SELECT 1 FROM pg_constraint pk
+            WHERE pk.conrelid = c.oid AND pk.contype = 'p')      AS has_pk,
+    array_to_string(
+      COALESCE((SELECT array_agg(fk.conname::text)
+                FROM pg_constraint fk
+                WHERE fk.conrelid = c.oid AND fk.contype = 'f'),
+               ARRAY[]::text[]), ',')                            AS fks,
+    array_to_string(
+      COALESCE((SELECT array_agg(a.attname::text ORDER BY a.attnum)
+                FROM pg_attribute a
+                WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped),
+               ARRAY[]::text[]), ',')                            AS columns
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE c.relkind = 'r' AND n.nspname = '{{schema}}'
+  ORDER BY c.relname;
+params:
+  - key: schema
+    type: String
+    description: 模式名

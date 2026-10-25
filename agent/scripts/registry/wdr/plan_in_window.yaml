@@ -1,0 +1,34 @@
+# WDR 报告 SQL 附录的执行计划:按 unique_query_id 取**窗口内**最近一次真实执行的计划
+# (statement_history.query_plan,带 actual time / rows)。
+#
+# 为什么在脚本层取:附录的计划原来靠模型调 explain 取回来写进 interp.json,取不到就写
+# 「执行计划:本次未取到」。2026-10-21 测试:sql_id 3091214944 在窗口内执行 34 次、34 条都有计划,
+# 附录照样空着 —— 文本是归一化的,explain 不读 query_plan。
+#
+# 限定在窗口内:报告讲的是这段时间,计划也要是这段时间执行时的那一个。与 explain.plan_from_history
+# 正文相近,**刻意不复用同一个逻辑名**(逻辑名按 skill 分域,客户侧按域审批 / 作废)。
+name: wdr.plan_in_window
+description: 按 unique_query_id 取 WDR 窗口内最近一次真实执行计划(含执行时间、耗时、返回行数)
+readonly: true
+sql: |
+  SELECT to_char(start_time, 'YYYY-MM-DD HH24:MI:SS') AS start_time,
+         round(db_time / 1000.0, 1) AS db_time_ms,
+         n_returned_rows,
+         query_plan
+    FROM dbe_perf.statement_history
+   WHERE unique_query_id = {{sid}}
+     AND start_time >= CAST('{{begin_time}}' AS TIMESTAMP)
+     AND start_time <= CAST('{{end_time}}' AS TIMESTAMP)
+     AND query_plan IS NOT NULL AND query_plan <> ''
+   ORDER BY start_time DESC
+   LIMIT 1;
+params:
+  - key: sid
+    type: INTEGER
+    description: unique_query_id(整数,可能为负)
+  - key: begin_time
+    type: DateTime
+    description: 窗口起点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss
+  - key: end_time
+    type: DateTime
+    description: 窗口终点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss

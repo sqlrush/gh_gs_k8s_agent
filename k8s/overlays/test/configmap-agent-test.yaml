@@ -1,0 +1,12 @@
+# test 环境的地址与模型(样例值,平台按实际填写;密钥仍走 Secret,不放这里)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-config
+  namespace: gaussdb-agent
+data:
+  GRMP_API_HOST: grmp-test.example.internal
+  GRMP_API_PORT: "8080"
+  GRMP_APPKEY: gaussdb-agent
+  MODEL_BASE_URL: http://llm-test.example.internal/v1
+  MODEL_ID: qwen3-32b

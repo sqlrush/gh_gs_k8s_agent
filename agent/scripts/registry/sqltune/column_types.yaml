@@ -1,0 +1,38 @@
+# 占位符替换前的列类型探测（coltypes.infer_types）。
+#
+# 现场教训（2026-08-11 客户日志）：比较列名不在整数白名单（如 grp / uid /
+# stock_quantity）时启发式兜底填 'test'，EXPLAIN 在计划期常量强转时报
+# `invalid input syntax for integer: "test"` —— 同一条 SQL 反复失败一小时，
+# agent 绕不出来。先问 catalog 再替换，合成值首发就类型正确。
+#
+# 为什么不用 PREPARE/pg_prepared_statements 探测参数类型：中间件每次调用
+# 独立连接、gsql 每语句一个子进程，会话状态留不住 —— 单条无状态查询是
+# 两条路径都走得通的唯一选择。
+#
+# 列名做键：attname 原生唯一；format_type 是表达式列，必须起别名 type_name，
+# 否则协议按列名取值时拿不到（见 common/grmp/columns.py）。
+#
+# `IN ({{...}})` 括号写在 SQL 里，取值只给带引号的字面量列表（'a','b'）——
+# 与 tables.yaml 同约定，避免双层括号。
+#
+# 同名列跨表类型冲突这里不裁决，原样多行返回，由调用方保守放弃该列。
+name: sqltune.column_types
+description: 占位符比较列的真实类型（替换前探测，让合成值类型正确）
+sql: |
+  SELECT n.nspname AS schema_name, c.relname AS table_name,
+         a.attname, format_type(a.atttypid, NULL) AS type_name
+  FROM pg_attribute a
+  JOIN pg_class c ON c.oid = a.attrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE c.relname IN ({{tables}})
+    AND a.attname IN ({{columns}})
+    AND a.attnum > 0 AND NOT a.attisdropped
+    AND c.relkind IN ('r','v','p','m')
+    AND n.nspname NOT IN ('pg_catalog','information_schema');
+params:
+  - key: tables
+    type: String
+    description: 带引号的表名字面量列表，如 'orders','items'。取值必须来自 evidence.extract_tables() 产出的标识符，经 coltypes._quoted_list() 转义，不可直接取用户输入
+  - key: columns
+    type: String
+    description: 带引号的列名字面量列表，如 'grp','uid'。取值必须来自 placeholder.comparison_column() 提取的标识符，经 coltypes._quoted_list() 转义，不可直接取用户输入

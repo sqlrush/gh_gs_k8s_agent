@@ -1,0 +1,39 @@
+# SQL 取自 common/sql.py 的 skill_health_004。
+# **改动：两个 COALESCE(...) 加了别名 usename / query。**
+# 原来两列都叫 coalesce，协议按列名做键，后一个会把前一个覆盖 ——
+# query 顶掉 usename，且不报错。
+#
+# **改动（2026-10-24 faultlab）：「真实客户端会话」改按 client_port 认，不再按 connection_info。**
+# 原 SQL 用 COALESCE(connection_info,'') <> '' 排除内核后台线程（WLM 的 workload 线程
+# 一直 active、带 xact_start，不排除就是一条 35 小时的「长事务」）。但 connection_info
+# 只有 openGauss 自带的 libpq（gsql、gs 系驱动）会填；psycopg2 这类社区 libpq 系驱动、
+# 不少中间件不填 —— og5 实测 psycopg2 会话这一列是空串。faultlab 里 V2 的 1118 秒长事务、
+# K1 的 16 分钟空闲事务因此整类看不见，报告写「无活动客户端事务」。
+# client_port：后台线程（workload、WDRSnapshot、Asp、JobScheduler 等）全是 NULL；
+# 客户端会话 TCP 是端口号、本地 Unix socket 是 -1，都非空（og5 逐个核对过）。
+#
+# pid <> pg_backend_pid()：按 client_port 认之后，执行这条 SELECT 的会话自己也是客户端、
+# 也 active、也带 xact_start，会被列成一条 0 秒的「客户端事务」。与 vacuum.oldest_xmin 同一句。
+#
+# 加了 waiting 一列：health 的「执行中的长 SQL」复用这条脚本，要分出在等锁的那些 ——
+# 等锁的耗时花在锁上，该看锁阻塞链，不该被导去调 SQL。
+name: health.long_xact
+description: 长事务与长时间未变状态的会话
+sql: |
+  SELECT pid,
+         COALESCE(usename,'') AS usename,
+         state,
+         waiting,
+         EXTRACT(EPOCH FROM (now()-xact_start))   AS xact_age_s,
+         EXTRACT(EPOCH FROM (now()-state_change)) AS state_age_s,
+         COALESCE(query,'') AS query
+  FROM pg_stat_activity
+  WHERE state IN ('active','idle in transaction') AND xact_start IS NOT NULL
+    AND client_port IS NOT NULL
+    AND pid <> pg_backend_pid()
+  ORDER BY xact_start
+  LIMIT {{limit}};
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

@@ -1,0 +1,10 @@
+# 与客户 id=56「查看数据库相关信息」同形的无参脚本。
+# 用它做端到端比对：客户给出了这条脚本的完整响应报文（规范说明 §5.7），
+# 是唯一一条能拿真实响应对照结构的样例。
+name: health.db_info
+description: 查看数据库相关信息（编码、兼容模式、连接限制等）
+# 末尾分号是照客户来的：客户的 script_content 与响应里的 cmd 都带分号。
+sql: |
+  select pg_encoding_to_char(encoding) as encoding_name, *
+  from pg_database
+  where datname not in ('template1','postgres','template0');

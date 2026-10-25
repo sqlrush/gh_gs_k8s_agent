@@ -1,0 +1,40 @@
+# 此刻的库级累计计数 —— 与 health.snap_counters 的键一一对应,两者相减即「快照时刻到此刻」。
+#
+# 多出来的两项是判定「窗口能不能算」的依据,不参与相减:
+#   postmaster_start —— 实例启动时刻。DB_TIME / CPU_TIME 是内存态累计,**实例一重启就清零**;
+#                       起点快照若早于它,和此刻相减得到的是负数或一个毫无意义的数。
+#   stats_reset      —— 统计重置时刻(pg_stat_database,取最晚的那个库)。提交/回滚/死锁
+#                       这族计数会被 pg_stat_reset() 单独清零,与实例重启不一定同时。
+# 判定侧取两者中**较晚**的那个当「这之前的起点一律不能用」的界线 —— 保守,但不会算错。
+name: health.live_counters
+description: 此刻的库级累计计数（与 snap_counters 对应）及实例启动 / 统计重置时刻
+readonly: true
+sql: |
+  SELECT 'now' AS item, to_char(now(), 'YYYY-MM-DD HH24:MI:SS') AS value
+  UNION ALL
+  SELECT 'postmaster_start', to_char(pg_postmaster_start_time(), 'YYYY-MM-DD HH24:MI:SS')
+  UNION ALL
+  SELECT 'stats_reset', COALESCE(to_char(max(stats_reset), 'YYYY-MM-DD HH24:MI:SS'), '')
+    FROM pg_stat_database
+  UNION ALL
+  SELECT 'db_time_us', COALESCE(sum(value), 0)::text
+    FROM dbe_perf.global_instance_time WHERE stat_name = 'DB_TIME'
+  UNION ALL
+  SELECT 'cpu_time_us', COALESCE(sum(value), 0)::text
+    FROM dbe_perf.global_instance_time WHERE stat_name = 'CPU_TIME'
+  UNION ALL
+  SELECT 'xact_commit', COALESCE(sum(xact_commit), 0)::text FROM pg_stat_database
+  UNION ALL
+  SELECT 'xact_rollback', COALESCE(sum(xact_rollback), 0)::text FROM pg_stat_database
+  UNION ALL
+  SELECT 'deadlocks', COALESCE(sum(deadlocks), 0)::text FROM pg_stat_database
+  UNION ALL
+  SELECT 'temp_bytes', COALESCE(sum(temp_bytes), 0)::text FROM pg_stat_database
+  UNION ALL
+  SELECT 'blks_read', COALESCE(sum(blks_read), 0)::text FROM pg_stat_database
+  UNION ALL
+  SELECT 'blks_hit', COALESCE(sum(blks_hit), 0)::text FROM pg_stat_database
+  UNION ALL
+  SELECT 'ckpt_timed', COALESCE(sum(checkpoints_timed), 0)::text FROM pg_stat_bgwriter
+  UNION ALL
+  SELECT 'ckpt_req', COALESCE(sum(checkpoints_req), 0)::text FROM pg_stat_bgwriter;

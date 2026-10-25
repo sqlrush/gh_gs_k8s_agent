@@ -1,0 +1,51 @@
+# 索引用量的**全局**视图 —— 不是「只把 idx_scan=0 的挑出来」。
+#
+# 原先这条 `WHERE s.idx_scan = 0`，报告直接写「无用索引 ×10 合计 12GB，建议
+# DROP」。两个问题：
+#
+# **一、idx_scan 是「自上次统计重置以来」的累计值，单看等于 0 没有意义。**
+# 统计刚重置或实例刚重启，全库索引都是 0 —— 那个结论会把整库索引都判成无用。
+# 观测窗口由 health.stats_window 单独取，报告必须先摆出来。
+#
+# **二、0 要放在上下文里读。** og5 实测：fact_sales 上某条索引 idx_scan=0，
+# 但**该表的 idx_scan 总数是 743690** —— 索引在被大量使用，只是不用这一条。
+# 这跟「整张表都没走过索引」是完全不同的两件事，而原先的输出把这个上下文
+# 全藏起来了。所以这里返回所有够大的索引连同其用量，判定放到 collectors.py。
+#
+# 约束背书的索引（主键/唯一）**照样返回**但会被标出来：它们不论 idx_scan
+# 多少都不能 DROP。原先在 SQL 里 `NOT indisprimary AND NOT indisunique`
+# 直接滤掉，看起来是对的，但也让报告失去了「这张表上还有哪些索引」的全貌。
+#
+# schema_filter 是整段 SQL 片段（如 ('pg_catalog','information_schema')），
+# GRMP 没有列表类型，只能当 String 塞进去 —— 注册时会标 STRING_PARAM。
+# 防线在调用方：取值来自 collectors.py 里的固定常量，不来自用户输入。
+name: health.unused_index
+description: 索引用量全局视图（含扫描次数、大小、是否约束背书、所属表的扫描分布）
+sql: |
+  SELECT s.schemaname||'.'||s.indexrelname AS idx_name,
+         s.relname AS table_name,
+         s.idx_scan,
+         s.idx_tup_read,
+         s.idx_tup_fetch,
+         pg_relation_size(s.indexrelid) AS idx_bytes,
+         i.indisprimary,
+         i.indisunique,
+         COALESCE(ts.seq_scan, 0) AS table_seq_scan,
+         COALESCE(ts.idx_scan, 0) AS table_idx_scan
+  FROM pg_stat_user_indexes s
+  JOIN pg_index i ON i.indexrelid = s.indexrelid
+  LEFT JOIN pg_stat_user_tables ts ON ts.relid = s.relid
+  WHERE pg_relation_size(s.indexrelid) > {{min_bytes}}
+    AND s.schemaname NOT IN {{schema_filter}}
+  ORDER BY s.idx_scan ASC, pg_relation_size(s.indexrelid) DESC
+  LIMIT {{limit}};
+params:
+  - key: min_bytes
+    type: INTEGER
+    description: 索引大小下限（字节）
+  - key: schema_filter
+    type: String
+    description: 要排除的模式列表，形如 ('a','b')。须来自受控常量
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

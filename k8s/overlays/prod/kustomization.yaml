@@ -1,0 +1,9 @@
+# 「prod」环境覆盖层:同一个镜像,只换 agent-config 里的地址与模型。
+# 用法: kubectl apply -k k8s/overlays/prod   然后 create secret model-api / grmp-sm2、按工号 provision。
+# 测试通过的镜像 digest 与生产跑的完全一样——环境差异永远只在这里,不在镜像里。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - path: configmap-agent-prod.yaml

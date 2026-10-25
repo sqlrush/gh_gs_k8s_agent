@@ -1,0 +1,17 @@
+# 按 pid 取该会话正在执行的 SQL——`explain.py --pid` 的退回路径用。
+#
+# 用户只给了 pid 而内核没有 gs_get_explain 时,退回标准 EXPLAIN 需要 SQL 文本,从这里取。
+# 取到的 query 是原始文本(不是归一化的),可直接进 EXPLAIN 模板;仍受 track_activity_query_size
+# 截断限制,调用方用 looks_truncated 同款判定兜底。
+name: explain.session_by_pid
+description: 按 pid 取会话当前语句(pid / query / query_start / state)
+readonly: true
+sql: |
+  SELECT pid, unique_sql_id, query, query_start, state
+    FROM pg_stat_activity
+   WHERE pid = {{pid}}
+   LIMIT 1;
+params:
+  - key: pid
+    type: INTEGER
+    description: 后台线程 pid(pg_stat_activity.pid)

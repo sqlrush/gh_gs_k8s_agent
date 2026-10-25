@@ -1,0 +1,41 @@
+# 表膨胀估算的输入 —— 页数、行数、平均行宽、真实大小。
+#
+# **这是估算,不是测量,而且必须带交叉校验。** `pgstattuple` 在这个内核上没装
+# (实测 pg_available_extensions 里查不到),所以只能按"行数 × 平均行宽"推算
+# 应占多少页,再和真实页数比。误差来源:fillfactor、已删列、TOAST 外联、
+# 变长字段的实际分布 —— 所以判定阈值要宽,呈现时要写明是估算。
+#
+# **`relpages` / `reltuples` 来自最后一次 ANALYZE/VACUUM,可能严重陈旧 ——
+# 这正是必须同时取真实大小的原因。** og5 实测:`statement_history` 的
+# relpages=428232,而 pg_relation_size 换算只有 14 页(表被清空过但没重新 analyze)。
+# 拿陈旧的 reltuples 去估算,会算出一个天文数字的"膨胀率",而那完全是假的。
+# 判定侧必须先比 relpages 与 real_pages:差得过多就**拒绝估算**并说明统计已陈旧,
+# 而不是输出一个看起来很严重的假数字。
+#
+# avg_width 从 pg_stats 按表汇总(每列一行,求和即一行的平均宽度)。
+# 某张表没有任何 pg_stats 行 = 从没 ANALYZE 过 → 这里给 NULL,判定侧据此拒绝估算。
+name: vacuum.bloat_estimate
+description: 表膨胀估算的输入（页数、行数、平均行宽、真实大小）
+readonly: true
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回表数上限
+sql: |
+  SELECT n.nspname AS schema,
+         c.relname AS "table",
+         c.relpages::bigint                       AS relpages,
+         (pg_relation_size(c.oid) / 8192)::bigint AS real_pages,
+         c.reltuples::bigint                      AS reltuples,
+         pg_relation_size(c.oid)::bigint          AS real_bytes,
+         (SELECT sum(s.avg_width)
+            FROM pg_stats s
+           WHERE s.schemaname = n.nspname AND s.tablename = c.relname) AS avg_row_width
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE c.relkind = 'r'
+     AND n.nspname NOT IN ('pg_catalog','information_schema','snapshot','dbe_perf',
+                           'dbe_pldeveloper','cstore','pg_toast')
+     AND pg_relation_size(c.oid) > 8192 * 128
+   ORDER BY pg_relation_size(c.oid) DESC
+   LIMIT {{limit}};

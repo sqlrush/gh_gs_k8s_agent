@@ -1,0 +1,30 @@
+# 过程「找不到」时的排查脚本之三:按名字模糊搜过程与包。
+# 两个 LEFT JOIN 是有意的:对象隔离下 pg_namespace 行被藏、pg_proc 行还在(og5 实测),内联 JOIN 会把它丢掉;
+# LEFT JOIN 让它以 nspname 为空的形态回来——这就是「过程在、schema 不可见」的证据。
+# 包那半段只在给了包名时才搜(A 兼容库 '' 即 NULL,所以用 length 判空而不是 <> '')。
+# {{name}} / {{package}} 进的是 ILIKE 的引号里,调用方(common/procname.py)只放行合法标识符。
+name: procinfo.locate_search
+description: 过程找不到时的排查:按名字模糊搜过程(schema 不可见时 nspname 为空)与包
+sql: |
+  SELECT 'proc' AS kind, n.nspname, COALESCE(k.pkgname, '') AS pkgname, p.proname
+  FROM pg_proc p
+  LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
+  LEFT JOIN gs_package k ON k.oid = p.propackageid
+  WHERE p.proname ILIKE '%{{name}}%'
+    AND (n.nspname IS NULL OR (n.nspname NOT LIKE 'pg_%' AND n.nspname NOT LIKE 'dbe_%'
+         AND n.nspname NOT IN ('information_schema', 'pkg_service', 'pkg_util', 'sqladvisor', 'db4ai',
+                               'snapshot', 'blockchain', 'cstore', 'pmk', 'coverage')))
+  UNION ALL
+  SELECT 'package' AS kind, n.nspname, k.pkgname, '' AS proname
+  FROM gs_package k
+  LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
+  WHERE COALESCE(length('{{package}}'), 0) > 0 AND k.pkgname ILIKE '%{{package}}%'
+  ORDER BY 1, 2, 3, 4
+  LIMIT 40;
+params:
+  - key: name
+    type: String
+    description: 过程名(模糊匹配)
+  - key: package
+    type: String
+    description: 包名(模糊匹配);空串表示不搜包

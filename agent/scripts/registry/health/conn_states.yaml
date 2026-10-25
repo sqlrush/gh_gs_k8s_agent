@@ -1,0 +1,22 @@
+# SQL 取自 common/sql.py 的 skill_health_008。
+#
+# **修正（用户确认）：原文把 Python 隐式字符串拼接的源码连同括号和引号
+# 一起粘进了三引号里**，实际执行的是以 ("SELECT ... 开头的文本，
+# 数据库报 syntax error。collectors.py 的 _CONN_Q 正在用它 ——
+# health 的连接状态统计今天是坏的。
+# 去掉外层括号与引号即可，原意毫无歧义。
+#
+# 同时给 count(*) 加了别名 cnt。
+#
+# **改动（2026-10-24 faultlab）：加 WHERE sessionid <> 0。** 开了线程池时 pg_stat_activity
+# 里有一批空闲工作线程的条目：sessionid = 0、没有客户端、不持锁（见 health.thread_pool 的说明）。
+# 不排除的话它们全算进总数和 idle —— faultlab 那轮 10:02 直接查库是 61 个会话，
+# 报告写「共 65：…、idle 17」。与 health.thread_pool 的 real_sessions 同一口径。
+name: health.conn_states
+description: 连接状态分布
+sql: |
+  SELECT COALESCE(state,'<null>') AS state, count(*) AS cnt
+  FROM pg_stat_activity
+  WHERE sessionid <> 0
+  GROUP BY state
+  ORDER BY cnt DESC;

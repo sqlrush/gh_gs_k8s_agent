@@ -1,0 +1,14 @@
+# 统计信息规范
+- id: GS-STAT-002
+  severity: error
+  check: advisory
+  rule: 批量灌数、exchange partition、gs_loader 导入之后必须在作业代码里显式 ANALYZE 相关表;CPU 或计划异常先核对统计信息再谈资源
+  criteria: last_analyze 早于最近一次批量
+  keywords:
+  - ANALYZE
+  - 统计信息
+  - exchange
+  - 计划跳变
+  - STALE_STATS
+  - DBTIME_CPU_HEAVY
+  source: 《运维规范》v5 §5.3

@@ -1,0 +1,19 @@
+# String 类型参数的样例。
+#
+# 引号由脚本作者写（'{{username}}'），中间件只做纯文本替换 ——
+# 这是决策表第 5 项。依据是接口文档「案例 2」把字符串与布尔型合并成
+# 同一个案例，说明替换时不按类型分支。**这仍是推断**：文档没有任何
+# String 类型的真实脚本样例。
+#
+# 该脚本因此也是一个取证点：等客户给出一条带 String 参数的真实脚本，
+# 若写法是 = {{name}}（中间件补引号），这里要跟着改。
+name: session.by_user
+description: 按用户名查当前会话
+sql: |
+  select pid, usename, state, application_name
+  from pg_stat_activity
+  where usename = '{{username}}';
+params:
+  - key: username
+    type: String
+    description: 数据库用户名，精确匹配

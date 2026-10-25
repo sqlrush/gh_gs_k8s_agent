@@ -1,0 +1,25 @@
+# SQL 取自 common/sql.py 的 skill_health_001。
+#
+# **改动（2026-10-24 faultlab）：最老事务只认客户端会话的条件，connection_info 换成 client_port。**
+# 理由同 health.long_xact 顶部的说明：psycopg2 这类驱动不填 connection_info，它们的事务
+# 全被滤掉，faultlab 里 S1 一条 SQL 跑了 1123 秒，Overview 仍写「最老事务 无」。
+# 内核后台线程的 client_port 都是 NULL，照样排除在外。
+#
+# **连接数改数 pg_stat_activity 里 sessionid <> 0 的条目（2026-10-24 faultlab 第二轮）。**
+# 原来是 sum(pg_stat_database.numbackends)：开了线程池时它把空闲工作线程的条目（sessionid = 0、
+# 无客户端、不持锁）也算进去 —— Connections 维度已按 sessionid <> 0 数出 51，Overview 仍写 53。
+# 与 health.conn_states、health.thread_pool 的 real_sessions 同一口径。
+name: health.overview
+description: 实例概览（缓存命中率/连接数/恢复态/最老事务）
+sql: |
+  SELECT
+    CASE WHEN sum(blks_hit)+sum(blks_read)=0 THEN 100
+         ELSE round(100.0*sum(blks_hit)/(sum(blks_hit)+sum(blks_read)),2) END AS cache_hit_pct,
+    (SELECT count(*) FROM pg_stat_activity WHERE sessionid <> 0)::bigint AS numbackends,
+    (SELECT setting::bigint FROM pg_settings WHERE name='max_connections') AS max_conn,
+    pg_is_in_recovery() AS in_recovery,
+    (SELECT COALESCE(EXTRACT(EPOCH FROM now()-min(xact_start)),0)::bigint
+     FROM pg_stat_activity
+     WHERE state IN ('active','idle in transaction') AND xact_start IS NOT NULL
+       AND client_port IS NOT NULL) AS oldest_xact_s
+  FROM pg_stat_database;

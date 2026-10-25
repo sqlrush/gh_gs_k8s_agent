@@ -1,0 +1,32 @@
+# SQL 取自 common/sql.py 的 skill_wdr_005。
+#
+# **修正：第二个 CTE 的 snapshot_id 原文写作 {c}，是 {e} 的笔误。**
+# 两个 CTE 一个取起始快照、一个取结束快照，第二个理应用 {e}。
+# 而调用处 collectors.py:192 传的是 b/e/top，没有 c ——
+# 于是 .format 抛 KeyError: 'c'，且它在 try 之外，降级逻辑接不住。
+# 实测结果：wdr collect 整个命令崩栈，不是降级，是彻底不可用。
+name: wdr.waits
+description: 窗口内等待类聚合（snap_global_wait_events）
+sql: |
+  WITH b AS (SELECT snap_type AS wait_class, snap_event AS event, sum(snap_wait) AS waits, sum(snap_total_wait_time) AS wt
+               FROM snapshot.snap_global_wait_events WHERE snapshot_id={{b}} GROUP BY snap_type, snap_event),
+       e AS (SELECT snap_type AS wait_class, snap_event AS event, sum(snap_wait) AS waits, sum(snap_total_wait_time) AS wt
+               FROM snapshot.snap_global_wait_events WHERE snapshot_id={{e}} GROUP BY snap_type, snap_event)
+  SELECT e.wait_class,
+         SUM(e.waits-b.waits) AS waits,
+         SUM(e.wt-b.wt)       AS wait_us
+  FROM e JOIN b USING (wait_class, event)
+  WHERE upper(e.wait_class) NOT IN ('STATUS','NONE')
+  GROUP BY e.wait_class
+  HAVING SUM(e.wt-b.wt) > 0
+  ORDER BY wait_us DESC LIMIT {{top}};
+params:
+  - key: b
+    type: INTEGER
+    description: 起始快照 ID
+  - key: e
+    type: INTEGER
+    description: 结束快照 ID
+  - key: top
+    type: INTEGER
+    description: 返回条数上限

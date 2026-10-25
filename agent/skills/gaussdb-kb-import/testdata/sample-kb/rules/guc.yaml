@@ -1,0 +1,25 @@
+# 参数规范
+- id: GS-GUC-004
+  severity: error
+  check: advisory
+  rule: 生产实例 shared_buffers / work_mem / max_connections 等全局参数由 NUMA 绑核方案与容量模型固定,不因单次指标(命中率、连接数)调整;报表类需求走只读实例或会话级参数
+  criteria: 任何要改全局 GUC 的建议
+  keywords:
+  - shared_buffers
+  - work_mem
+  - max_connections
+  - CACHE_LOW
+  - CONN_HIGH
+  - 只读实例
+  source: 《运维规范》v5 §4.2
+- id: GS-CONN-001
+  severity: warn
+  check: advisory
+  rule: 应用必须使用本行统一 druid 连接池模板(maxActive ≤ 20/实例),禁止短连接
+  keywords:
+  - 连接池
+  - 短连接
+  - druid
+  - ProcArrayLock
+  - CONN_HIGH
+  source: 《开发规范》v3 §2.1

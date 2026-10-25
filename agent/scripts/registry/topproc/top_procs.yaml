@@ -1,0 +1,25 @@
+# SQL 取自 common/sql.py 的 skill_topproc_001。
+#
+# **改动：给两个 ROUND(...) 加了别名 total_ms / self_ms。**
+# 原来两列都叫 round，协议按列名做键返回，重名列会被后一个覆盖 ——
+# self_time 会把 total_time 顶掉，且不报错。加别名不改语义与结果。
+#
+# {{order}} 落在 ORDER BY 位，取值只能来自 topproc.py 的 _SORT_COLS 白名单。
+name: topproc.top_procs
+description: 资源消耗最高的存储过程/函数（pg_stat_user_functions）
+sql: |
+  SELECT n.nspname, p.proname, s.calls,
+         ROUND(s.total_time::numeric, 2) AS total_ms,
+         ROUND(s.self_time::numeric, 2) AS self_ms
+  FROM pg_stat_user_functions s
+  JOIN pg_proc p ON p.oid = s.funcid
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  ORDER BY {{order}} NULLS LAST
+  LIMIT {{limit}};
+params:
+  - key: order
+    type: String
+    description: 排序表达式。必须来自调用方的受控白名单，不可直接取用户输入
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

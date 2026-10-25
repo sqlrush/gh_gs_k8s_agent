@@ -1,0 +1,8 @@
+.git
+docs
+scripts
+docker/tests
+agent/tests
+agent/grmp_middleware/fixtures
+**/__pycache__
+**/*.pyc

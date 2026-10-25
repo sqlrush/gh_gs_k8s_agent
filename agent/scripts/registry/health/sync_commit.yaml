@@ -1,0 +1,37 @@
+# 同步提交会不会把主库卡住 —— 判定所需的四个事实,一次取齐。
+#
+# **为什么要先分辨单机/集群,这是本脚本存在的全部理由。** og5 上实测:
+# `synchronous_commit = on`、`synchronous_standby_names = '*'`、
+# 且 `pg_stat_replication` 一个备库都没有 —— 按 PostgreSQL 的语义这应该让
+# 每次提交无限等待,但 og5 写入完全正常。原因是 openGauss 的同步复制要靠
+# `replconninfo1..N` 定义对端才会生效,而 og5 上这些全是空的(单机部署)。
+#
+# 所以只看 `synchronous_commit` + `synchronous_standby_names` 就报警,会在
+# **每一个单机库上乱报** —— 而单机库恰恰是客户环境里最多的一类。必须拿
+# replconninfo 是否配过来区分,这就是 peers_configured 这一列。
+#
+# 四个事实各自不可省:
+#   peers_configured —— >0 才是集群;=0 则本项整体不适用(而不是"健康")
+#   in_recovery      —— 本节点是备库时,同步提交的风险在主库那边,不在这儿
+#   sync_commit      —— on / remote_write / remote_apply 才会等备库;
+#                       local / off 不等
+#   standby_names    —— 空串表示没要求任何同步备,此时也不会等
+#
+# 判定在 skills/gaussdb-health/scripts/collectors.py 的 collect_repl;
+# 已连上的同步备数量从既有的 health.replication(sync_state)那条脚本数,
+# 不在这里重复查 pg_stat_replication。
+name: health.sync_commit
+description: 同步提交配置与部署形态（判断主库会不会因等同步备而卡住）
+readonly: true
+sql: |
+  SELECT 'peers_configured' AS item,
+         (SELECT count(*)::text FROM pg_settings
+           WHERE name LIKE 'replconninfo%' AND COALESCE(setting,'') <> '') AS value
+  UNION ALL
+  SELECT 'in_recovery' AS item, pg_is_in_recovery()::text AS value
+  UNION ALL
+  SELECT 'sync_commit' AS item,
+         COALESCE((SELECT setting FROM pg_settings WHERE name='synchronous_commit'),'') AS value
+  UNION ALL
+  SELECT 'standby_names' AS item,
+         COALESCE((SELECT setting FROM pg_settings WHERE name='synchronous_standby_names'),'') AS value;

@@ -1,0 +1,83 @@
+# 时段锁回溯的**阻塞对**:某段时间里谁在等谁、等在什么锁上、采到几次。
+#
+# 为什么读 gs_asp:pg_locks 只有此刻;statement_history 只记 lock_wait_time 总量,
+# 不记当时是谁挡的。活跃会话采样(ASP)每个样本带 block_sessionid / 锁模式 / locktag,
+# 落表后(gs_asp,保留 asp_retention_days 天)事后能还原阻塞关系。
+#
+# **还要读内存里的样本(dbe_perf.local_active_session)。** ASP 内存写满(asp_sample_num 个)才落表,
+# 最近几个小时只在内存里 —— 只读 gs_asp 时,刚过去的那段一律「一个样本都没有」(2026-10-24 og5 实测,
+# 见 lockwait.asp_status)。内存那一侧只取 need_flush_sample 的样本:它们正是将来会落进 gs_asp 的那一批,
+# 两处步长一致(asp_sample_interval × asp_flush_rate),同一时段落表前后查到的结果一样;
+# 并且只取晚于本时段内最后一条落表样本的,两处不重复。
+#
+# 时长按「采到次数 × 落表间隔」估算(落表间隔 = asp_sample_interval × asp_flush_rate,
+# 由 lockwait.asp_status 给出),所以这里只返回次数与首末次时间,不在 SQL 里算秒数。
+# lock_object 只在锁标签能解析出本库的表时给出;等在事务号上(行锁冲突最常见的形态)
+# 没有表名,看等待语句。
+#
+# 实测(og5,10-21 18:32–18:52,faultlab 第一轮):5142→5141 等 transactionid 采到 115 次,
+# 5144→5145 等 tuple(fl.acct)115 次,能连出 5146→…→5141 这条链。
+name: lockwait.asp_pairs
+description: 时段内的锁阻塞对(活跃会话采样:落表的 gs_asp + 内存里的 local_active_session):等待者、阻塞者、锁、锁对象、采到次数、首末次时间
+readonly: true
+sql: |
+  WITH t AS (
+    SELECT a.sessionid, a.block_sessionid, a.event, a.lockmode, a.locktag,
+           a.unique_query_id, a.unique_query, a.sample_time
+      FROM gs_asp a
+     WHERE a.sample_time >= CAST('{{begin_time}}' AS TIMESTAMP)
+       AND a.sample_time <= CAST('{{end_time}}' AS TIMESTAMP)
+  ), s AS (
+    SELECT * FROM t
+     WHERE t.block_sessionid IS NOT NULL AND t.block_sessionid <> 0
+    UNION ALL
+    SELECT m.sessionid, m.block_sessionid, m.event, m.lockmode, m.locktag,
+           m.unique_query_id, m.unique_query, m.sample_time
+      FROM dbe_perf.local_active_session m
+     WHERE m.need_flush_sample
+       AND m.sample_time >= CAST('{{begin_time}}' AS TIMESTAMP)
+       AND m.sample_time <= CAST('{{end_time}}' AS TIMESTAMP)
+       AND m.sample_time > (SELECT COALESCE(max(t.sample_time), CAST('1970-01-01' AS TIMESTAMP)) FROM t)
+       AND m.block_sessionid IS NOT NULL AND m.block_sessionid <> 0
+  ), g AS (
+    SELECT sessionid, block_sessionid,
+           COALESCE(event, '') AS event, COALESCE(lockmode, '') AS lockmode,
+           COALESCE(locktag, '') AS locktag, unique_query_id,
+           count(*) AS samples, min(sample_time) AS first_seen, max(sample_time) AS last_seen,
+           max(substr(COALESCE(unique_query, ''), 1, 300)) AS query
+      FROM s
+     GROUP BY sessionid, block_sessionid, COALESCE(event, ''), COALESCE(lockmode, ''),
+              COALESCE(locktag, ''), unique_query_id
+  ), d AS (
+    SELECT g.*, CASE WHEN g.locktag <> '' THEN COALESCE(locktag_decode(g.locktag), '') ELSE '' END AS decoded
+      FROM g
+  )
+  SELECT d.sessionid AS waiter_sessionid,
+         d.block_sessionid AS holder_sessionid,
+         d.event AS wait_event,
+         d.lockmode AS waiter_mode,
+         d.locktag AS locktag,
+         d.decoded AS lock_decoded,
+         COALESCE((SELECT n.nspname || '.' || c.relname
+                     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE c.oid = CAST(NULLIF(substring(d.decoded from 'relation:([0-9]+)'), '') AS oid)
+                      AND substring(d.decoded from 'database:([0-9]+)')
+                          = (SELECT CAST(oid AS text) FROM pg_database WHERE datname = current_database())), '') AS lock_object,
+         d.unique_query_id AS waiter_sql_id,
+         d.query AS waiter_query,
+         d.samples AS samples,
+         to_char(d.first_seen, 'YYYY-MM-DD HH24:MI:SS') AS first_seen,
+         to_char(d.last_seen, 'YYYY-MM-DD HH24:MI:SS') AS last_seen
+    FROM d
+   ORDER BY d.samples DESC, d.sessionid
+   LIMIT {{limit}};
+params:
+  - key: begin_time
+    type: DateTime
+    description: 时段起点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss
+  - key: end_time
+    type: DateTime
+    description: 时段终点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

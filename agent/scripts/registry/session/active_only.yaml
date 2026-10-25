@@ -1,0 +1,21 @@
+# Boolean 类型参数的样例。
+#
+# 取值只认字面量 "true"/"false"（文档「案例 2」给的就是这两个），
+# 传 "True"/"1"/"t" 一律拒绝。不做宽容解析：宽容会让"客户端传了 t、
+# 客户中间件拒绝、本地却接受"这类落差到交付现场才暴露。
+#
+# 占位符出现两次，验证同名占位符的多处替换。
+name: session.active_only
+description: 列出会话，可选只看 active
+sql: |
+  select pid, usename, state, application_name
+  from pg_stat_activity
+  where ({{active_only}} = false or state = 'active')
+  limit {{limit}};
+params:
+  - key: active_only
+    type: Boolean
+    description: true 只返回 active 会话，false 返回全部
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

@@ -1,0 +1,999 @@
+- src:
+    kind: case
+    name: 偶现单条update慢
+    canonical: case:S2-20250224-CBST-偶现单条update慢
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 单条 update 偶发秒级
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250224-CBST-偶现单条update慢.md#现场
+  case: S2-20250224-CBST-偶现单条update慢
+  valid_from: '2025-02-24'
+- src:
+    kind: symptom
+    name: 单条 update 偶发秒级
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: autovacuum 尾部空页回收持 8 级锁与 DML 互相 cancel
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250224-CBST-偶现单条update慢.md#判断
+  case: S2-20250224-CBST-偶现单条update慢
+  valid_from: '2025-02-24'
+- src:
+    kind: rootcause
+    name: autovacuum 尾部空页回收持 8 级锁与 DML 互相 cancel
+  rel: handled_by
+  dst:
+    kind: action
+    name: 表级调大 autovacuum_vacuum_threshold 降低小表 vacuum 频率
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250224-CBST-偶现单条update慢.md#处置
+  case: S2-20250224-CBST-偶现单条update慢
+  valid_from: '2025-02-24'
+- src:
+    kind: case
+    name: 异步任务日志表update抖动
+    canonical: case:S2-20250611-CBST-异步任务日志表update抖动
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 单条 update 偶发秒级
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250611-CBST-异步任务日志表update抖动.md#现场
+  case: S2-20250611-CBST-异步任务日志表update抖动
+  valid_from: '2025-06-11'
+- src:
+    kind: symptom
+    name: 单条 update 偶发秒级
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: autovacuum 尾部空页回收持 8 级锁与 DML 互相 cancel
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250611-CBST-异步任务日志表update抖动.md#判断
+  case: S2-20250611-CBST-异步任务日志表update抖动
+  valid_from: '2025-06-11'
+- src:
+    kind: rootcause
+    name: autovacuum 尾部空页回收持 8 级锁与 DML 互相 cancel
+  rel: handled_by
+  dst:
+    kind: action
+    name: 表级调大 autovacuum_vacuum_threshold 降低小表 vacuum 频率
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250611-CBST-异步任务日志表update抖动.md#处置
+  case: S2-20250611-CBST-异步任务日志表update抖动
+  valid_from: '2025-06-11'
+- src:
+    kind: case
+    name: 大表死元组累积无法清理
+    canonical: case:S3-20250318-CBMS-大表死元组累积无法清理
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 死元组占比持续超过 20%
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250318-CBMS-大表死元组累积无法清理.md#现场
+  case: S3-20250318-CBMS-大表死元组累积无法清理
+  valid_from: '2025-03-18'
+- src:
+    kind: symptom
+    name: 死元组占比持续超过 20%
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 长事务持有旧 xmin 阻止 vacuum 回收
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250318-CBMS-大表死元组累积无法清理.md#判断
+  case: S3-20250318-CBMS-大表死元组累积无法清理
+  valid_from: '2025-03-18'
+- src:
+    kind: rootcause
+    name: 长事务持有旧 xmin 阻止 vacuum 回收
+  rel: handled_by
+  dst:
+    kind: action
+    name: 与批量岗确认后结束长事务,再在低峰窗口手工 VACUUM
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250318-CBMS-大表死元组累积无法清理.md#处置
+  case: S3-20250318-CBMS-大表死元组累积无法清理
+  valid_from: '2025-03-18'
+- src:
+    kind: case
+    name: 批量与联机互锁
+    canonical: case:S1-20250705-CBST-批量与联机互锁
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 锁等待超过 30 秒
+  confidence: 1.0
+  status: accepted
+  source: cases/S1-20250705-CBST-批量与联机互锁.md#现场
+  case: S1-20250705-CBST-批量与联机互锁
+  valid_from: '2025-07-05'
+- src:
+    kind: symptom
+    name: 锁等待超过 30 秒
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 批量与联机以不同顺序更新同一表导致互锁
+  confidence: 1.0
+  status: accepted
+  source: cases/S1-20250705-CBST-批量与联机互锁.md#判断
+  case: S1-20250705-CBST-批量与联机互锁
+  valid_from: '2025-07-05'
+- src:
+    kind: rootcause
+    name: 批量与联机以不同顺序更新同一表导致互锁
+  rel: handled_by
+  dst:
+    kind: action
+    name: 批量作业按主键升序分批更新,与联机顺序一致
+  confidence: 1.0
+  status: accepted
+  source: cases/S1-20250705-CBST-批量与联机互锁.md#处置
+  case: S1-20250705-CBST-批量与联机互锁
+  valid_from: '2025-07-05'
+- src:
+    kind: case
+    name: 死锁频发
+    canonical: case:S2-20250812-CBMS-死锁频发
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 死锁累计数持续上升
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250812-CBMS-死锁频发.md#现场
+  case: S2-20250812-CBMS-死锁频发
+  valid_from: '2025-08-12'
+- src:
+    kind: symptom
+    name: 死锁累计数持续上升
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 两个存储过程以相反顺序更新客户表与额度表
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250812-CBMS-死锁频发.md#判断
+  case: S2-20250812-CBMS-死锁频发
+  valid_from: '2025-08-12'
+- src:
+    kind: rootcause
+    name: 两个存储过程以相反顺序更新客户表与额度表
+  rel: handled_by
+  dst:
+    kind: action
+    name: 统一按 客户表→额度表 的顺序更新(本行 GS-DML-003),不靠应用重试掩盖
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250812-CBMS-死锁频发.md#处置
+  case: S2-20250812-CBMS-死锁频发
+  valid_from: '2025-08-12'
+- src:
+    kind: case
+    name: 空闲事务持锁阻塞
+    canonical: case:S2-20250120-CBST-空闲事务持锁阻塞
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 根阻塞会话处于 idle in transaction
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250120-CBST-空闲事务持锁阻塞.md#现场
+  case: S2-20250120-CBST-空闲事务持锁阻塞
+  valid_from: '2025-01-20'
+- src:
+    kind: symptom
+    name: 根阻塞会话处于 idle in transaction
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 应用连接池归还连接时未提交事务
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250120-CBST-空闲事务持锁阻塞.md#判断
+  case: S2-20250120-CBST-空闲事务持锁阻塞
+  valid_from: '2025-01-20'
+- src:
+    kind: rootcause
+    name: 应用连接池归还连接时未提交事务
+  rel: handled_by
+  dst:
+    kind: action
+    name: 经应用运维平台定位实例并由应用重启连接池,不在数据库侧 kill
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250120-CBST-空闲事务持锁阻塞.md#处置
+  case: S2-20250120-CBST-空闲事务持锁阻塞
+  valid_from: '2025-01-20'
+- src:
+    kind: case
+    name: WALWriteLock等待冲高
+    canonical: case:S1-20250314-CBST-WALWriteLock等待冲高
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: LWLock 等待占 DB time 过高(WALWriteLock)
+  confidence: 1.0
+  status: accepted
+  source: cases/S1-20250314-CBST-WALWriteLock等待冲高.md#现场
+  case: S1-20250314-CBST-WALWriteLock等待冲高
+  valid_from: '2025-03-14'
+- src:
+    kind: symptom
+    name: LWLock 等待占 DB time 过高(WALWriteLock)
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 批量单事务提交超大且 synchronous_commit=on 导致 WAL 刷盘串行化
+  confidence: 1.0
+  status: accepted
+  source: cases/S1-20250314-CBST-WALWriteLock等待冲高.md#判断
+  case: S1-20250314-CBST-WALWriteLock等待冲高
+  valid_from: '2025-03-14'
+- src:
+    kind: rootcause
+    name: 批量单事务提交超大且 synchronous_commit=on 导致 WAL 刷盘串行化
+  rel: handled_by
+  dst:
+    kind: action
+    name: 批量拆成 5000 行/事务,并在批量窗口内经审批把 synchronous_commit 设为 local
+  confidence: 1.0
+  status: accepted
+  source: cases/S1-20250314-CBST-WALWriteLock等待冲高.md#处置
+  case: S1-20250314-CBST-WALWriteLock等待冲高
+  valid_from: '2025-03-14'
+- src:
+    kind: case
+    name: ProcArrayLock等待
+    canonical: case:S2-20250420-CBMS-ProcArrayLock等待
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: LWLock 等待占 DB time 过高(ProcArrayLock)
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250420-CBMS-ProcArrayLock等待.md#现场
+  case: S2-20250420-CBMS-ProcArrayLock等待
+  valid_from: '2025-04-20'
+- src:
+    kind: symptom
+    name: LWLock 等待占 DB time 过高(ProcArrayLock)
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 应用未用连接池导致短连接风暴
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250420-CBMS-ProcArrayLock等待.md#判断
+  case: S2-20250420-CBMS-ProcArrayLock等待
+  valid_from: '2025-04-20'
+- src:
+    kind: rootcause
+    name: 应用未用连接池导致短连接风暴
+  rel: handled_by
+  dst:
+    kind: action
+    name: 应用接入本行统一 druid 连接池参数
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250420-CBMS-ProcArrayLock等待.md#处置
+  case: S2-20250420-CBMS-ProcArrayLock等待
+  valid_from: '2025-04-20'
+- src:
+    kind: case
+    name: CPU占比高源于计划跳变
+    canonical: case:S2-20250908-CBST-CPU占比高源于计划跳变
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: CPU_TIME 占 DB_TIME 超过 80%
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250908-CBST-CPU占比高源于计划跳变.md#现场
+  case: S2-20250908-CBST-CPU占比高源于计划跳变
+  valid_from: '2025-09-08'
+- src:
+    kind: symptom
+    name: CPU_TIME 占 DB_TIME 超过 80%
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 统计信息过期导致执行计划跳变
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250908-CBST-CPU占比高源于计划跳变.md#判断
+  case: S2-20250908-CBST-CPU占比高源于计划跳变
+  valid_from: '2025-09-08'
+- src:
+    kind: rootcause
+    name: 统计信息过期导致执行计划跳变
+  rel: handled_by
+  dst:
+    kind: action
+    name: 先 ANALYZE 涉及的表并核对计划,再评估资源
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250908-CBST-CPU占比高源于计划跳变.md#处置
+  case: S2-20250908-CBST-CPU占比高源于计划跳变
+  valid_from: '2025-09-08'
+- src:
+    kind: case
+    name: 分区表长时间未做analyze
+    canonical: case:S2-20241105-CBMS-分区表长时间未做analyze
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 存储过程执行时间突然变长
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20241105-CBMS-分区表长时间未做analyze.md#现场
+  case: S2-20241105-CBMS-分区表长时间未做analyze
+  valid_from: '2024-11-05'
+- src:
+    kind: symptom
+    name: 存储过程执行时间突然变长
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: exchange 分区后统计信息未更新导致计划跳变
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20241105-CBMS-分区表长时间未做analyze.md#判断
+  case: S2-20241105-CBMS-分区表长时间未做analyze
+  valid_from: '2024-11-05'
+- src:
+    kind: rootcause
+    name: exchange 分区后统计信息未更新导致计划跳变
+  rel: handled_by
+  dst:
+    kind: action
+    name: exchange 后在应用代码里显式 ANALYZE 分区表(本行不依赖 autoanalyze)
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20241105-CBMS-分区表长时间未做analyze.md#处置
+  case: S2-20241105-CBMS-分区表长时间未做analyze
+  valid_from: '2024-11-05'
+- src:
+    kind: case
+    name: 临时表统计信息缺失
+    canonical: case:S3-20250505-CBMS-临时表统计信息缺失
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 存储过程执行时间突然变长
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250505-CBMS-临时表统计信息缺失.md#现场
+  case: S3-20250505-CBMS-临时表统计信息缺失
+  valid_from: '2025-05-05'
+- src:
+    kind: symptom
+    name: 存储过程执行时间突然变长
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 存储过程内临时表无统计信息
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250505-CBMS-临时表统计信息缺失.md#判断
+  case: S3-20250505-CBMS-临时表统计信息缺失
+  valid_from: '2025-05-05'
+- src:
+    kind: rootcause
+    name: 存储过程内临时表无统计信息
+  rel: handled_by
+  dst:
+    kind: action
+    name: 存储过程里灌完临时表后立即 ANALYZE 临时表
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250505-CBMS-临时表统计信息缺失.md#处置
+  case: S3-20250505-CBMS-临时表统计信息缺失
+  valid_from: '2025-05-05'
+- src:
+    kind: case
+    name: 大表autoanalyze未触发
+    canonical: case:S3-20250717-CBST-大表autoanalyze未触发
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 大表统计信息长期未更新
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250717-CBST-大表autoanalyze未触发.md#现场
+  case: S3-20250717-CBST-大表autoanalyze未触发
+  valid_from: '2025-07-17'
+- src:
+    kind: symptom
+    name: 大表统计信息长期未更新
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 大表更新比例未达 autovacuum_analyze_scale_factor
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250717-CBST-大表autoanalyze未触发.md#判断
+  case: S3-20250717-CBST-大表autoanalyze未触发
+  valid_from: '2025-07-17'
+- src:
+    kind: rootcause
+    name: 大表更新比例未达 autovacuum_analyze_scale_factor
+  rel: handled_by
+  dst:
+    kind: action
+    name: 对超过 1 亿行的表表级调小 autovacuum_analyze_scale_factor
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250717-CBST-大表autoanalyze未触发.md#处置
+  case: S3-20250717-CBST-大表autoanalyze未触发
+  valid_from: '2025-07-17'
+- src:
+    kind: case
+    name: 未使用索引清理
+    canonical: case:S3-20250210-CBST-未使用索引清理
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 索引在统计窗口内 idx_scan 为 0
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250210-CBST-未使用索引清理.md#现场
+  case: S3-20250210-CBST-未使用索引清理
+  valid_from: '2025-02-10'
+- src:
+    kind: symptom
+    name: 索引在统计窗口内 idx_scan 为 0
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 历史报表索引残留
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250210-CBST-未使用索引清理.md#判断
+  case: S3-20250210-CBST-未使用索引清理
+  valid_from: '2025-02-10'
+- src:
+    kind: rootcause
+    name: 历史报表索引残留
+  rel: handled_by
+  dst:
+    kind: action
+    name: 登记观察 30 天并确认月末批量后提变更单删除,不直接 DROP
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250210-CBST-未使用索引清理.md#处置
+  case: S3-20250210-CBST-未使用索引清理
+  valid_from: '2025-02-10'
+- src:
+    kind: case
+    name: 重复索引写放大
+    canonical: case:S2-20250630-CBMS-重复索引写放大
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 批量 insert 变慢
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250630-CBMS-重复索引写放大.md#现场
+  case: S2-20250630-CBMS-重复索引写放大
+  valid_from: '2025-06-30'
+- src:
+    kind: symptom
+    name: 批量 insert 变慢
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 同列重复索引导致写放大
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250630-CBMS-重复索引写放大.md#判断
+  case: S2-20250630-CBMS-重复索引写放大
+  valid_from: '2025-06-30'
+- src:
+    kind: rootcause
+    name: 同列重复索引导致写放大
+  rel: handled_by
+  dst:
+    kind: action
+    name: 保留一个,另一个按 GS-IDX-005 流程观察后删除
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250630-CBMS-重复索引写放大.md#处置
+  case: S2-20250630-CBMS-重复索引写放大
+  valid_from: '2025-06-30'
+- src:
+    kind: case
+    name: 索引失效
+    canonical: case:S2-20250822-CBST-索引失效
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 索引处于 invalid 状态
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250822-CBST-索引失效.md#现场
+  case: S2-20250822-CBST-索引失效
+  valid_from: '2025-08-22'
+- src:
+    kind: symptom
+    name: 索引处于 invalid 状态
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 并发建索引中途失败
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250822-CBST-索引失效.md#判断
+  case: S2-20250822-CBST-索引失效
+  valid_from: '2025-08-22'
+- src:
+    kind: rootcause
+    name: 并发建索引中途失败
+  rel: handled_by
+  dst:
+    kind: action
+    name: 在变更窗口 REINDEX 并复核
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250822-CBST-索引失效.md#处置
+  case: S2-20250822-CBST-索引失效
+  valid_from: '2025-08-22'
+- src:
+    kind: case
+    name: 缓存命中率低
+    canonical: case:S2-20250405-CBST-缓存命中率低
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 缓存命中率低于 98%
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250405-CBST-缓存命中率低.md#现场
+  case: S2-20250405-CBST-缓存命中率低
+  valid_from: '2025-04-05'
+- src:
+    kind: symptom
+    name: 缓存命中率低于 98%
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 报表全表扫描冲刷 shared_buffers
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250405-CBST-缓存命中率低.md#判断
+  case: S2-20250405-CBST-缓存命中率低
+  valid_from: '2025-04-05'
+- src:
+    kind: rootcause
+    name: 报表全表扫描冲刷 shared_buffers
+  rel: handled_by
+  dst:
+    kind: action
+    name: 把报表 SQL 迁到只读实例,不调 shared_buffers
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250405-CBST-缓存命中率低.md#处置
+  case: S2-20250405-CBST-缓存命中率低
+  valid_from: '2025-04-05'
+- src:
+    kind: case
+    name: 排序下盘
+    canonical: case:S3-20250515-CBMS-排序下盘
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 报表 SQL 排序下盘
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250515-CBMS-排序下盘.md#现场
+  case: S3-20250515-CBMS-排序下盘
+  valid_from: '2025-05-15'
+- src:
+    kind: symptom
+    name: 报表 SQL 排序下盘
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 报表会话 work_mem 不足
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250515-CBMS-排序下盘.md#判断
+  case: S3-20250515-CBMS-排序下盘
+  valid_from: '2025-05-15'
+- src:
+    kind: rootcause
+    name: 报表会话 work_mem 不足
+  rel: handled_by
+  dst:
+    kind: action
+    name: 由应用在报表会话级 SET work_mem,不改全局
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250515-CBMS-排序下盘.md#处置
+  case: S3-20250515-CBMS-排序下盘
+  valid_from: '2025-05-15'
+- src:
+    kind: case
+    name: 连接数逼近上限
+    canonical: case:S2-20250725-CBST-连接数逼近上限
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 连接数超过 max_connections 的 80%
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250725-CBST-连接数逼近上限.md#现场
+  case: S2-20250725-CBST-连接数逼近上限
+  valid_from: '2025-07-25'
+- src:
+    kind: symptom
+    name: 连接数超过 max_connections 的 80%
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 应用连接池 maxActive 过大
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250725-CBST-连接数逼近上限.md#判断
+  case: S2-20250725-CBST-连接数逼近上限
+  valid_from: '2025-07-25'
+- src:
+    kind: rootcause
+    name: 应用连接池 maxActive 过大
+  rel: handled_by
+  dst:
+    kind: action
+    name: 按 GS-CONN-001 收敛应用连接池,不调 max_connections
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250725-CBST-连接数逼近上限.md#处置
+  case: S2-20250725-CBST-连接数逼近上限
+  valid_from: '2025-07-25'
+- src:
+    kind: case
+    name: 分区裁剪失效
+    canonical: case:S2-20250115-CBMS-分区裁剪失效
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 分区表全分区扫描
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250115-CBMS-分区裁剪失效.md#现场
+  case: S2-20250115-CBMS-分区裁剪失效
+  valid_from: '2025-01-15'
+- src:
+    kind: symptom
+    name: 分区表全分区扫描
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: where 条件对分区键做了函数导致裁剪失效
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250115-CBMS-分区裁剪失效.md#判断
+  case: S2-20250115-CBMS-分区裁剪失效
+  valid_from: '2025-01-15'
+- src:
+    kind: rootcause
+    name: where 条件对分区键做了函数导致裁剪失效
+  rel: handled_by
+  dst:
+    kind: action
+    name: 改写为分区键范围条件(GS-DML-006)
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250115-CBMS-分区裁剪失效.md#处置
+  case: S2-20250115-CBMS-分区裁剪失效
+  valid_from: '2025-01-15'
+- src:
+    kind: case
+    name: 分区过多DDL慢
+    canonical: case:S3-20250601-CBMS-分区过多DDL慢
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 分区表 DDL 执行很慢
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250601-CBMS-分区过多DDL慢.md#现场
+  case: S3-20250601-CBMS-分区过多DDL慢
+  valid_from: '2025-06-01'
+- src:
+    kind: symptom
+    name: 分区表 DDL 执行很慢
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 日分区三年未归档导致分区数过多
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250601-CBMS-分区过多DDL慢.md#判断
+  case: S3-20250601-CBMS-分区过多DDL慢
+  valid_from: '2025-06-01'
+- src:
+    kind: rootcause
+    name: 日分区三年未归档导致分区数过多
+  rel: handled_by
+  dst:
+    kind: action
+    name: 按本行归档策略合并为季度分区
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250601-CBMS-分区过多DDL慢.md#处置
+  case: S3-20250601-CBMS-分区过多DDL慢
+  valid_from: '2025-06-01'
+- src:
+    kind: case
+    name: exchange分区锁等待
+    canonical: case:S2-20250915-CBMS-exchange分区锁等待
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 锁等待超过 30 秒
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250915-CBMS-exchange分区锁等待.md#现场
+  case: S2-20250915-CBMS-exchange分区锁等待
+  valid_from: '2025-09-15'
+- src:
+    kind: symptom
+    name: 锁等待超过 30 秒
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: exchange partition 与查询会话争锁
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250915-CBMS-exchange分区锁等待.md#判断
+  case: S2-20250915-CBMS-exchange分区锁等待
+  valid_from: '2025-09-15'
+- src:
+    kind: rootcause
+    name: exchange partition 与查询会话争锁
+  rel: handled_by
+  dst:
+    kind: action
+    name: exchange 只在批量窗口执行
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250915-CBMS-exchange分区锁等待.md#处置
+  case: S2-20250915-CBMS-exchange分区锁等待
+  valid_from: '2025-09-15'
+- src:
+    kind: case
+    name: 存过循环单条提交慢
+    canonical: case:S2-20250303-CBST-存过循环单条提交慢
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 日终存过执行超时
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250303-CBST-存过循环单条提交慢.md#现场
+  case: S2-20250303-CBST-存过循环单条提交慢
+  valid_from: '2025-03-03'
+- src:
+    kind: symptom
+    name: 日终存过执行超时
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 循环内逐条 commit
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250303-CBST-存过循环单条提交慢.md#判断
+  case: S2-20250303-CBST-存过循环单条提交慢
+  valid_from: '2025-03-03'
+- src:
+    kind: rootcause
+    name: 循环内逐条 commit
+  rel: handled_by
+  dst:
+    kind: action
+    name: 按 GS-PROC-001 改为每 5000 行批量提交
+  confidence: 1.0
+  status: accepted
+  source: cases/S2-20250303-CBST-存过循环单条提交慢.md#处置
+  case: S2-20250303-CBST-存过循环单条提交慢
+  valid_from: '2025-03-03'
+- src:
+    kind: case
+    name: 存过动态SQL硬解析
+    canonical: case:S3-20250410-CBMS-存过动态SQL硬解析
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 解析时间占比高
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250410-CBMS-存过动态SQL硬解析.md#现场
+  case: S3-20250410-CBMS-存过动态SQL硬解析
+  valid_from: '2025-04-10'
+- src:
+    kind: symptom
+    name: 解析时间占比高
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 动态拼接 SQL 无绑定变量
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250410-CBMS-存过动态SQL硬解析.md#判断
+  case: S3-20250410-CBMS-存过动态SQL硬解析
+  valid_from: '2025-04-10'
+- src:
+    kind: rootcause
+    name: 动态拼接 SQL 无绑定变量
+  rel: handled_by
+  dst:
+    kind: action
+    name: 改用绑定变量(GS-PROC-001)
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250410-CBMS-存过动态SQL硬解析.md#处置
+  case: S3-20250410-CBMS-存过动态SQL硬解析
+  valid_from: '2025-04-10'
+- src:
+    kind: case
+    name: 存过异常未回滚
+    canonical: case:S2-20250820-CBST-存过异常未回滚
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 批量调整后数据不一致
+  confidence: 0.6
+  status: accepted
+  source: cases/S2-20250820-CBST-存过异常未回滚.md#现场
+  case: S2-20250820-CBST-存过异常未回滚
+  valid_from: '2025-08-20'
+- src:
+    kind: symptom
+    name: 批量调整后数据不一致
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 存过 exception 分支未回滚
+  confidence: 0.6
+  status: accepted
+  source: cases/S2-20250820-CBST-存过异常未回滚.md#判断
+  case: S2-20250820-CBST-存过异常未回滚
+  valid_from: '2025-08-20'
+- src:
+    kind: rootcause
+    name: 存过 exception 分支未回滚
+  rel: handled_by
+  dst:
+    kind: action
+    name: 按本行存过模板补 exception 处理
+  confidence: 0.6
+  status: accepted
+  source: cases/S2-20250820-CBST-存过异常未回滚.md#处置
+  case: S2-20250820-CBST-存过异常未回滚
+  valid_from: '2025-08-20'
+- src:
+    kind: case
+    name: 偶现update慢-网络抖动
+    canonical: case:S3-20250505-CBST-偶现update慢-网络抖动
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 单条 update 偶发秒级
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250505-CBST-偶现update慢-网络抖动.md#现场
+  case: S3-20250505-CBST-偶现update慢-网络抖动
+  valid_from: '2025-05-05'
+- src:
+    kind: symptom
+    name: 单条 update 偶发秒级
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 应用到数据库网络抖动
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250505-CBST-偶现update慢-网络抖动.md#判断
+  case: S3-20250505-CBST-偶现update慢-网络抖动
+  valid_from: '2025-05-05'
+- src:
+    kind: rootcause
+    name: 应用到数据库网络抖动
+  rel: handled_by
+  dst:
+    kind: action
+    name: 网络侧排查交换机端口
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250505-CBST-偶现update慢-网络抖动.md#处置
+  case: S3-20250505-CBST-偶现update慢-网络抖动
+  valid_from: '2025-05-05'
+- src:
+    kind: case
+    name: 缓存命中率低-冷启动
+    canonical: case:S3-20250606-CBMS-缓存命中率低-冷启动
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 缓存命中率低于 98%
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250606-CBMS-缓存命中率低-冷启动.md#现场
+  case: S3-20250606-CBMS-缓存命中率低-冷启动
+  valid_from: '2025-06-06'
+- src:
+    kind: symptom
+    name: 缓存命中率低于 98%
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 实例刚重启缓存未热
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250606-CBMS-缓存命中率低-冷启动.md#判断
+  case: S3-20250606-CBMS-缓存命中率低-冷启动
+  valid_from: '2025-06-06'
+- src:
+    kind: rootcause
+    name: 实例刚重启缓存未热
+  rel: handled_by
+  dst:
+    kind: action
+    name: 观察 30 分钟不处理
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250606-CBMS-缓存命中率低-冷启动.md#处置
+  case: S3-20250606-CBMS-缓存命中率低-冷启动
+  valid_from: '2025-06-06'
+- src:
+    kind: case
+    name: 索引未使用-季度报表
+    canonical: case:S3-20250707-CBST-索引未使用-季度报表
+  rel: exhibits
+  dst:
+    kind: symptom
+    name: 索引在统计窗口内 idx_scan 为 0
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250707-CBST-索引未使用-季度报表.md#现场
+  case: S3-20250707-CBST-索引未使用-季度报表
+  valid_from: '2025-07-07'
+- src:
+    kind: symptom
+    name: 索引在统计窗口内 idx_scan 为 0
+  rel: caused_by
+  dst:
+    kind: rootcause
+    name: 季度报表索引平时不用
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250707-CBST-索引未使用-季度报表.md#判断
+  case: S3-20250707-CBST-索引未使用-季度报表
+  valid_from: '2025-07-07'
+- src:
+    kind: rootcause
+    name: 季度报表索引平时不用
+  rel: handled_by
+  dst:
+    kind: action
+    name: 保留,标注用途
+  confidence: 1.0
+  status: accepted
+  source: cases/S3-20250707-CBST-索引未使用-季度报表.md#处置
+  case: S3-20250707-CBST-索引未使用-季度报表
+  valid_from: '2025-07-07'

@@ -1,0 +1,38 @@
+# 窗口内物理读写最多的文件。
+#
+# **2026-10-18 修:原来的 `FROM e JOIN b USING (...)` 内连接会丢掉窗口内**新出现**的
+# 文件。** 文件在起始快照里不存在、只在结束快照里有(窗口中途新建的表/索引,
+# 或该文件此前从未产生过 IO 因而不在那一刻的视图里),内连接直接把它整行丢掉。
+#
+# og5 实测(窗口 2981→2987):结束快照有 1468 个文件键,其中 **1269 个(86%)在起始
+# 快照里没有** —— 内连接只留下 185 行,物理读少报 62%(302,912 vs 793,888)、
+# 物理写少报 58%(505,819 vs 1,209,857)。也就是说 File IO 这一维此前只看到了
+# 不到四成的 IO,而报告里看不出任何异常。
+#
+# 这与 wdr.top_sql 是同一个 bug(那边是窗口内新出现的 SQL 被丢掉,DB time 少报
+# 8800 倍)。新出现的文件在起始端按 0 计是**正确**的:它在窗口之前不存在,
+# 它的全部 IO 都发生在这个窗口里。
+name: wdr.file_io
+description: 窗口内物理读写最多的文件（snap_summary_file_iostat）
+sql: |
+  WITH b AS (SELECT snap_filenum, snap_dbid, snap_spcid, snap_phyrds AS reads, snap_phywrts AS writes
+               FROM snapshot.snap_summary_file_iostat WHERE snapshot_id={{b}}),
+       e AS (SELECT snap_filenum, snap_dbid, snap_spcid, snap_phyrds AS reads, snap_phywrts AS writes
+               FROM snapshot.snap_summary_file_iostat WHERE snapshot_id={{e}})
+  SELECT ('db'||e.snap_dbid||'/spc'||e.snap_spcid||'/f'||e.snap_filenum) AS filename,
+         (e.reads  - COALESCE(b.reads,  0)) AS reads,
+         (e.writes - COALESCE(b.writes, 0)) AS writes
+  FROM e LEFT JOIN b USING (snap_filenum, snap_dbid, snap_spcid)
+  WHERE (e.reads  - COALESCE(b.reads,  0)) > 0
+     OR (e.writes - COALESCE(b.writes, 0)) > 0
+  ORDER BY reads DESC LIMIT {{top}};
+params:
+  - key: b
+    type: INTEGER
+    description: 起始快照 ID
+  - key: e
+    type: INTEGER
+    description: 结束快照 ID
+  - key: top
+    type: INTEGER
+    description: 返回条数上限

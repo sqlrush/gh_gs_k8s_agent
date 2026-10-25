@@ -1,0 +1,10 @@
+# 本机验证用的知识库管理员:scripts/k8s/verify-cluster.sh 与 e2e-kb-init.sh 用 u2001 测导入容器。
+# 只在 k8s/local 里;base(交付给客户的)默认是空名单。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-roles
+  namespace: gaussdb-agent
+data:
+  kb-admins: |
+    u2001

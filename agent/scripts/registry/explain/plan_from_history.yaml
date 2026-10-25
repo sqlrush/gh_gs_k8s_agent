@@ -1,0 +1,27 @@
+# 按 unique_query_id 取 SQL 历史里**最近一次真实执行的计划**(statement_history.query_plan)。
+#
+# 为什么要这条:L2 跟踪下 statement_history.query 是带占位符的归一化文本,拿去 EXPLAIN 不了;
+# 但同一行的 query_plan 是当时执行的真实计划(带 actual time / rows)。2026-10-21 测试:
+# sql_id 3091214944 在 og5 有 34 次执行、34 条都有计划,而 explain 只读 query 列,
+# 遇到占位符就停下,WDR 附录写「执行计划:本次未取到」。
+#
+# 只取有计划的行(慢 SQL 或开了全量跟踪才记计划);取最近一次,start_time 一并返回,
+# 报告里要标明「这是哪次执行的计划」。
+name: explain.plan_from_history
+description: 按 unique_query_id 从 SQL 历史里取最近一次真实执行计划(含执行时间、耗时、返回行数)
+readonly: true
+sql: |
+  SELECT schema_name,
+         to_char(start_time, 'YYYY-MM-DD HH24:MI:SS') AS start_time,
+         round(db_time / 1000.0, 1) AS db_time_ms,
+         n_returned_rows,
+         query_plan
+    FROM dbe_perf.statement_history
+   WHERE unique_query_id = {{sid}}
+     AND query_plan IS NOT NULL AND query_plan <> ''
+   ORDER BY start_time DESC
+   LIMIT 1;
+params:
+  - key: sid
+    type: INTEGER
+    description: unique_query_id(整数,可能为负)

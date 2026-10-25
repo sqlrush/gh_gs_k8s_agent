@@ -1,0 +1,44 @@
+# gaussdb-agent-gateway:接入网关。全体共用,2 副本,常驻。
+#
+# 它管别人的生死,自己不按人分。做四件事:
+#   ① 认请求头里的工号凭什么可信(共享密钥 / 来源网段)
+#   ② 按工号找 Pod,没有就建(等就绪)
+#   ③ 反向代理到 runtime-<工号>:4096,注入 Basic 口令,**转发字节时记活动**
+#   ④ 后台线程按最后活动时间回收闲置 Pod
+#
+# **不装 kubectl。** 走 k8s REST API + Pod 自己的 ServiceAccount 凭据(gateway/kube.py),
+# 标准库 urllib 就够。镜像小、攻击面小、离线安装少一个二进制要对架构。
+#
+# 依赖只有 PyYAML(解析 Pod 模板)。不引 Web 框架:并发量是「一个行几十个 DBA」,
+# stdlib 的 ThreadingHTTPServer 够用,而银行离线安装最怕多一个包。
+FROM python:3.12-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir "PyYAML>=6" \
+    && pip uninstall -y pip setuptools 2>/dev/null || true \
+    && rm -rf /usr/local/lib/python3.12/ensurepip/_bundled
+
+# 非 root 运行;网关不需要写任何东西,根文件系统可以只读(见 k8s/base/gateway.yaml)
+RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin gateway
+
+COPY gateway/ /opt/gateway/gateway/
+# Pod 模板:网关按工号渲染它们。与 k8s/templates/ 同一份,构建时拷进来。
+COPY k8s/templates/ /opt/gateway/templates/
+RUN chown -R gateway:gateway /opt/gateway
+
+# image.source 让 GHCR 把镜像关联到仓库,关联后镜像继承仓库的访问权限 ——
+# 授权就变成「把人加成仓库只读协作者」,不用另发令牌。
+LABEL org.opencontainers.image.title="gaussdb-agent-gateway" \
+      org.opencontainers.image.source="https://github.com/sqlrush/gh_agent_k8s" \
+      org.opencontainers.image.description="接入网关:认身份、按工号建/收 Pod、反向代理"
+
+USER gateway
+WORKDIR /opt/gateway
+ENV GATEWAY_TEMPLATES=/opt/gateway/templates PYTHONPATH=/opt/gateway
+EXPOSE 8080
+ENTRYPOINT ["python3", "-m", "gateway"]

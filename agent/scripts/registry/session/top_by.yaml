@@ -1,0 +1,26 @@
+# 占位符落在 ORDER BY 位的样例 —— 注册时会被标 IDENT_POSITION。
+#
+# 保留它是刻意的：
+#   1. 标识符位的占位符在客户的文本替换中间件上能正常跑，本地不能拒绝它，
+#      拒绝就是本地比客户更严，会拒掉一条客户天天在跑的脚本；
+#   2. 它是"类型校验对标识符位无效"的活样本 —— sort_col 声明为 String，
+#      但 String 没有格式约束，注入面真实存在；
+#   3. 用绑定变量实现的话，这条脚本会**静默失效**（按常量排序 = 不排序），
+#      正是我们不用绑定变量的原因。
+#
+# 注册报告会把它列出来。这份清单本身对客户有价值：它精确回答"现有脚本库里
+# 哪些脚本的参数可能被用来注入"。
+name: session.top_by
+description: 按指定列排序列出会话（占位符在 ORDER BY 位）
+sql: |
+  select datname, usename, state, backend_start
+  from pg_stat_activity
+  order by {{sort_col}} desc
+  limit {{limit}};
+params:
+  - key: sort_col
+    type: String
+    description: 排序列名。注意：标识符位无法做类型校验，取值须来自受控枚举
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

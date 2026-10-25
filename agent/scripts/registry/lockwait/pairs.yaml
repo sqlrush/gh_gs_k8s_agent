@@ -1,0 +1,57 @@
+# 锁堵塞的**成对明细** —— holder 与 waiter 及双方的锁模式。
+#
+# 为什么不用 pg_thread_wait_status 一个视图搞定：它给的 lockmode 是
+# **waiter 请求的**模式，holder 持有的模式不在里面。而「这一对属于 8 级矩阵
+# 里的哪种互斥」需要两边的模式。所以从 pg_locks 自连接：同一个 locktag 上
+# granted=false 的是等待者、granted=true 的是持有者。
+#
+# 实测（og5，造了一次真实堵塞）：
+#   waiter AccessShareLock ← holder AccessExclusiveLock，locktag 3985:b2123:0:0:0:0
+#   等待时长 4.0 秒，与实际让它等的秒数对得上
+#
+# pid 在 openGauss 里是线程号（形如 281452581017248），sessionid 才是稳定标识，
+# 两个都返回：kill 语句要用 pid，报告里给人看的用 sessionid。
+#
+# waiter_wait_s / holder_xact_age_s **故意不 COALESCE 成 0**：两者都靠
+# LEFT JOIN pg_stat_activity 算，而 holder 是被遗弃的预备/2PC 事务时
+# （仓库里 health.prepared_xacts 这条脚本存在的原因，就是这个场景在本环境
+# 真实出现过）没有活着的 backend、pg_stat_activity 里根本没有那一行，join
+# 不上就是 NULL——真实等待时长「未知，且可能极大」。把它填成 0 会让这一行
+# 在 ORDER BY waiter_wait_s DESC LIMIT 之下排到最后、掉出返回页，而这恰恰
+# 是这个 skill 最该报出来的那一行。别把 COALESCE(...,0) 加回这两列。
+name: lockwait.pairs
+description: 锁堵塞的持有者/等待者成对明细（含双方锁模式、锁对象、等待时长、双方 SQL）
+readonly: true
+sql: |
+  SELECT w.pid                         AS waiter_pid,
+         COALESCE(w.sessionid, 0)      AS waiter_sessionid,
+         w.mode                        AS waiter_mode,
+         h.pid                         AS holder_pid,
+         COALESCE(h.sessionid, 0)      AS holder_sessionid,
+         h.mode                        AS holder_mode,
+         w.locktype                    AS locktype,
+         COALESCE(n.nspname || '.' || c.relname, '')  AS lock_object,
+         COALESCE(w.locktag, '')       AS locktag,
+         round(EXTRACT(EPOCH FROM (now() - wa.query_start))::numeric, 1) AS waiter_wait_s,
+         COALESCE(wa.usename, '')      AS waiter_user,
+         COALESCE(wa.application_name, '') AS waiter_app,
+         COALESCE(substr(wa.query, 1, 300), '')       AS waiter_query,
+         COALESCE(ha.state, '')        AS holder_state,
+         COALESCE(ha.usename, '')      AS holder_user,
+         COALESCE(ha.application_name, '') AS holder_app,
+         round(EXTRACT(EPOCH FROM (now() - ha.xact_start))::numeric, 1) AS holder_xact_age_s,
+         COALESCE(substr(ha.query, 1, 300), '')       AS holder_query
+    FROM pg_locks w
+    JOIN pg_locks h
+      ON h.locktag = w.locktag AND h.granted AND h.pid <> w.pid
+    LEFT JOIN pg_class c     ON c.oid = w.relation
+    LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+    LEFT JOIN pg_stat_activity wa ON wa.pid = w.pid
+    LEFT JOIN pg_stat_activity ha ON ha.pid = h.pid
+   WHERE w.granted = false
+   ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
+   LIMIT {{limit}};
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限
