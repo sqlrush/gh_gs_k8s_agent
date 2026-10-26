@@ -150,7 +150,7 @@ git log --oneline -1
 | `k8s/templates/` | 网关给每个用户建容器用的模板（构建网关镜像时拷进去） |
 | `k8s/tools/` | 现场工具：`runtime-doctor.sh`（诊断/修复）、`sso-sim.py`（模拟 SSO）、`render-pool.py`（渲染固定池化的池子） |
 | `scripts/` | 构建脚本 `build-images.sh`、离线打包 `package-images.sh`、大盘样例数据 `dash-samples.py` |
-| `docs/` | 本手册；《前端对接接口说明》与 `docs/api/`（接口定义、报告字段契约） |
+| `docs/` | 本手册；《前端对接接口说明》与 `docs/api/`（接口定义、报告字段契约）；《代码结构说明》（每个文件的作用） |
 
 定一个版本号，后面构建、推送、部署都用它：
 

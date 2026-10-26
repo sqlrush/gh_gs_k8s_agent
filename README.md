@@ -9,6 +9,7 @@ GaussDB 数据库智能体的**后端**：把 opencode 与 GaussDB / openGauss �
 |---|---|---|
 | [docs/从源码构建到K8s运行-完整手册.md](docs/从源码构建到K8s运行-完整手册.md) | 实施 / 运维 / 开发 | 从拉代码、构建 3 个镜像、推仓库，到部署进 K8s、开通工号、对话里跑通健康检查；可选的固定池化。每步带实测输出 |
 | [docs/前端对接接口说明.md](docs/前端对接接口说明.md) | 前端 | 接入后端的全部接口（v1）：身份与网关行为、对话接口与事件流、报告接口、大盘链接格式、联调清单 |
+| [docs/代码结构说明.md](docs/代码结构说明.md) | 后端 / 前端 / 双方的编码智能体 | 逐个目录说明每个文件的作用、一个请求在代码里怎么走、改什么去哪里（有守卫测试，加删文件要同步） |
 | [docs/api/](docs/api/) | 前端 / 后端 | 机器可读的接口定义：`opencode-1.18.27-openapi.json`（对话接口全集）、`reports-contract.json`（报告字段契约，后端单测逐条核对） |
 
 ## 组成
@@ -29,7 +30,7 @@ docker/      Dockerfile(base → runtime / kb-import)、Dockerfile.gateway、容
 gateway/     接入网关
 k8s/         base/ 部署清单;templates/ 网关按工号建 Pod 的模板;tools/ 现场工具(runtime-doctor、sso-sim、render-pool);local/ 本地测试集群覆盖
 scripts/     构建、离线打包、大盘样例数据(dash-samples.py)、测试集群与端到端脚本
-docs/        构建部署手册、前端对接接口说明、api/ 机器可读的接口定义
+docs/        构建部署手册、前端对接接口说明、代码结构说明、api/ 机器可读的接口定义
 ```
 
 前端代码约定放在 `frontend/`（由前端方建立与维护）。
