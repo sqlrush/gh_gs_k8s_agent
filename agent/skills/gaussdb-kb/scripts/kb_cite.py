@@ -9,6 +9,9 @@
 
 2026-10-24 八类知识:手册 RB- / 缺陷 KD- / 基线 BL- / 产品文档 PD- / Wiki WK- / 画像 EP- 也核对;
 改过类型的旧 ID 记在新条目的 aliases 里,核对结果写「已改为 <新 ID>」。
+
+2026-10-26 回答模板化:引用写成「上色的句子(引用自 xxx 库 编号)」。编号照旧逐个核对;另核对括号里的库名
+与编号的类型对不对得上(写成「引用自贵行规范库 RB-LCK-001」就是张冠李戴,读者会以为是规范)——只提示,不改退出码。
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ from dataclasses import asdict, dataclass
 from typing import Dict, List, Set, Tuple
 
 from common.kb import cases as kbcases
+from common.kb import citestyle
 
 CLAUSE_RE = re.compile(r"GS-[A-Z]{2,4}-\d{3}")
 CASE_RE = re.compile(r"S[1-4]-\d{8}-[A-Za-z0-9_]+-[^\s,，;;:：、。!?！?()（）\[\]【】〔〕《》〈〉\"'`<>*]*")
@@ -29,6 +33,8 @@ TYPED_RE = re.compile(r"(?<![A-Za-z0-9_-])(?:WK-\d{4}|PD-[A-Z][A-Z0-9]{1,9}-\d{5
                       r"|BL-[A-Z0-9_]+-[A-Z0-9_]+|EP-[A-Z0-9_]+)(?![A-Za-z0-9_])")
 
 STATUS_MARK = {"存在": "✓", "前缀匹配": "✓", "已废止": "⚠", "不唯一": "⚠", "未找到": "✗"}
+_LIB_RE = re.compile(r"[(（]\s*引用自\s*(%s)\s+([A-Z][^\s,，;;:：、。)）]*)" % "|".join(
+    re.escape(n) for n in sorted(citestyle.LIBRARY_NAMES, key=len, reverse=True)))
 
 
 class CiteCmdError(Exception):
@@ -58,9 +64,23 @@ def extract_ids(text: str) -> List[Tuple[str, str]]:
     return out
 
 
+def _rules_api():
+    """条款文件的读取与 status 判定。两个仓库共用这一份 kb_cite,而函数放的地方不同:
+    容器线(gh_agent_k8s)在 common/kb/rulesfile.py,gh_skill 在同目录 kb.py。
+
+    2026-10-26 测试环境:WDR 渲染时核对引用编号(skills/gaussdb-wdr/scripts/kbrefs.py)走到这里,
+    `import kb` 拿到的是容器线查询侧的 kb.py —— 那一份没有 load_rule_file,渲染直接崩了。先找 rulesfile。
+    """
+    try:
+        from common.kb import rulesfile as api        # 容器线
+    except ImportError:
+        import kb as api                              # gh_skill:同目录 kb.py
+    return api
+
+
 def known_ids(kb: pathlib.Path) -> Tuple[List[str], Set[str], Set[str]]:
     """(案例 ID 列表, 生效条款 ID, 已废止条款 ID)——全部来自文件。"""
-    import kb as kbmain              # 同目录 kb.py:条款文件读取与 status 判定
+    kbmain = _rules_api()
     cases, _ = kbcases.load_cases(kb)
     case_ids = sorted(c.id for c in cases)
     active: Set[str] = set()
@@ -131,6 +151,23 @@ def check(text: str, kb: pathlib.Path) -> List[Cite]:
     return out
 
 
+def library_mismatches(text: str) -> List[Tuple[str, str, str]]:
+    """括号里写的库名与编号类型对不上的:(写的库名, 编号, 应为的库名)。认不出编号类型的不报。"""
+    out: List[Tuple[str, str, str]] = []
+    for m in _LIB_RE.finditer(text):
+        lib, tok = m.group(1), _ELLIPSIS_RE.sub("", m.group(2))
+        found = citestyle.library_for(tok)
+        if found is not None and found[0] != lib:
+            out.append((lib, tok, found[0]))
+    return out
+
+
+def render_mismatches(items: List[Tuple[str, str, str]]) -> str:
+    if not items:
+        return ""
+    return "\n".join(["库名核对 :"] + ["  ⚠ 「引用自%s %s」—— 这个编号属于%s" % it for it in items])
+
+
 def render(cites: List[Cite]) -> str:
     if not cites:
         return "引用核对 : 文本里没有案例 ID / 条款 ID(也没有手册 / 缺陷 / 基线 / 产品文档 / Wiki / 画像的 ID)"
@@ -168,10 +205,13 @@ def cmd_cite_check(args: argparse.Namespace) -> int:
     if not text.strip():
         raise CiteCmdError("没有可核对的文本(--text / --file / stdin)")
     cites = check(text, kb)
+    mism = library_mismatches(text)
     if args.json:
         print(json.dumps([asdict(c) for c in cites], ensure_ascii=False, indent=2))
     else:
         print(render(cites))
+        if mism:
+            print(render_mismatches(mism))
     return 2 if any(c.status == "未找到" for c in cites) else 0
 
 

@@ -12,7 +12,7 @@ _SCRIPTS = _ROOT / "skills" / "gaussdb-wdr" / "scripts"
 
 # wdr 与 health 等 skill 的模块同名不同内容:照 test_wdr_units.py 的做法先清缓存、再把 wdr 的目录放最前面
 for _m in ("model", "thresholds", "util", "collectors", "report",
-           "native", "snaps", "interp", "recheck", "finalreport", "ansi"):
+           "native", "snaps", "interp", "recheck", "finalreport", "kbrefs", "appendix", "mdreport", "render", "ansi"):
     sys.modules.pop(_m, None)
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_ROOT))

@@ -30,7 +30,7 @@ def rdir(monkeypatch, tmp_path):
 
 _HEALTH_MODS = ("model", "thresholds", "util", "collectors", "report", "health", "aggregate", "render")
 _WDR_MODS = ("model", "thresholds", "util", "collectors", "report", "native", "snaps",
-             "interp", "recheck", "finalreport", "ansi", "wdr", "render")
+             "interp", "recheck", "finalreport", "kbrefs", "appendix", "mdreport", "ansi", "wdr", "render")
 
 
 def test_health_main_archives_json_shape(rdir, monkeypatch):

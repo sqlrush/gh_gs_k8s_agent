@@ -23,7 +23,7 @@ _SCRIPTS = _ROOT / "skills" / "gaussdb-wdr" / "scripts"
 # collectors …)。全量跑测试时先 import 到的是哪一个取决于顺序,所以这里照 test_wdr_units.py
 # 的做法:先把同名模块从缓存里清掉,再把 wdr 的 scripts 目录放到 sys.path 最前面。
 for _m in ("model", "thresholds", "util", "collectors", "report",
-           "native", "snaps", "interp", "recheck", "finalreport", "ansi"):
+           "native", "snaps", "interp", "recheck", "finalreport", "kbrefs", "appendix", "mdreport", "render", "ansi"):
     sys.modules.pop(_m, None)
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_ROOT))

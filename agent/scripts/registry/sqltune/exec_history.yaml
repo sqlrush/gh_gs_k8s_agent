@@ -1,0 +1,42 @@
+# SQL 优化第 ① 段「每小时最慢多少、执行计划变没变」(2026-10-26 回答模板化 R4)。
+#
+# 来源是 statement_history:逐次执行的记录,带当时真实执行的计划(query_plan)。按小时归并,每小时一行:
+#   runs / avg_ms / max_ms   这一小时里记下的执行次数与耗时(只含被记下的执行:慢于阈值或开了全量跟踪)
+#   plan_sig                 这一小时最近一次带计划的执行的计划指纹 —— 去掉 (cost=…)/(actual …) 括号和全部数字后取 md5,
+#                            估算值与实际耗时每次都不同,不去掉的话同一个计划每次指纹都不一样
+#   query_plan               **只在指纹与上一小时不同时给出**(第一行总给):整段计划只在变的时候搬一次,不是每小时搬一份
+# 指纹只是粗筛:绑定值不同也可能让指纹不同,脚本(sqltrend.py)再按计划的节点结构核对一遍才算「计划变了」。
+# 只取最近 N 天:statement_history 的保留期由客户参数决定,更早的查不到。
+name: sqltune.exec_history
+description: 按 unique_query_id 取近 N 天每小时的执行次数、平均 / 最大耗时与执行计划指纹(计划只在变化时给出)
+readonly: true
+sql: |
+  SELECT hour, runs, avg_ms, max_ms, plan_sig,
+         CASE WHEN prev_sig IS NULL OR prev_sig <> plan_sig THEN query_plan END AS query_plan
+    FROM (SELECT hour, runs, avg_ms, max_ms, plan_sig, query_plan,
+                 lag(plan_sig) OVER (ORDER BY hour) AS prev_sig
+            FROM (SELECT to_char(hour, 'YYYY-MM-DD HH24:MI') AS hour, runs,
+                         round(avg_us / 1000.0, 1) AS avg_ms,
+                         round(max_us / 1000.0, 1) AS max_ms,
+                         CASE WHEN coalesce(query_plan, '') = '' THEN NULL
+                              ELSE md5(regexp_replace(regexp_replace(query_plan, '\((cost|actual)[^)]*\)', '', 'g'),
+                                                      '[0-9]', '', 'g')) END AS plan_sig,
+                         query_plan
+                    FROM (SELECT date_trunc('hour', start_time) AS hour, query_plan,
+                                 row_number() OVER (PARTITION BY date_trunc('hour', start_time)
+                                                    ORDER BY (coalesce(query_plan, '') = ''), start_time DESC) AS rn,
+                                 count(*) OVER (PARTITION BY date_trunc('hour', start_time)) AS runs,
+                                 avg(db_time) OVER (PARTITION BY date_trunc('hour', start_time)) AS avg_us,
+                                 max(db_time) OVER (PARTITION BY date_trunc('hour', start_time)) AS max_us
+                            FROM dbe_perf.statement_history
+                           WHERE unique_query_id = {{sid}}
+                             AND start_time >= now() - {{days}} * INTERVAL '1 day') r
+                   WHERE rn = 1) a) b
+   ORDER BY hour;
+params:
+  - key: sid
+    type: INTEGER
+    description: unique_query_id(整数,可能为负)
+  - key: days
+    type: INTEGER
+    description: 往回看几天(调用方传 7)

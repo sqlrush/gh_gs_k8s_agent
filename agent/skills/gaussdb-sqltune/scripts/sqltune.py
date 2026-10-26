@@ -58,6 +58,8 @@ import placeholder  # noqa: E402
 import planrules  # noqa: E402
 from placeholder import SubstituteResult, substitute  # noqa: E402
 from sqlfetch import sql_fetch  # noqa: E402
+import sqltrend  # noqa: E402
+import sqltrendmd  # noqa: E402
 
 # 代价推演。hypopg 走不通时它是唯一的定量证据来源 —— 见 _derivation_report。
 import calibrate  # noqa: E402
@@ -115,6 +117,8 @@ class TuneResult:
     runtime_plan: str = ""
     runtime_plan_pid: int = 0
     runtime_note: str = ""
+    # 现状与趋势(回答模板 R4 第 ① 段):按 sql_id 调优时由 sqltrend.collect 取;按 SQL 文本调优时没有
+    trend: object = None
 
 
 # 运行态计划依赖的白名单脚本(走中间件必须先注册;交付闸按脚本名全串在 skills/ 里检索,故写全):
@@ -394,7 +398,7 @@ def tune_by_id(runner, db, raw_id: str, binds: list[str], do_analyze: bool,
         raise
     plan, pid, note = _runtime_plan_for(runner, fr.sql_id)
     return replace(tr, runtime_plan=plan, runtime_plan_pid=pid, runtime_note=note,
-                   schema_source=schema_source if schema else "")
+                   schema_source=schema_source if schema else "", trend=sqltrend.collect(runner, fr.sql_id))
 
 
 def tune_by_sql(runner, db, sql_text: str, binds: list[str], do_analyze: bool,
@@ -498,6 +502,8 @@ def sqltune_report(tr: TuneResult) -> str:
     if len(sb) > 1:
         sb.append("")
     out = "\n".join(sb) + "\n"
+    # 回答模板第 ① 段「现状与趋势」的三节放在最前:先看这条 SQL 平时什么样、什么时候变慢的,再看计划
+    out += sqltrendmd.report(_trend_of(tr))
     out += _substitution_section(tr.substitution)
     out += evidence_report(tr.evidence)
 
@@ -535,6 +541,14 @@ def sqltune_report(tr: TuneResult) -> str:
     if tr.derivation_report:
         out += tr.derivation_report
     return out
+
+
+def _trend_of(tr) -> "sqltrend.TrendReport":
+    """按 SQL 文本调优(没有 sql_id)或测试替身没有这一项时,给一份只带说明的空报告(不再取数)。"""
+    got = getattr(tr, "trend", None)
+    if got is not None:
+        return got
+    return sqltrend.unavailable() if not getattr(tr, "sql_id", "") else sqltrend.unavailable("本次没有取现状与趋势。")
 
 
 def archive_tune(payload: dict) -> None:
@@ -580,6 +594,7 @@ def _to_jsonable(tr: TuneResult) -> dict:
         "runtime_plan_pid": getattr(tr, "runtime_plan_pid", 0),
         "runtime_note": getattr(tr, "runtime_note", ""),
         "kb_refs": kb_section(tr)[1],
+        "trend": sqltrendmd.to_dict(_trend_of(tr)),
     }
 
 

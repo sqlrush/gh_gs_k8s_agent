@@ -1,0 +1,1140 @@
+<!DOCTYPE html><html lang='zh-CN'><head><meta charset='utf-8'><title>回答模板化 · 前后对比</title><style>body{font:14px/1.7 -apple-system,"PingFang SC",sans-serif;color:#1b2430;background:#f6f8fb;margin:0}
+.wrap{max-width:1400px;margin:0 auto;padding:24px}header{background:linear-gradient(120deg,#0f2f5f,#2f6fdb);color:#fff;border-radius:14px;padding:24px 28px}
+header h1{margin:0 0 6px;font-size:24px}section,.tbl{background:#fff;border:1px solid #d9dfe8;border-radius:12px;padding:18px 22px;margin:16px 0}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #d9dfe8;padding:6px 8px;text-align:left;vertical-align:top}
+th{background:#f0f4fa}td.q{max-width:420px}.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}.two>div{min-width:0}
+.ans{border:1px solid #e3e8ef;border-radius:10px;padding:10px 14px;max-height:900px;overflow:auto;background:#fcfdff}
+.ans pre{background:#f6f8fa;padding:8px;overflow:auto;font-size:12px}.ans table{font-size:12px}
+.ck{margin:4px 0 8px;padding-left:18px;font-size:12.5px}.ok{color:#1f8a5b}.bad{color:#c0392b}.prompt{color:#4a5566}
+h3 small{color:#7a8596;font-weight:400;margin-left:8px}.kpis{display:flex;gap:12px;margin-top:14px}
+.kpis div{background:rgba(255,255,255,.14);border-radius:10px;padding:10px 14px}.kpis b{display:block;font-size:20px}</style></head><body><div class='wrap'><header><h1>回答模板化 · 前后对比(测试环境实测)</h1><div>同一组 11 道题,改造前(sec-e068108)与改造后(sec-at1026c,三轮修正后的最终版)各问一次;用户 u9500,og5 演练数据。格式检查只看版式,内容对不对请人工看。</div><div class='kpis'><div><b>7/62 → 52/52</b><span>格式检查通过项(全部题目合计)</span></div><div><b>1024 → 1204 秒</b><span>总耗时(+18%)</span></div><div><b>128058 → 144061</b><span>生成 token,输出 + 思考(+12%)</span></div><div><b>49287 → 62183 字</b><span>总长度(+26%)</span></div></div></header><div class='tbl'><table><tr><th>题号</th><th>类型</th><th>问题</th><th>改造前格式</th><th>改造后格式</th><th>耗时</th><th>生成 token</th><th>长度</th></tr><tr><td><a href='#H1'>H1</a></td><td>健康检查</td><td class='q'>对 og5 做一次健康检查。</td><td>1/6</td><td><b>5/5</b></td><td>88 → 147 秒</td><td>7710 → 14912</td><td>4970 → 5677 字</td></tr><tr><td><a href='#H2'>H2</a></td><td>健康检查</td><td class='q'>对 og5 做 2026-10-24 18:20 到 18:40 的时段健康检查。</td><td>1/5</td><td><b>5/5</b></td><td>68 → 83 秒</td><td>6671 → 9795</td><td>5193 → 5555 字</td></tr><tr><td><a href='#F1'>F1</a></td><td>故障排查</td><td class='q'>og5 在 2026-10-24 18:20 到 18:40 之间交易超时,是什么原因?</td><td>1/6</td><td><b>5/5</b></td><td>154 → 117 秒</td><td>21264 → 11444</td><td>3746 → 6237 字</td></tr><tr><td><a href='#F2'>F2</a></td><td>故障排查</td><td class='q'>og5 在 2026-10-24 18:20 到 18:40 之间的锁等待情况怎么样?根会话都有哪些,按本行规范和手册该怎么处置?</td><td>0/5</td><td><b>5/5</b></td><td>32 → 91 秒</td><td>4303 → 10515</td><td>3078 → 4200 字</td></tr><tr><td><a href='#F3'>F3</a></td><td>故障排查</td><td class='q'>og5 在 2026-10-24 18:32 到 18:36 的临时文件落盘严重吗?能不能直接把 work_mem 全局调大?</td><td>0/6</td><td><b>5/5</b></td><td>91 → 159 秒</td><td>10000 → 19188</td><td>1805 → 4767 字</td></tr><tr><td><a href='#S1'>S1</a></td><td>SQL 优化</td><td class='q'>对 og5 上 sql_id 4198238080 做调优,并贴出执行计划。</td><td>0/7</td><td><b>5/5</b></td><td>222 → 179 秒</td><td>33618 → 23050</td><td>6307 → 6708 字</td></tr><tr><td><a href='#S2'>S2</a></td><td>SQL 优化</td><td class='q'>og5 上 sql_id 4198238080 为什么慢?</td><td>0/7</td><td><b>5/5</b></td><td>53 → 76 秒</td><td>6023 → 7981</td><td>3685 → 4438 字</td></tr><tr><td><a href='#Q1'>Q1</a></td><td>知识问答</td><td class='q'>lockwait_timeout 默认是多少?我们行里 DDL 变更时应该设成多少?</td><td>1/5</td><td><b>4/4</b></td><td>30 → 45 秒</td><td>3023 → 5287</td><td>874 → 2115 字</td></tr><tr><td><a href='#Q2'>Q2</a></td><td>知识问答</td><td class='q'>报错 GAUSS-10512 是什么意思,怎么处理?</td><td>1/5</td><td><b>4/4</b></td><td>42 → 48 秒</td><td>2968 → 4359</td><td>942 → 1159 字</td></tr><tr><td><a href='#Q3'>Q3</a></td><td>知识问答</td><td class='q'>用 Plan Hint 指定 join 顺序怎么写?给个例子。</td><td>1/4</td><td><b>4/4</b></td><td>33 → 31 秒</td><td>2126 → 2962</td><td>1276 → 1410 字</td></tr><tr><td><a href='#W1'>W1</a></td><td>WDR 解读</td><td class='q'>对 og5 做 2026-10-21 18:32 到 18:52 的 WDR 分析。</td><td>1/6</td><td><b>5/5</b></td><td>211 → 229 秒</td><td>30352 → 34568</td><td>17411 → 19917 字</td></tr></table><p class='prompt'>耗时受模型服务当时的负载影响(同一句「只回复两个字」在不同时段 1–6 秒),比工作量请看生成 token。格式检查:段落齐不齐、顺序对不对、开头的总体状态 / 解答来源、结尾的展开提议、两种读者、上色引用的出处与颜色、旧写法残留。</p></div><section id='H1'><h2>H1 · 健康检查</h2><p class='prompt'>对 og5 做一次健康检查。</p><div class='two'><div><h3>改造前 <small>88 秒 · 4970 字 · 格式 1/6</small></h3><ul class='ck'><li class='bad'>✗ 段落:缺「现象」</li><li class='ok'>✓ 开头:开头有总体状态</li><li class='bad'>✗ 展开提议:结尾没有展开提议</li><li class='bad'>✗ 两种读者:应用视角 0 处、数据库机制 0 处</li><li class='bad'>✗ 引用写法:还在用旧写法〔类型 ID〕</li><li class='bad'>✗ 出处括号:6 处上色的句子后面没有「(引用自 …)」:〔手册 RB-LCK-001〕锁等待超过;〔规范 GS-CONN-002〕idle;〔案例 S3-20260416-FPAY</li></ul><div class='ans'>
+<h2>健康检查报告 — og5（10.x.x.x / postgres）</h2>
+<p><strong>总体状态 🟠告警</strong> — 驱动：DB Time 维度等待事件占比过高（LOCK_EVENT 占 DB_TIME 89.7%） <strong>判断校验 ✓ 已锚定（12 条确定性发现全覆盖、无夸大、无遗漏）</strong></p>
+<p>连接：og5 / 主库（in_recovery=false）/ openGauss 5.0.3 单机 4 核 8G。本次依赖的锁、等待事件、死元组这三个子 skill 全部采集成功。</p>
+<blockquote><p>口径提醒：LOCK_EVENT 89.7% 与 LWLOCK_EVENT 29.8% 相加为 119.5%，已超过 100% —— 等待统计含后台线程、DB_time 只算前台会话，两者分母不同，<strong>不能相加</strong>，也不能据此推断“锁争用更严重”。两条阈值判定以脚本为准，此处照实说明数对不上。</p></blockquote>
+<h3>维度概览</h3>
+<table>
+<tr><th>维度</th><th>严重度</th><th>关键指标</th></tr>
+<tr><td>Overview</td><td>🟢</td><td>缓存命中 99.66%，连接 12/1000</td></tr>
+<tr><td>Slow SQL</td><td>🟡</td><td>Top1 平均 126596ms×1，共 10 条超阈值</td></tr>
+<tr><td>Long &amp; Idle Transactions</td><td>🟢</td><td>无活动客户端事务，IIT 0</td></tr>
+<tr><td>Connections</td><td>🟢</td><td>active 5 / idle 7，线程池 12/800（2%）</td></tr>
+<tr><td>Checkpoint / WAL / Archiving</td><td>🟢</td><td>checkpoint req 占比 0.08%，归档 off</td></tr>
+<tr><td>Replication / Standby</td><td>🟢</td><td>单机未配 replconninfo，同步提交不适用（不是风险）</td></tr>
+<tr><td>Schema / Objects</td><td>🟡</td><td>5 个窗口内未使用索引、1 张表无统计信息、1 张表 1000 分区</td></tr>
+<tr><td>Storage Usage</td><td>🟢</td><td>最大库 postgres 17.3G（剩余空间不可知）</td></tr>
+<tr><td>Transactions / Concurrency</td><td>🟡</td><td>死锁距上次新增 14（累计 142）</td></tr>
+<tr><td>Locks（gaussdb-lockwait）</td><td>🟢</td><td>未报出当前阻塞链风险</td></tr>
+<tr><td>DB Time（gaussdb-waitevent）</td><td>🟠</td><td>LOCK_EVENT 89.7%、LWLOCK_EVENT 29.8%（占 DB_TIME）</td></tr>
+<tr><td>Dead Tuples（gaussdb-vacuum）</td><td>🟢</td><td>未报出死元组/膨胀风险</td></tr>
+</table>
+<h3>按严重度排序的发现</h3>
+<p><strong>1. 🟠 WAIT_LOCK_HEAVY / WAIT_LWLOCK_HEAVY（DB Time）</strong></p>
+<ul><li>证据：LOCK_EVENT 耗时占 DB_TIME 89.7%（阈值 ≥10%）；LWLOCK_EVENT 占 29.8%（阈值 ≥10%）。</li><li>根因：等待时间主要由行锁/事务锁类等待占据，与下面“慢 SQL 但 CPU 极低”互相印证；当前 lockwait 未报出活跃阻塞链，说明这些等待更多是统计窗口内的累计/间歇性争用。</li><li>建议：按 P0 处理，先取数据库日志里的死锁段、并对高耗时语句做锁与等待下钻（详见 gaussdb-waitevent / gaussdb-lockwait）。</li><li>风险：低（只读排查）。</li></ul>
+<p><strong>2. 🟡 SLOWSQL_TOP + SLOWSQL_LOW_CPU（Slow SQL）</strong></p>
+<ul><li>证据：Top1 <code>INSERT INTO fl.acct_child(...)</code> 平均 126596ms×1，CPU 仅 0.0s；另有 <code>UPDATE fl.acct SET bal=bal+?</code> 33 次、平均 47691ms、总 1573.8s。已排除 4 条内核系统 SQL（合计 266.3 秒）。</li><li>根因：Top1 总耗时 126.6s 而 CPU 0.0s，属锁等待/睡眠或 IO/排序溢出，不是缺索引类资源问题；<code>fl.acct</code>、<code>fl.acct_child</code> 的合计等待与行锁等待方向一致。</li><li>建议：先查锁与等待、必要时看临时文件/排序，再决定是否转 sqltune；不要直接按“缺索引”上改写。</li><li>风险：低。</li></ul>
+<p><strong>3. 🟡 DEADLOCKS（Transactions）</strong></p>
+<ul><li>证据：<strong>距上次新增 14 次</strong>（累计 142 次），回滚率 0.0%；增量 &gt;0 说明两次巡检之间仍在发生。</li><li>根因：死锁只留次数，环上语句与牺牲者只在数据库日志里，库里看不到。</li><li>建议：把含 <code>deadlock detected</code> 的日志段（连同 DETAIL 几行）贴给我，用 <code>gaussdb-lockwait --deadlock-log -</code> 解析环、语句与牺牲者；不要从 Top SQL 里挑两条当结论。</li><li>风险：低。</li></ul>
+<p><strong>4. 🟡 INDEX_UNUSED ×5（Schema，观测窗口 2026-10-17 21:13:50 起 8.9 天）</strong></p>
+<ul><li>证据：<code>gsbench_v4.plan_index_unusable_idx</code>（117.2M 字节）、<code>gaussdb.idx_items_order</code>（107.4M）、<code>fl.idx_items_product</code>（64.5M，“该表其他索引共扫描 50924 次”）、<code>gaussdb.idx_orders_uid</code>（43.0M）、<code>gaussdb.idx_payments_order</code>（38.7M），窗口内 idx_scan 均为 0。</li><li>根因/边界：这是“当前统计窗口内未被使用”的观测，不等于“无用索引”。删除前必须排除：统计重置或实例重启会归零；月度/季度/年报表用的索引可以数周为 0；主备分离时备机使用不计入本机。</li><li>建议：先与应用确认报表类使用，再评估是否删除；建任何新索引须在线进行。</li><li>风险：中（删除属变更）。</li></ul>
+<p><strong>5. 🟡 STALE_STATS（Schema）</strong></p>
+<ul><li>证据：<code>fl.import_stage</code> 的 pg_stats 统计列为 0、relpages=0、reltuples=0，实时页数 4202、n_live_tup=500000，从未 ANALYZE。</li><li>根因：规划器只能靠默认估算，批量导入类语句容易选错计划。</li><li>建议：对该表执行 ANALYZE（人工执行），并纳入批量作业后的常规统计收集。</li><li>风险：低。</li></ul>
+<p><strong>6. 🟡 PARTITION_COUNT_HIGH（Schema）</strong></p>
+<ul><li>证据：<code>fl.part_log</code> 1000 个分区（策略 r）。</li><li>根因：每次查询规划都要遍历分区元数据，四位数分区时规划开销明显上升；常见成因是按天/小时分区且从不清理历史。</li><li>边界：该项不代表分区裁剪有问题，裁剪要看具体 SQL 的执行计划。</li><li>建议：评审分区保留策略，清理/归档历史分区。</li><li>风险：中。</li></ul>
+<h3>关键原始证据</h3>
+<table>
+<tr><th>sql_id</th><th>calls</th><th>avg_ms</th><th>total_s</th><th>cpu_s</th><th>query 摘要</th></tr>
+<tr><td>226085226</td><td>1</td><td>126595.67</td><td>126.60</td><td>0.00</td><td>INSERT INTO fl.acct_child…</td></tr>
+<tr><td>3167133288</td><td>33</td><td>47691.79</td><td>1573.83</td><td>0.02</td><td>UPDATE fl.acct SET bal = bal + ?</td></tr>
+<tr><td>26287510</td><td>7</td><td>30728.69</td><td>215.10</td><td>0.00</td><td>INSERT INTO fl.uniq_race…</td></tr>
+<tr><td>169551786</td><td>15</td><td>15668.81</td><td>235.03</td><td>0.01</td><td>UPDATE fl.acct_child…</td></tr>
+</table>
+<p>存储：postgres 17.3G、pg_global 513.0M、gsbench_ts 118.8M。<strong>本内核取不到文件系统剩余空间，这一维只能回答“谁大、涨得快”，回答不了“盘还剩多少”</strong>，请结合操作系统侧磁盘监控判断。</p>
+<h3>处置优先级（只读建议，均需人工执行）</h3>
+<p><strong>P0 — 先处理锁等待与死锁增量</strong></p>
+<ul><li>用 gaussdb-lockwait 取当前根会话；有 idle in transaction 先通知应用，不要直接杀。依据：<font color="#2f6fdb">〔手册 RB-LCK-001〕锁等待超过 30 秒或阻塞链 3 层以上时，先用 gaussdb-lockwait 定位根会话，只处理根会话，不得终止链条中间的会话。</font></li><li>终止业务会话前走审批。依据：<font color="#2f6fdb">〔规范 GS-CONN-002〕idle in transaction 超过 300 秒必须告警，数据库侧不得自行终止业务会话，联机时段终止须经值班经理审批。</font></li><li>若日志显示同一主键并发插入，先做幂等。依据：<font color="#2f6fdb">〔案例 S3-20260416-FSYSC-SYSC支付流水重复提交导致主键插入排队〕网关重试未做幂等导致同一主键并发 INSERT 排队，长期按 pay_no 幂等去重并把下游记账调用移出事务。</font></li></ul>
+<p><strong>P1 — 高耗时语句与 WAL 争用</strong></p>
+<ul><li>对 sqlid 226085226 / 3167133288 做锁与等待下钻后再调优（走 gaussdb-sqltune，不要先按缺索引改写）。</li><li>若确认是高频单行提交引起的 WAL 轻量锁等待：<font color="#2f6fdb">〔缺陷 KD-0001〕openGauss 5.0.0–5.0.3 高频单行 INSERT+COMMIT 时组提交合并失效，WAL 轻量锁等待占比偏高，5.0.4 修复，本环境 5.0.3 受影响。</font> 规避可评估合并提交（每 100–500 行一次）。本行另有基线 BL-FL-WAL_LIGHT_LOCK_WAIT_PCT（平时 &lt;5%、演练窗口 20–40%），但其口径与本次“占 DB time”未必一致，仅作参考、不改判定。</li></ul>
+<p><strong>P2 — 对象治理与容量</strong></p>
+<ul><li>5 个未使用索引：确认非报表索引、非统计重置影响后再评估删除；新建索引必须在线。依据：<font color="#2f6fdb">〔规范 GS-CHG-002〕生产环境建索引必须使用 CREATE INDEX CONCURRENTLY。</font></li><li><code>fl.import_stage</code> 执行 ANALYZE；<code>fl.part_log</code> 评审 1000 分区的保留策略。外键与批量清理场景可参考：<font color="#2f6fdb">〔案例 S3-20260227-FSYSE-SYSE外键父子表互等导致借据录入超时〕子表外键列缺索引会导致删除父表时全表扫描子表，长期方案是子表外键列在线建索引并把清理批次移到夜间。</font></li><li>存储：17.3G 只是占用量，不是“盘快满”，请结合 OS 磁盘监控。</li></ul>
+<h3>本次边界</h3>
+<ul><li>死锁明细、SQL 原文、存储过程调优等需指定对象的能力本次未检查（gaussdb-explain、sqltune、sqlreview、sqlfetch、proctune 需具体 SQL / sql_id / 过程）。</li><li>单机部署下 <code>synchronous_commit=on</code> + <code>standby_names=*</code> 不构成同步复制风险，不要当成隐患。</li></ul>
+<p><a href="/dash/health?inst=api_10-x-x-x-postgres&amp;run=20261026T095918Z.json">打开报告</a></p>
+<p>本报告全部经脚本只读采集，所有结论已对确定性发现锚定校验。</p>
+</div></div><div><h3>改造后 <small>147 秒 · 5677 字 · 格式 5/5</small></h3><ul class='ck'><li class='ok'>✓ 段落:现象 → 根因和证据链 → 解决方案 → 总结和结论</li><li class='ok'>✓ 开头:开头有总体状态</li><li class='ok'>✓ 展开提议:结尾有「需要就 … 吗?」</li><li class='ok'>✓ 两种读者:应用视角 6 处、数据库机制 5 处</li><li class='ok'>✓ 引用:5 处上色引用,出处与颜色都对</li></ul><div class='ans'>
+<p>总体状态 <strong>🟠告警</strong> 驱动：等待事件中 <strong>LOCK_EVENT 占 DB time 89.7%</strong>（阈值 ≥10%，详见 gaussdb-waitevent） 判断校验 <strong>✓ 已锚定（10 条发现全覆盖、无夸大、无遗漏）</strong></p>
+<p>本次检查针对 og5（<font color="#2f6fdb">本实例为 openGauss 5.0.3、单机 4 核 8G</font>(引用自环境画像库 EP-FL)）。结论是：当前的问题并非 CPU、IO 或容量不足，而是锁等待占用了绝大部分数据库时间；头部慢 SQL 的 CPU 时间接近 0，也与之一致。此刻的瞬时状态相对平静，连接 12 个、没有长事务和空闲事务；另外还有 5 个未被使用的索引、1 张统计信息缺失的表、1 张有 1000 个分区的表，这些属于关注项。</p>
+<h2>① 现象</h2>
+<table>
+<tr><th>维度</th><th>级别</th><th>关键指标</th></tr>
+<tr><td>Overview</td><td>🟢</td><td>缓存命中率 99.6%、连接 12/1000、未处于恢复状态、没有最老事务</td></tr>
+<tr><td>Slow SQL</td><td>🟡</td><td>Top1 平均耗时 126.6s、只执行 1 次；共 10 条超过 500ms；<strong>已排除 3 条内核系统 SQL（合计 393.6s）</strong></td></tr>
+<tr><td>Long &amp; Idle Transactions</td><td>🟢</td><td>无活动客户端事务、IIT 0</td></tr>
+<tr><td>Connections</td><td>🟢</td><td>12 = active 5 / idle 7；线程池 12/800（2%）</td></tr>
+<tr><td>Checkpoint / WAL / Archiving</td><td>🟢</td><td>checkpoint 请求占比 0.08%、归档 off</td></tr>
+<tr><td>Replication / Standby</td><td>🟢</td><td>单机部署，同步提交不适用</td></tr>
+<tr><td>Schema / Objects</td><td>🟡</td><td>未用索引 5 个、统计不足以支撑估算的表 1 张、1000 分区表 1 张</td></tr>
+<tr><td>Storage Usage</td><td>🟢</td><td>最大库 postgres 17.3G；<strong>剩余空间取不到，不能当作“盘快满”的依据</strong></td></tr>
+<tr><td>Transactions / Concurrency</td><td>🟢</td><td>死锁累计 142、<strong>距上次新增 0 次</strong>；回滚率 0.1%</td></tr>
+<tr><td>DB Time（gaussdb-waitevent）</td><td>🟠</td><td><strong>LOCK_EVENT 耗时占 DB_TIME 89.7%</strong></td></tr>
+<tr><td>Locks（gaussdb-lockwait）</td><td>🟢</td><td>本次瞬时采集未报锁等待 / 阻塞链</td></tr>
+<tr><td>Dead Tuples（gaussdb-vacuum）</td><td>🟢</td><td>未见死元组 / 膨胀风险</td></tr>
+</table>
+<p>三个子 skill（锁 / 等待 / 死元组）本次全部采集成功。<code>gaussdb-explain / sqltune / sqlreview / sqlfetch / proctune</code> 这 5 项需要指定 SQL、sql_id 或存储过程才能运行，不在本次汇总范围内，因此不代表这些方面没有问题。</p>
+<p><strong>应用视角</strong>：最直观的感受是数据库整体卡顿、交易超时，而不是某一个接口偶发变慢。从采样结果看，问题集中在与账户余额、子表金额、唯一键相关的几类写入操作上，符合并发更新同一批数据时相互阻塞的典型表现。</p>
+<h2>② 根因和证据链</h2>
+<p><strong>1）🟠 WAIT_LOCK_HEAVY：锁等待占 DB time 89.7%（阈值 10%）</strong>，这是本次唯一比关注高的发现，也是导致整体告警的直接原因。</p>
+<ul><li>证据：等待事件统计中 <code>wait_class=LOCK_EVENT</code> 的耗时之和为 DB_TIME 的 89.7%。</li><li>应用视角：并发写同一账户、同一业务键时，后到的交易会一直排队，接口超时或批量处理跑不完，粗看像是数据库变慢，实际是彼此阻塞。</li><li>数据库机制：同一窗口内头部慢 SQL 的 CPU 时间几乎为 0，说明这些语句耗时主要来自等待：<code>UPDATE fl.acct SET bal = bal + ? WHERE id = ?</code> 执行 33 次、平均 47.7s、累计 1573.8s、CPU 0.02s；<code>INSERT INTO fl.uniq_race(k, who)</code> 执行 7 次、平均 30.7s；<code>INSERT INTO fl.acct_child(...)</code> 单次 126.6s、CPU 0.0s。这一组合指向“同一行或同一唯一键上的并发写入串行排队”，而非扫描或计算开销。当前瞬时 active 5、IIT 0，说明本次捕捉到的冲高发生在统计窗口内，并非常驻的阻塞链。</li><li>关联约束与先例：<font color="#2f6fdb">idle in transaction 超过 300 秒必须告警，数据库侧不得自行终止业务会话，须通知应用运维确认，联机时段终止须值班经理审批</font>(引用自贵行规范库 GS-CONN-002)；处置按<font color="#2f6fdb">先用 gaussdb-lockwait 定位根会话；idle in transaction 通知应用，10 分钟未解除经审批后终止；active 先 cancel 当前语句；只处理根会话</font>(引用自处置手册库 RB-LCK-001)。</li><li>版本相关：<font color="#2f6fdb">openGauss 5.0.0–5.0.3 在每秒数千次单行 INSERT+COMMIT、并发会话≥3 时组提交合并失效，WALWriteLock/WALFlushWait 等待占比明显偏高，5.0.4 修复；本环境 5.0.3 受影响</font>(引用自已知缺陷库 KD-0001)。是否命中这一条，要看具体等待事件里有没有 WAL 写锁。</li></ul>
+<p><strong>2）🟡 SLOWSQL_TOP / SLOWSQL_LOW_CPU：慢 SQL 头部两处。</strong></p>
+<ul><li>证据：Top1 平均 126596ms，仅执行 1 次；该条 sqlid 226085226 总耗时 126.6s、CPU 0.0s，CPU 占比不足 10%。</li><li>应用视角：个别写交易需要几十秒甚至两分钟才返回，重试会进一步放大排队。</li><li>数据库机制：CPU 几乎不消耗，说明瓶颈不在索引缺失或计算，而在锁等待、睡眠或其他等待；因此不能直接按“缺索引”处理，应先按 ②-1 锁定等待来源。</li></ul>
+<p><strong>3）🟡 STALE_STATS：<code>fl.import_stage</code> 没有任何列统计信息。</strong></p>
+<ul><li>证据：<code>relpages=0</code>、实时页数 4202、<code>reltuples=0</code>、<code>n_live_tup=500000</code>、<code>pg_stats</code> 统计列数 0、<code>last_analyze=never</code>。</li><li>应用视角：导数/跑批任务在这张表上的执行时间会不稳定，同样的 SQL 有时快、有时突然变慢。</li><li>数据库机制：规划器拿不到真实行数和分布，只能按默认值估算，容易选错连接顺序或扫描方式；这张表已达 50 万行，估算偏差会被放大。</li></ul>
+<p><strong>4）🟡 INDEX_UNUSED ×5（观测窗口：自 2026-10-17 21:13:50 起 8.9 天）</strong></p>
+<ul><li><code>gsbench_v4.plan_index_unusable_idx</code> 117.2M、<code>idx_scan=0</code>（该表所有索引均 0 次、顺扫 0）</li><li><code>gaussdb.idx_items_order</code> 107.4M、<code>idx_scan=0</code>（该表所有索引均 0 次）</li><li><code>fl.idx_items_product</code> 64.5M、<code>idx_scan=0</code>（同表其他索引共被扫 51034 次、顺扫 60）</li><li><code>gaussdb.idx_orders_uid</code> 43.0M、<code>idx_scan=0</code>（该表所有索引均 0 次）</li><li><code>gaussdb.idx_payments_order</code> 38.7M、<code>idx_scan=0</code>（该表所有索引均 0 次）</li><li>应用视角：这些索引持续占用空间、拖慢写入，但本月没有任何查询用到它们。</li><li>数据库机制：计数是自 <code>stats_reset</code> 起的累计值。统计重置或重启、月度/季度报表、备机使用不计入本机，都会让计数为 0，因此只能判“当前窗口内未被使用”，不能直接断言“无用”。其中 4 个在压测/基准表上，整表索引全为 0；<code>fl.idx_items_product</code> 同表其他索引被扫了 51034 次，是最值得复核的一个。</li></ul>
+<p><strong>5）🟡 PARTITION_COUNT_HIGH：<code>fl.part_log</code> 有 1000 个分区。</strong></p>
+<ul><li>应用视角：这张表上的查询在刚开始“想执行计划”时就会多花时间，分区越多越明显。</li><li>数据库机制：规划阶段需要遍历分区元数据，四位数分区会抬高规划开销；但这<strong>不代表分区裁剪失效</strong>，裁剪是否生效要看具体 SQL 的执行计划。与千分区相关的已知缺陷 KD-0003 在本环境 5.0.3 <strong>不受影响</strong>（标注为 505.x 集中式）。</li></ul>
+<h2>③ 解决方案</h2>
+<p><strong>P0（最优先）：查清并收敛锁等待</strong></p>
+<ul><li>改什么：在业务高峰或冲高复现时，用 <code>gaussdb-lockwait</code> 定位根会话与阻塞链，用 <code>gaussdb-waitevent</code> 把 89.7% 的 LOCK_EVENT 拆到具体等待事件；同时复核 KD-0001 提到的 WAL 写锁是否在列。</li><li>为什么：这是唯一 🟠 发现（②-1），且头部慢 SQL 的 CPU≈0（②-2）与之同源；当前 IIT 0、无长事务，说明是窗口内冲高，必须在高发时抓。</li><li>详细做法：若根会话是 idle in transaction，按 RB-LCK-001 通知应用，10 分钟未解除且经审批后只终止根会话；若是 active，先 cancel 当前语句。应用侧针对 <code>fl.acct</code> 的余额更新缩短事务、同账户更新串行化或改批量，针对 <code>fl.uniq_race</code> 在网关按业务键幂等，避免重复提交打同一唯一键。若等待事件确认含 WALWriteLock/WALFlushWait 且符合 KD-0001 场景，评估升级到 5.0.4。</li><li>风险：中；<code>[需人工执行]</code></li></ul>
+<p><strong>P1：补齐 <code>fl.import_stage</code> 统计信息</strong></p>
+<ul><li>改什么：在业务低峰执行 <code>ANALYZE fl.import_stage</code>（或 <code>VACUUM ANALYZE</code>）。</li><li>为什么：②-3，当前 <code>pg_stats</code> 0 列、<code>reltuples=0</code>，而实际 50 万行 / 4202 页，规划器只能用默认估算。</li><li>预期效果：规划器拿到真实行数与分布，减少该表相关 SQL 的计划抖动。</li><li>风险：低；<code>[需人工执行]</code></li></ul>
+<p><strong>P1：对头部慢 SQL 做执行计划与调优验证</strong></p>
+<ul><li>改什么：对 sqlid 3167133288（<code>UPDATE fl.acct ...</code>）和 226085226（<code>INSERT fl.acct_child ...</code>）跑 <code>gaussdb-sqltune</code> / <code>gaussdb-explain</code>，确认是锁等待还是有额外扫描。</li><li>为什么：②-2 已排除 CPU 主导，若直接按缺索引加索引会打偏。</li><li>风险：低（只读分析）；<code>[需人工执行]</code></li></ul>
+<p><strong>P2：复核 5 个未使用索引</strong></p>
+<ul><li>改什么：逐一确认业务是否真不用；优先复核 <code>fl.idx_items_product</code>（64.5M，同表其他索引有 51034 次扫描），其余 4 个在压测表上可先标记为待确认。</li><li>为什么：②-4；删除前必须排除统计重置/重启、月报类索引、备机使用三种反例。</li><li>详细做法：确认后再评估删除；若后续需要重建或新增索引，按<font color="#2f6fdb">生产环境建索引必须使用 CREATE INDEX CONCURRENTLY</font>(引用自贵行规范库 GS-CHG-002)执行，避免锁写。</li><li>风险：中；<code>[需人工执行]</code></li></ul>
+<p><strong>P2：评估 <code>fl.part_log</code> 分区规模</strong></p>
+<ul><li>改什么：核对分区策略与历史分区保留周期，评估清理/归档历史分区。</li><li>为什么：②-5，1000 分区抬高规划开销；KD-0003 在本版本不受影响，先不动数据。</li><li>风险：中；<code>[需人工执行]</code></li></ul>
+<h2>④ 总结和结论</h2>
+<p>本次告警由锁等待驱动（LOCK_EVENT 占 DB time 89.7%），不是 CPU、IO 或容量问题；头部慢 SQL 的 CPU≈0 与此互相印证。瞬时状态（连接、长事务、空闲事务、复制）本次都正常，问题发生在统计窗口内的并发写冲高。死锁累计 142 次但距上次巡检新增为 0，不作为当前问题。</p>
+<p>建议下一步：高峰时抓一次锁等待与等待事件明细 → 补 <code>fl.import_stage</code> 统计 → 复核未使用索引与千分区表。<strong>需要您配合</strong>：如果怀疑曾发生死锁，请让 DBA 提供含 <code>deadlock detected</code> 的数据库日志段（工具读不到数据库日志）；若要复盘某个具体时段，告诉我时间窗，我可以做时段体检。</p>
+<p>本报告全部经脚本只读采集，所有结论已对确定性发现做锚定校验。</p>
+<p><a href="/dash/health?inst=api_10-x-x-x-postgres&amp;run=20261026T111847Z.json">打开报告</a></p>
+<p>需要我就这 89.7% 的 LOCK_EVENT 单独跑一次等待事件下钻、拆到具体等待事件吗？需要对 sql_id 3167133288 做一次调优分析吗？需要我把 5 个未使用索引按业务影响逐个核对一遍吗？</p>
+</div></div></div></section><section id='H2'><h2>H2 · 健康检查</h2><p class='prompt'>对 og5 做 2026-10-24 18:20 到 18:40 的时段健康检查。</p><div class='two'><div><h3>改造前 <small>68 秒 · 5193 字 · 格式 1/5</small></h3><ul class='ck'><li class='bad'>✗ 段落:缺「现象」</li><li class='ok'>✓ 开头:开头有总体状态</li><li class='bad'>✗ 展开提议:结尾没有展开提议</li><li class='bad'>✗ 两种读者:应用视角 0 处、数据库机制 0 处</li><li class='bad'>✗ 出处括号:7 处上色的句子后面没有「(引用自 …)」:〔GS-CONN-002〕idle in;〔RB-LCK-001〕锁等待超过 30;〔S2-20260618-FSYSA〕同</li></ul><div class='ans'>
+<h1>og5 时段健康检查（2026-10-24 18:20–18:40）</h1>
+<p><strong>总体状态 🔴严重</strong> —— 驱动因素：<code>idle in transaction</code> 根会话持锁，最长阻塞约 <strong>1160 秒</strong>，22 个会话被挡。 判断校验：<strong>✓ 已锚定</strong>（5 条确定性发现全覆盖，无下调、无遗漏）</p>
+<h2>评估窗口</h2>
+<p>你要看的是 <strong>10-24 18:20–18:40（20 分钟）</strong>；实际评估的是 <strong>快照 3197（18:19）→ 快照 3204（18:40），21.1 分钟</strong>。原因：累计计数器只能在快照与快照之间相减，起点取不晚于 18:20 的最近快照、终点取不早于 18:40 的最近快照。<strong>完整覆盖</strong>。</p>
+<h2>维度概览</h2>
+<table>
+<tr><th>维度</th><th>状态</th><th>关键指标</th></tr>
+<tr><td>Locks（来源 gaussdb-lockwait）</td><td>🔴</td><td>最长锁等待约 1160s；14 条阻塞链、22 个会话被挡</td></tr>
+<tr><td>Window IO / Temp / Checkpoint</td><td>🟠</td><td>临时文件溢出 6.8G；命中率 99.8%；checkpoint 21 次</td></tr>
+<tr><td>Window Load</td><td>🟡</td><td>DB time 21920.8s，平均活跃会话 17.27，CPU 仅占 12.3%</td></tr>
+<tr><td>Window Waits</td><td>🟡</td><td>LOCK_EVENT 占总等待 88.2%</td></tr>
+<tr><td>Window Transactions</td><td>🟢</td><td>提交 13,001,141 / 回滚 17（0.00%）/ 死锁 0</td></tr>
+<tr><td>Connections</td><td>不可用</td><td>回看不了（瞬时状态，当时未采集）</td></tr>
+<tr><td>Long &amp; Idle Transactions</td><td>不可用</td><td>回看不了（快照无事务开始时间）</td></tr>
+<tr><td>Dead Tuples &amp; Bloat</td><td>不可用</td><td>回看不了（膨胀只能看此刻）</td></tr>
+<tr><td>Replication / Standby</td><td>不可用</td><td>回看不了</td></tr>
+<tr><td>Storage Usage</td><td>不可用</td><td>回看不了</td></tr>
+</table>
+<h2>发现（按严重度）</h2>
+<h3>🔴 LOCK_WAIT_LONG —— 最长锁等待约 1160 秒</h3>
+<ul><li><strong>证据</strong>：采样期内 22 个会话被挡、14 条阻塞链。最长链 <code>10339 → 10340 → 10341 → 10338 → 10337 → 10336</code>，根会话 <strong>10336 处于 idle in transaction</strong>，持有 <code>fl.acct</code> 的 tuple ExclusiveLock，等待者从 18:20:46 一直等到 18:40:16，采到 116 次（约 1160s，阈值 ≥60s）。</li><li><strong>根因</strong>：应用会话开启事务后长期不提交、不干活，行锁不放；<code>UPDATE fl.acct SET bal = bal + ? WHERE id = ?</code>（sqlid 3167133288）窗口内耗时 5925s、平均 658s，属于<strong>锁等待累积</strong>，不是缺索引。</li><li><strong>建议</strong>：应急按根会话处置，<strong>只处理根会话，不得杀链条中间会话</strong>；风险:中，<code>[需人工执行]</code>。</li></ul>
+<h3>🟠 WIN_TEMP_SPILL —— 时段临时文件溢出 6.8G</h3>
+<ul><li><strong>证据</strong>：库级 <code>temp_bytes</code> 合计 6.8G（阈值 512M）。其中能归到语句的 <strong>5380.37MiB（占库级 77%）</strong>，落盘最多的是 <strong>sqlid 2858996927</strong>（5380.37MiB，占语句级 100%）；其余 <strong>1604.58MiB 归不到具体语句</strong>。</li><li><strong>根因</strong>：排序/哈希放不进 <code>work_mem</code> 落盘，集中在单条 SQL 上。</li><li><strong>建议</strong>：用 <code>gaussdb-memanalyze</code> 对该 SQL 定位；会话级 <code>SET work_mem</code> 须审批（单会话 ≤256MB），并推动 SQL 改写或分批；<strong>不得全局调大 work_mem</strong>。风险:中，<code>[需人工执行]</code>。</li></ul>
+<h3>🟠 LOCK_ROOT_IDLE_XACT —— 4 个空闲事务根会话</h3>
+<ul><li><strong>证据</strong>：时段内最后一次采到时状态为 idle in transaction 的有 4 个，点名 <strong>10336（fl:K1/root，直接或间接挡住 5 个会话）、10362（fl:K6/parent，挡住 4 个）、10522（fl:K3/longread，挡住 4 个）</strong>；事务分别从 18:20:39、18:23:44、18:29:55 开始。</li><li><strong>根因</strong>：事务开着不提交，同时持锁并阻止 vacuum 回收。</li><li><strong>建议</strong>：这是<strong>事后回看</strong>，当时的会话多半已结束、会话号可能被复用，<strong>不要据此 kill</strong>；现在还堵着就先跑此刻的锁等待分析。长期改应用事务边界。风险:中，<code>[需人工执行]</code>。</li></ul>
+<h3>🟡 WIN_WAIT_HEAVY —— CPU 占 DB time 仅 12.3%</h3>
+<ul><li><strong>证据</strong>：DB time 21920.8s，CPU 只有 2697.5s（12.3%，阈值 &lt;30%）。</li><li><strong>结论</strong>：时间主要花在<strong>等锁</strong>上，不是 CPU 不够；不要按 CPU 压力方向处置。</li></ul>
+<h3>🟡 WIN_WAIT_SKEW —— 等待集中在 LOCK_EVENT（88.2%）</h3>
+<ul><li><strong>证据</strong>：LOCK_EVENT 14909.34s，占全部等待 88.2%（阈值 &gt;60%）；其中 <code>transactionid 6486.2s</code>、<code>relation 3085.8s</code>、<code>advisory 2879.2s</code>。注意这是<strong>占全部等待</strong>，不是占 DB time，等待统计含后台线程，两者口径不同。</li></ul>
+<h2>关键原始证据</h2>
+<p><strong>时段等待（Top 类）</strong></p>
+<table>
+<tr><th>等待类</th><th>等待时长(s)</th><th>占总等待</th><th>主要事件</th></tr>
+<tr><td>LOCK_EVENT</td><td>14909.34</td><td>88.2%</td><td>transactionid 6486.2s、relation 3085.8s、advisory 2879.2s</td></tr>
+<tr><td>IO_EVENT</td><td>1213.80</td><td>7.2%</td><td>BufHashTableSearch 693.0s、BufFileRead 139.6s、WALWrite 124.8s</td></tr>
+<tr><td>LWLOCK_EVENT</td><td>778.66</td><td>4.6%</td><td>WALFlushWait 324.0s、LockMgrLock 217.1s</td></tr>
+</table>
+<p><strong>阻塞链（部分）</strong></p>
+<table>
+<tr><th>等待者 → … → 根</th><th>根状态</th><th>锁 / 对象</th><th>约等了</th><th>时段</th></tr>
+<tr><td>10339→10340→10341→10338→10337→10336</td><td>idle in transaction</td><td>tuple ExclusiveLock <code>fl.acct</code></td><td>1160s</td><td>18:20:46–18:40:16</td></tr>
+<tr><td>10359→10360→10363→10362</td><td>idle in transaction</td><td>relation RowExclusiveLock <code>fl.acct_child</code></td><td>940s</td><td>18:23:28–18:40:16</td></tr>
+<tr><td>10376→10377→10375→10369</td><td>未采到（疑似会话级 advisory 锁持有者）</td><td>advisory ExclusiveLock</td><td>940s</td><td>18:24:28–18:40:16</td></tr>
+<tr><td>10524→10523→10343 / 10522</td><td>active / idle in transaction</td><td>relation AccessShareLock <code>fl.payments</code></td><td>130s</td><td>18:30:04–18:32:06</td></tr>
+</table>
+<blockquote><p><code>## Window Top SQL</code> 已<strong>排除 1 条内核系统 SQL</strong>（648622204，合计 2879.2 秒）。这条正好与上面 advisory 锁等待时长对得上，说明 advisory 等待主要来自它，但榜上不再作为业务 SQL 呈现。</p></blockquote>
+<h2>跨维度关联（单一根因）</h2>
+<p><code>LOCK_EVENT 88.2%</code> + <code>4 个 idle in transaction</code> 指向<strong>同一条因果链</strong>：应用事务内长时间不提交 → 行锁/表锁不放 → transactionid、relation 等待放大 → 后续 DML 与查询层层排队。advisory 那 940s 是<strong>另一条独立根因</strong>（会话级咨询锁未释放，持有者当时没采到），与行锁链要分开处理。</p>
+<h2>处置优先级</h2>
+<ul><li><strong>P0｜止血</strong>：先用此刻的锁等待分析确认根会话是否还在；仍在则通知应用运维确认交易，按手册终止<strong>根会话</strong>（联机时段须值班经理审批），不得杀中间会话。advisory 链的持有者按同样规则单独定位。风险:中，<code>[需人工执行]</code>。</li><li><strong>P1｜临时文件</strong>：定位 sqlid 2858996927 的落盘，审批后做会话级 <code>work_mem</code> 调整 / SQL 改写或分批；剩余 1604.58MiB 归不到语句，建议对同一时段跑 WDR 下钻。风险:低，<code>[需人工执行]</code>。</li><li><strong>P2｜长期治理</strong>：应用把外部接口调用移出事务、缩短事务边界；DBA 评估 <code>idle_in_transaction_session_timeout</code> 取值；锁监控补上 <code>locktype=advisory</code>；DDL 前按规范检查长事务并将会话级 <code>lockwait_timeout</code> 设为 ≤30 秒。风险:低。</li></ul>
+<h2>未覆盖 / 回看不了的项</h2>
+<ul><li><strong>回看不了</strong>：连接与线程池、长事务、死元组与膨胀、复制、占用量（瞬时状态，当时没采）；本次膨胀子 skill 也未运行。</li><li><strong>未纳入汇总</strong>：<code>gaussdb-explain</code>、<code>gaussdb-sqltune</code>、<code>gaussdb-sqlreview</code>、<code>gaussdb-sqlfetch</code>、<code>gaussdb-proctune</code> 都需要指定具体 SQL / 过程，本次没检查，<strong>不代表这些方面没问题</strong>。</li></ul>
+<h2>知识库依据</h2>
+<ul><li><font color="#2f6fdb">〔GS-CONN-002〕idle in transaction 超过 300 秒必须告警；数据库侧不得自行终止业务会话，须通知应用运维确认后处理；联机时段终止须值班经理审批。</font></li><li><font color="#2f6fdb">〔RB-LCK-001〕锁等待超过 30 秒或阻塞链 3 层以上时先定位根会话；IIT 通知应用，10 分钟未解除经审批后终止；只处理根会话。</font></li><li><font color="#2f6fdb">〔S2-20260618-FSYSA〕同类先例：事务内调用外部接口超时，会话 idle in transaction 持锁，阻塞逐级排队。</font></li><li><font color="#2f6fdb">〔S3-20260309-FSYSD〕同类先例：会话级 pg_advisory_lock 异常分支未释放，连接回池后空闲会话持锁，表现为 advisory 等待。</font></li><li><font color="#2f6fdb">〔RB-TMP-001〕临时文件落盘先用 gaussdb-memanalyze 定位，审批后会话级调 work_mem，不得全局调大；该手册标注未验证。</font></li><li><font color="#2f6fdb">〔GS-CHG-003〕DDL 前须检查目标表长事务/长查询，会话级 lockwait_timeout 不超过 30 秒。</font></li><li><font color="#2f6fdb">〔BL-FL-LOCK_WAIT_SESSIONS〕FL 锁等待会话数平时 0–2 个，超过 40 个视为异常；本次时段 22 个被挡。</font></li></ul>
+<p>本报告全部经脚本只读采集，所有结论已对确定性发现锚定校验。</p>
+<p><a href="/dash/health?inst=api_10-x-x-x-postgres&amp;run=20261026T095911Z.span.json&amp;from=2026-10-24T18%3A19&amp;to=2026-10-24T18%3A40">打开报告</a></p>
+</div></div><div><h3>改造后 <small>83 秒 · 5555 字 · 格式 5/5</small></h3><ul class='ck'><li class='ok'>✓ 段落:现象 → 根因和证据链 → 解决方案 → 总结和结论</li><li class='ok'>✓ 开头:开头有总体状态</li><li class='ok'>✓ 展开提议:结尾有「需要就 … 吗?」</li><li class='ok'>✓ 两种读者:应用视角 4 处、数据库机制 3 处</li><li class='ok'>✓ 引用:8 处上色引用,出处与颜色都对</li></ul><div class='ans'>
+<h2>评估时段</h2>
+<p>你要看的是 <strong>10-24 18:20–18:40（20 分钟）</strong>，实际评估的是 <strong>快照 3197（18:19）→ 快照 3204（18:40）（21.1 分钟）</strong>：起点取不晚于 18:20 的最近快照、终点取不早于 18:40 的最近快照，时段完整覆盖。</p>
+<p><strong>总体状态：🔴严重</strong>　驱动：空闲事务持锁（会话 10336 等）引发最长约 1160 秒的锁等待、22 个会话被挡。 判断校验：✓ 已锚定（5 条发现全覆盖、无夸大、无遗漏）</p>
+<p>这 20 分钟不是 CPU 或 IO 不够，而是被锁住了：几个「事务开着却不干活」的空闲会话攥着 <code>fl.acct</code> / <code>fl.acct_child</code> / <code>fl.payments</code> 的锁，后面的交易一层层排队，最长等了约 19 分钟；另外有 6.8G 临时文件落盘。锁的问题一解，整体就会明显好转。</p>
+<h2>① 现象</h2>
+<table>
+<tr><th>维度</th><th>级别</th><th>关键指标</th></tr>
+<tr><td>Locks（来源 gaussdb-lockwait）</td><td>🔴严重</td><td>最长锁等待约 1160s；14 条阻塞链、22 个会话被挡</td></tr>
+<tr><td>Window IO / Temp / Checkpoint</td><td>🟠告警</td><td>临时文件溢出 6.8G；缓存命中率 99.8%；checkpoint 21 次</td></tr>
+<tr><td>Locks—空闲事务持锁（来源 gaussdb-lockwait）</td><td>🟠告警</td><td>4 个 idle in transaction 会话持锁</td></tr>
+<tr><td>Window Load</td><td>🟡关注</td><td>DB time 21920.8s、平均活跃会话 17.27、CPU 仅占 12.3%</td></tr>
+<tr><td>Window Waits</td><td>🟡关注</td><td>LOCK_EVENT 占总等待 88.2%</td></tr>
+<tr><td>Window Transactions</td><td>🟢健康</td><td>提交 1300.1 万、回滚 17（0.00%）、死锁 0</td></tr>
+<tr><td>Window Top SQL</td><td>信息</td><td>最耗时 sqlid 3167133288（5924.99s）；已排除 1 条内核系统 SQL</td></tr>
+<tr><td>Connections / 长事务 / 死元组膨胀 / 复制 / 占用量</td><td>回看不了</td><td>瞬时状态，当时未采集</td></tr>
+</table>
+<p>应用视角：这段时间业务会感受到交易变慢、接口大量超时，尤其是开户、账户变更、对账一类会碰 <code>fl.acct</code>、<code>fl.acct_child</code>、<code>fl.payments</code> 的交易。数据库侧看，真正干活的只占 12.3% 的 DB 时间，剩下近九成都在等锁——瓶颈不在机器算力，而在「谁把谁挡住了」。</p>
+<h2>② 根因和证据链</h2>
+<p><strong>🔴 LOCK_WAIT_LONG：最长锁等待约 1160 秒（阈值 ≥60s）</strong> 应用视角：排队最久的会话等了约 19 分钟，前面一直是同一个空闲事务在挡路，属于典型的「一笔没提交的事务拖垮一串交易」。 数据库机制：活跃会话采样里 22 个会话被挡，最久的是会话 10337 等会话 10336（<code>transactionid</code> 锁，ShareLock），采到 116 次（18:20:46–18:40:16，每 10 秒一个样本）；根会话 10336 状态为 <strong>idle in transaction</strong>——事务从 18:20:39 开始、执行完 <code>UPDATE fl.acct</code> 后既不提交也不回滚，行锁一直不放。阻塞链与头部语句：</p>
+<table>
+<tr><th>阻塞链（等待者 → … → 根）</th><th>根状态</th><th>锁 / 对象</th><th>约等了</th><th>链头语句</th></tr>
+<tr><td>10339→10340→10341→10338→10337→<strong>10336</strong></td><td>idle in transaction</td><td>tuple ExclusiveLock <code>fl.acct</code></td><td>1160s</td><td>sqlid 3167133288 <code>UPDATE fl.acct SET bal=bal+? WHERE id=?</code></td></tr>
+<tr><td>10359→10360→10363→<strong>10362</strong></td><td>idle in transaction</td><td>relation RowExclusiveLock <code>fl.acct_child</code></td><td>940s</td><td>—</td></tr>
+<tr><td>10361→10360→10363→<strong>10362</strong></td><td>idle in transaction</td><td>relation RowExclusiveLock <code>fl.acct_child</code></td><td>940s</td><td>—</td></tr>
+<tr><td>10376→10377→10375→<strong>10369</strong></td><td>未采到（疑似会话级 advisory 锁持有者）</td><td>advisory ExclusiveLock</td><td>940s</td><td>sqlid 648622204 <code>SELECT pg_advisory_lock(?)</code></td></tr>
+<tr><td>10524/10525→10523→<strong>10522/10343</strong></td><td>idle in transaction / active</td><td>relation AccessShareLock <code>fl.payments</code></td><td>130s</td><td>—</td></tr>
+</table>
+<p><strong>🟠 LOCK_ROOT_IDLE_XACT：4 个空闲事务持锁</strong> 应用视角：这些会话多半是应用把外部接口调用、报文等待放在了数据库事务里，接口一慢，事务就挂着不提交，锁跟着不放。 数据库机制：最后一次采到时状态仍是 idle in transaction——10336（应用 <code>fl:K1/root</code>，事务始于 18:20:39，挡住 5 个）、10362（<code>fl:K6/parent</code>，始于 18:23:44，挡住 4 个）、10522（<code>fl:K3/longread</code>，始于 18:29:55，挡住 4 个），另有 1 个。事务开启时间都落在窗口内，与上面的阻塞链一一对应。这是事后回看，当时的会话多半已结束、会话号可能被复用，<strong>不能据此直接 kill</strong>（详见 gaussdb-lockwait）。</p>
+<p><strong>🟠 WIN_TEMP_SPILL：临时文件溢出 6.8G（阈值 &gt;512M）</strong> 应用视角：大查询做排序/聚合时放不进内存就写盘，会额外吃 IO、拖慢语句，量级大时还会占满临时目录。 数据库机制：库级合计 <code>temp_bytes</code> 6.8G，其中能归到语句的 5380.37MiB（占库级 77%），落盘最多的是 **sqlid 2858996927（<code>SELECT count(*)...</code>，5380.37MiB，占语句级 100%）**，其余 1604.58MiB 归不到具体语句。按 21.1 分钟折算约 19GB/h；<font color="#2f6fdb">平时低于 200MB/h，演练窗口 2–8GB/h，超过 10GB/h 视为异常</font>(引用自贵行基线库 BL-FL-TEMP_BYTES_PER_HOUR)，本次已超过该异常线。</p>
+<p><strong>🟡 WIN_WAIT_HEAVY / WIN_WAIT_SKEW：CPU 占 12.3%，等待集中在锁</strong> DB time 21920.8 秒里 CPU 只有 2697.5 秒，等待占大头；LOCK_EVENT 14909.34 秒（88.2%），其中 <code>transactionid</code> 6486.2s、<code>relation</code> 3085.8s、<code>advisory</code> 2879.2s，与上面的空闲事务阻塞链完全对得上。CPU 不是瓶颈，判断不要引到「加 CPU」。</p>
+<p>跨维度因果链：<strong>应用事务内等待外部调用 → 会话 idle in transaction 持锁（fl.acct / fl.acct_child / fl.payments）→ 后序交易逐层排队（最长约 1160s）→ 等待时间集中在 LOCK_EVENT（88.2%）→ CPU 占比低但业务体感极慢</strong>；临时文件 6.8G 是同期另一条独立线索（大聚合语句落盘），与锁链无直接因果。</p>
+<h2>③ 解决方案</h2>
+<p><strong>P0　处置空闲事务持锁的根会话（对应 LOCK_WAIT_LONG / LOCK_ROOT_IDLE_XACT）</strong></p>
+<ul><li>改什么：10336、10362、10522 等 4 个 idle in transaction 根会话。</li><li>为什么：它们是 1160s / 940s / 130s 三类阻塞链的共同源头，不处理根、只杀排队者无效。</li><li>做法：时段已过，先跑<strong>此刻</strong>的锁等待分析确认是否还堵着；若仍存在，<font color="#2f6fdb">idle in transaction 状态超过 300 秒的会话必须触发告警；数据库侧不得自行终止业务会话，须通知应用运维确认后处理；联机时段由 DBA 终止会话须经值班经理审批</font>(引用自贵行规范库 GS-CONN-002)，并按 <font color="#2f6fdb">先用 gaussdb-lockwait 定位根会话；idle in transaction 通知应用，10 分钟未解除经值班经理审批后终止；只处理根会话</font>(引用自处置手册库 RB-LCK-001) 执行。长期：<font color="#2f6fdb">应用调整事务边界，把外部接口调用移到事务之外</font>(引用自本行案例库 S2-20260618-FSYSA-[模拟测试]某行SYSA日终批量更新阻塞)，<code>idle_in_transaction_session_timeout</code> 由 DBA 评估取值。</li><li>风险：中　<code>[需人工执行]</code></li></ul>
+<p><strong>P1　处理 advisory 锁链（对应 10369 advisory 阻塞链）</strong></p>
+<ul><li>改什么：会话级 <code>pg_advisory_lock</code> 的持有方（根 10369 未被采样到，头部语句 sqlid 648622204）。</li><li>为什么：<code>advisory</code> 等待 2879.2s，是第二大锁等待来源；会话级 advisory 锁在异常分支不释放、连接回池后仍被空闲会话持有，容易反复复发。</li><li>做法：先确认持有者身份；长期按先例把 <font color="#2f6fdb">会话级 pg_advisory_lock 改用事务级 pg_advisory_xact_lock，事务结束自动释放；锁监控加上 locktype=advisory 的等待</font>(引用自本行案例库 S3-20260309-FSYSD-SYSD清算作业咨询锁未释放导致排队)。</li><li>风险：低　<code>[需人工执行]</code></li></ul>
+<p><strong>P2　收敛临时文件落盘（对应 WIN_TEMP_SPILL）</strong></p>
+<ul><li>改什么：sqlid 2858996927 这条大聚合语句。</li><li>为什么：单条占语句级落盘 100%、库级 77%，是 6.8G 溢出的主因。</li><li>做法：按 <font color="#2f6fdb">用 gaussdb-memanalyze 定位落盘最多的 SQL，审批后对该会话 SET work_mem，推动 SQL 改写或分批；不得全局调大 work_mem</font>(引用自处置手册库 RB-TMP-001,未验证) 处理；<font color="#0f7c86">openGauss 5.0.x 的 temp_file_limit 默认 -1 不限制</font>(引用自产品文档库 PD-0001)，是否设上限由 DBA 按磁盘余量评估。</li><li>风险：低　<code>[需人工执行]</code></li></ul>
+<p><strong>P3　复核整体（对应 WIN_WAIT_HEAVY / SKEW）</strong> 锁链解除后重跑同时段体检，确认 CPU/等待分布回落即可，无需针对 CPU 做任何调整。</p>
+<h2>④ 总结和结论</h2>
+<p>这段 21 分钟的核心问题是<strong>空闲事务持锁</strong>：4 个 idle in transaction 会话把 <code>fl.acct</code> / <code>fl.acct_child</code> / <code>fl.payments</code> 锁住，形成 14 条阻塞链、22 个会话被挡、最长约 1160s，等待时间 88.2% 集中在锁；临时文件 6.8G 是并发的次要问题。优先按 P0 处置根会话并推动应用改事务边界。</p>
+<p>需要你配合确认两件事：① 这批 <code>fl:K1/K6/K3</code> 会话当时在等什么（外部接口？人工操作？），以便定位事务边界写法；② 22 个被挡会话<font color="#2f6fdb">平时 0–2 个，演练窗口（18:00–19:00）15–25 个属演练预期，超过 40 个视为异常</font>(引用自贵行基线库 BL-FL-LOCK_WAIT_SESSIONS)——本次 22 个落在演练区间内，<strong>这是否是一次计划内的演练/模拟测试？</strong> 若是演练，可对照基线判为预期，否则按生产故障处理。连接、长事务、死元组、复制、占用量这 5 项是瞬时状态，这段时间当时未采集，回看不了。</p>
+<p>报告已存档：<a href="/dash/health?inst=api_10-x-x-x-postgres&amp;run=20261026T111839Z.span.json&amp;from=2026-10-24T18%3A19&amp;to=2026-10-24T18%3A40">打开报告</a></p>
+<p>需要我就这段时间单独跑一次锁等待时段回看、把 14 条阻塞链完整列出来吗？需要我分析落盘最多的 sqlid 2858996927 的执行计划吗？</p>
+</div></div></div></section><section id='F1'><h2>F1 · 故障排查</h2><p class='prompt'>og5 在 2026-10-24 18:20 到 18:40 之间交易超时,是什么原因?</p><div class='two'><div><h3>改造前 <small>154 秒 · 3746 字 · 格式 1/6</small></h3><ul class='ck'><li class='bad'>✗ 段落:缺「现象」</li><li class='ok'>✓ 开头:开头有总体状态</li><li class='bad'>✗ 展开提议:结尾没有展开提议</li><li class='bad'>✗ 两种读者:应用视角 0 处、数据库机制 0 处</li><li class='bad'>✗ 引用写法:还在用旧写法〔类型 ID〕</li><li class='bad'>✗ 出处括号:5 处上色的句子后面没有「(引用自 …)」:〔画像 EP-FL〕og5 是 FL（F;〔基线 BL-FL-LOCK_WAIT_;〔案例 S2-20260618-FCMI</li></ul><div class='ans'>
+<p><strong>总体状态：🔴严重</strong>（驱动：LOCK_WAIT_LONG，最长锁等待约 1140 秒）｜判断校验：✓ 已锚定（5 条确定性发现全覆盖）</p>
+<p><strong>评估窗口</strong>：你要看的是 10-24 18:20–18:40；实际评估的是快照 3197（10-24 18:19）→ 快照 3204（10-24 18:40），共 21.1 分钟，完整覆盖。起点取不晚于 18:20 的最近快照，因为累计计数器只能在两个快照之间相减，所以实际窗口比你要的早 1 分钟开始。</p>
+<h2>结论</h2>
+<p>交易超时的直接原因是<strong>锁等待</strong>，不是 CPU/IO 不足，也不是某条 SQL 计划差。窗口内总等待 14909 秒，其中 <strong>88.2% 是 LOCK_EVENT</strong>；22 个会话被挡，最长约 <strong>1140 秒（约 19 分钟）</strong>。<code>UPDATE fl.acct</code>、<code>INSERT fl.uniq_race</code>、<code>INSERT fl.acct_child</code>、<code>LOCK TABLE fl.acct_child</code> 这些语句的窗口耗时几乎 100% 是等锁，CPU+IO 接近 0。</p>
+<p><font color="#2f6fdb">〔画像 EP-FL〕og5 是 FL（Fault Lab，故障演练模拟库），openGauss 5.0.3 单机 4 核 8G，每日 18:00–19:00 为造数窗口，窗口内会集中出现锁等待、WAL 写入高峰、临时文件落盘和慢 SQL，窗口外基本空闲。</font></p>
+<p>也就是说，18:20–18:40 正处演练造数窗口，这组锁等待是演练场景的一部分。</p>
+<p><font color="#2f6fdb">〔基线 BL-FL-LOCK_WAIT_SESSIONS〕FL 演练窗口 15–25 个被阻塞会话属演练预期，超过 40 个视为异常；本次 22 个落在预期内，真正超出阈值的是最长等待约 1140 秒（阈值 60 秒）。</font></p>
+<h2>根因（按影响排序）</h2>
+<ol><li><strong>fl.acct 行锁链（最长，约 19 分钟）</strong>：<code>10339 → 10340 → 10341 → 10338 → 10337 → 10336</code>。根会话 <strong>10336（fl:K1/root）</strong> 从 18:20:39 起处于 <strong>idle in transaction</strong>，持有 fl.acct 的 tuple/transactionid 锁；5 个会话排队执行 <code>UPDATE fl.acct SET bal = bal + ? WHERE id = ?</code>，从 18:20:46 一直等到 18:39:55。这是账户余额更新超时的主链。</li><li><strong>fl.acct_child 表锁链（约 15 分钟）</strong>：根会话 <strong>10362（fl:K6/parent）</strong> idle in transaction，持有 RowExclusiveLock；<code>LOCK TABLE fl.acct_child IN EXCLUSIVE MODE</code> 与 <code>INSERT fl.acct_child</code> 排队。显式 LOCK TABLE 把冲突从行级放大到整张子表。</li><li><strong>咨询锁未释放（约 15 分钟）</strong>：根会话 <strong>10369</strong> 持有会话级 advisory 锁（采样里没记到空闲会话），3 个会话在 <code>SELECT pg_advisory_lock(?)</code> 上排队。这类锁不随事务结束自动释放，连接回池后仍可能被空闲会话持有。</li><li><strong>uniq_race 同主键插入（约 15.5 分钟）</strong>：根会话 <strong>10365（fl:K7/first）</strong> idle in transaction，2 个会话的 <code>INSERT INTO fl.uniq_race(k, who)</code> 等 transactionid 锁；属于同一主键并发插入/重试未幂等的形态。</li><li><strong>fl.payments DDL 队列（约 2 分钟）</strong>：<code>ALTER TABLE fl.payments ADD COLUMN</code> 先被 10522（fl:K3/longread，idle in transaction）和 10343（fl:S1/q，active 长查询）的 AccessShareLock 挡住；ALTER 一旦排队，后面的普通读又排在 ALTER 后面，形成 DDL 锁队列放大。</li><li><strong>fl.order_items 非并发建索引（约 2 分钟）</strong>：<code>CREATE INDEX idx_fl_k5_items_note</code> 期间写请求等 RowExclusiveLock 约 130 秒。</li></ol>
+<p>如果只按“交易超时”这条线看，<strong>主因是第 1 条 fl.acct 行锁链</strong>；第 2–6 条是同一窗口内并发的其他锁故障，分别影响子表写入、咨询锁、唯一键插入和 payments 查询。</p>
+<p>根会话 10336 的状态是 idle in transaction——事务开着、但不执行 SQL，不是一条跑得很久的语句。这与本行历史案例的机制一致：</p>
+<p><font color="#2f6fdb">〔案例 S2-20260618-FSYSA-[模拟测试]某行SYSA日终批量更新阻塞〕联机服务在事务内调用外部征信接口超时，会话 idle in transaction 持有账户行锁，导致批量 UPDATE 逐级排队；处置确认后终止根会话，并把外部接口调用移出事务、事务内尽快提交。</font></p>
+<p>数据库侧只能看到它不提交、不放锁；是否在事务内调用了外部接口，需要应用侧核对 18:20 前的日志。</p>
+<h2>不是这些原因</h2>
+<ul><li>CPU 只占 DB time 的 <strong>12.3%</strong>（2697 秒 / 21921 秒），不是 CPU 打满。</li><li>缓存命中率 <strong>99.8%</strong>，IO 等待只占总等待 <strong>7.2%</strong>，不是 IO 瓶颈。</li><li>死锁 <strong>0</strong>，回滚 17 次（0.00%），不是死锁或大面积回滚。</li><li>临时文件溢出 <strong>6.8G</strong>，其中 77% 来自 sql_id 2858996927；这与 FL 库 work_mem=64kB 的落盘演练有关，会增加 IO 等待，但不是交易被卡 19 分钟的原因。</li><li>Top SQL 榜已排除 <strong>1 条内核系统 SQL</strong>（合计 2879.2 秒），所以榜单不是全量；但榜首前几条都是等锁语句，不是执行慢。</li></ul>
+<h2>处置建议</h2>
+<ul><li><strong>P0 现在确认</strong>：我刚查过，<strong>当前已无锁等待</strong>，阻塞已解除。当时的会话多半已结束，不要按历史会话号去 kill（会话号可能已被复用）。若复发，按手册处理。</li><li><strong>P0 复发时</strong>：<font color="#2f6fdb">〔手册 RB-LCK-001〕锁等待超过 30 秒或阻塞链 3 层以上时先定位根会话；根会话 idle in transaction 通知应用，10 分钟未解除且经审批后终止；active 先取消当前语句；只处理根会话，不终止链条中间的会话。</font></li><li><strong>P1 DDL 类</strong>：<font color="#2f6fdb">〔手册 RB-DDL-001〕执行 ALTER TABLE 或非并发 CREATE INDEX 后大量读写排队时，先取消 DDL 会话释放队列，找出 DDL 之前就在运行的长查询，再把 DDL 改到变更窗口并把会话级 lockwait_timeout 设为不超过 30 秒后重试。</font></li><li><strong>P1 应用改造</strong>：外部接口/下游调用移出数据库事务，事务内只做数据库操作并尽快提交；对 idle in transaction 加监控告警并评估 <code>idle_in_transaction_session_timeout</code>；咨询锁改用事务级 <code>pg_advisory_xact_lock</code>；uniq_race 插入做幂等/去重；联机时段避免 DDL，建索引优先 <code>CONCURRENTLY</code>。</li><li><strong>P2 演练复盘</strong>：这个窗口同时注入了行锁、表锁、咨询锁、唯一键插入竞争和 DDL 队列五类故障；如果演练目标是单一故障，建议分场景复现，避免归因混淆。</li></ul>
+<p><strong>风险等级</strong>：按生产口径 <strong>L4（严重：交易超时、最长阻塞约 19 分钟）</strong>；og5 是 FL 演练库，实际业务影响限于演练，当前已无锁等待。</p>
+<p><strong>报告链接</strong>：</p>
+<ul><li>时段健康检查：<a href="/dash/health?inst=api_10-x-x-x-postgres&amp;run=20261026T095910Z.span.json&amp;from=2026-10-24T18%3A19&amp;to=2026-10-24T18%3A40">打开报告</a></li><li>时段 Top SQL：<a href="/dash/topsql?inst=api_10-x-x-x-postgres&amp;run=20261026T095940Z.time.span.json&amp;by=time&amp;from=2026-10-24T18%3A19&amp;to=2026-10-24T18%3A40">打开报告</a></li></ul>
+</div></div><div><h3>改造后 <small>117 秒 · 6237 字 · 格式 5/5</small></h3><ul class='ck'><li class='ok'>✓ 段落:现象 → 根因 → 解决方案 → 总结</li><li class='ok'>✓ 开头:开头有总体状态</li><li class='ok'>✓ 展开提议:结尾有「需要就 … 吗?」</li><li class='ok'>✓ 两种读者:应用视角 5 处、数据库机制 5 处</li><li class='ok'>✓ 引用:5 处上色引用,出处与颜色都对</li></ul><div class='ans'>
+<p>你要看的是 <strong>10-24 18:20–18:40</strong>；实际评估的是<strong>快照 3197（18:19）→ 快照 3204（18:40），共 21.1 分钟</strong>，完整覆盖（起点取不晚于 18:20 的最近快照，终点取不早于 18:40 的最近快照）。</p>
+<p><strong>总体状态：🔴 严重</strong> <strong>驱动：</strong> 4 个 idle in transaction（事务开着不提交）的会话长期持锁，形成 14 条阻塞链、22 个会话被挡，最长约 1140–1160 秒，<code>UPDATE fl.acct</code> 等语句大面积超时。 <strong>判断校验：</strong> ✓ 已锚定（5 条确定性发现全覆盖、无夸大、无遗漏）</p>
+<h2>短结论</h2>
+<p>交易超时不是 CPU 或 IO 不够，也不是死锁（时段内死锁 0），而是<strong>锁等待</strong>：几个空闲事务一直不释放 <code>fl.acct</code>、<code>fl.acct_child</code>、<code>fl.payments</code> 上的锁，把账户更新、子表写入和 DDL 全部堵住；同时段还叠加了 <code>LOCK TABLE</code>、<code>ALTER TABLE</code> 加列、<code>CREATE INDEX</code> 这类强锁操作。等待一度接近 19 分钟，应用侧自然表现为交易超时。</p>
+<h2>① 现象</h2>
+<table>
+<tr><th>维度</th><th>级别</th><th>关键指标</th></tr>
+<tr><td>Window Load</td><td>🟡</td><td>DB time 21920.8 秒，平均活跃会话 17.27，CPU 只占 12.3%</td></tr>
+<tr><td>Window Transactions</td><td>🟢</td><td>提交 13,001,141，回滚 17（0.00%），死锁 0</td></tr>
+<tr><td>Window IO / Temp / Checkpoint</td><td>🟠</td><td>缓存命中 99.8%，临时文件溢出 6.8G，checkpoint 21 次</td></tr>
+<tr><td>Window Waits</td><td>🟡</td><td>LOCK_EVENT 14909.34 秒，占总等待 88.2%</td></tr>
+<tr><td>Locks（详见 gaussdb-lockwait）</td><td>🔴</td><td>14 条阻塞链、22 个会话被挡，最长约 1140–1160 秒</td></tr>
+<tr><td>Dead Tuples &amp; Bloat</td><td>—</td><td>回看不了：膨胀是此刻的状态</td></tr>
+<tr><td>Connections</td><td>—</td><td>回看不了：连接数与线程池是此刻的状态</td></tr>
+<tr><td>Long &amp; Idle Transactions</td><td>—</td><td>回看不了：长事务是此刻的状态（当时的空闲事务由锁采样回看到）</td></tr>
+<tr><td>Replication / Storage</td><td>—</td><td>回看不了：复制与占用量是此刻的状态</td></tr>
+</table>
+<p><code>Window Top SQL</code> 已排除 1 条内核系统 SQL（sqlid 648622204，合计 2879.2 秒），这条正是等 <code>pg_advisory_lock</code> 的语句，它的等待量在锁维度里体现。</p>
+<p><strong>应用视角：</strong> 这段时间卡住的是账户余额更新、子账户写入、订单查询/对账等接口。同一账户的请求互相排队，直到应用侧超时；还有变更类操作（锁表、加列、建索引）排在队列后面，把后面的读写一起拖住。</p>
+<p><strong>数据库机制：</strong> 根因不在 SQL 本身慢，而在于锁没释放。时段内等待时长 14909 秒集中在 LOCK_EVENT（88.2%），其中 <code>transactionid</code> 6486.2 秒、<code>relation</code> 3085.8 秒、<code>advisory</code> 2879.2 秒；CPU 时间只有 2697.5 秒，说明数据库大量时间是在等锁，不是在算。</p>
+<h2>② 根因和证据链</h2>
+<h3>1. 🔴 LOCK_WAIT_LONG：最长锁等待约 1140 秒（阈值 ≥60 秒）</h3>
+<p><strong>证据：</strong> 会话 10337 等会话 10336 的 <code>transactionid</code> ShareLock，从 18:20:46 持续到 18:39:55，采到 114 次（每 10 秒一次），约 1140 秒；完整链为 <code>10339 → 10340 → 10341 → 10338 → 10337 → 10336</code>，链头在等 <code>fl.acct</code> 的 tuple ExclusiveLock，约 1160 秒。时段内 <code>UPDATE fl.acct SET bal = bal + ? WHERE id = ?</code>（sqlid 3167133288）调用 9 次、累计 5924.99 秒，平均每次 658 秒，是交易超时的直接落点。</p>
+<p><strong>应用视角：</strong> 账户余额更新接口本来应该是毫秒级，这次平均要等 11 分钟才结束，必然超过应用超时阈值。</p>
+<p><strong>数据库机制：</strong> 根会话 10336 从 18:20:39 开了事务后进入 idle in transaction，持有 <code>fl.acct</code> 的行锁/tuple 锁不放；后续 5 个会话按 <code>transactionid</code>、<code>tuple</code> 逐级排队，形成 5 层阻塞链。<code>transactionid</code> 等待本质是在等前一个事务提交或回滚，事务不结束，整条链都不动。</p>
+<h3>2. 🟠 LOCK_ROOT_IDLE_XACT：4 个空闲事务持锁</h3>
+<p><strong>证据：</strong></p>
+<ul><li>会话 10336（应用标签 <code>fl:K1/root</code>）从 18:20:39 起 idle in transaction，直接或间接挡住 5 个会话；</li><li>会话 10362（<code>fl:K6/parent</code>）从 18:23:44 起 idle in transaction，持 <code>fl.acct_child</code> 的 RowExclusiveLock，挡住 4 个会话；紧随其后的 <code>LOCK TABLE fl.acct_child IN EXCLUSIVE MODE</code>（sqlid 3973385787，平均耗时 420 秒）等了约 800 秒；</li><li>会话 10522（<code>fl:K3/longread</code>）从 18:29:55 起 idle in transaction，持 <code>fl.payments</code> 的 AccessShareLock，挡住 4 个会话；同表 <code>ALTER TABLE fl.payments ADD COLUMN fl_k3_tmp int</code>（sqlid 2404118272）等 AccessExclusiveLock 约 120 秒；</li><li>另有会话 10369 持有 advisory 锁（等待方语句为 <code>SELECT pg_advisory_lock(?)</code>，sqlid 648622204），挡住 3 个会话约 920 秒；该持有者没被采样到，属于会话级咨询锁持有者。</li></ul>
+<p><strong>应用视角：</strong> 这些会话的共同特征是&quot;事务开着、人不在干活&quot;——很可能是事务里调了外部接口、等待用户操作，或者异常分支没走完。它们占着锁，后面的正常交易就全排队。</p>
+<p><strong>数据库机制：</strong> idle in transaction 的会话仍持有已获得的行锁、表锁，事务不结束锁就不释放。<code>LOCK TABLE ... EXCLUSIVE</code>、<code>ALTER TABLE ... ADD COLUMN</code> 需要 AccessExclusiveLock，遇到前面有长事务/长读时会一直排在锁队列里，并继续挡住后面所有读写，形成&quot;DDL 锁队列放大&quot;。这与知识库里的历史路径一致：<font color="#2f6fdb">事务内调用外部接口超时，会话 idle in transaction 持有行锁，导致批量 UPDATE 逐级排队形成阻塞链</font>(引用自本行案例库 S2-20260618-FSYSA-[模拟测试]某行SYSA日终批量更新阻塞)；<font color="#2f6fdb">会话级 pg_advisory_lock 在异常分支未释放，连接回池后被空闲会话持有，后续作业全部排队</font>(引用自本行案例库 S3-20260309-FSYSD-SYSD清算作业咨询锁未释放导致排队)。</p>
+<h3>3. 🟠 WIN_TEMP_SPILL：时段临时文件溢出 6.8G（阈值 &gt;512M）</h3>
+<p><strong>证据：</strong> 库级 <code>temp_bytes</code> 6.8G，其中能归到语句的 5380.37MiB（占 77%），落盘最多的是 sqlid 2858996927（窗口函数查询，<code>SELECT count(*), max(rn), max(rsum)...</code>），占语句级 100%、库级 77%；其余 1604.58MiB 归不到具体语句。</p>
+<p><strong>应用视角：</strong> 这条偏分析的查询把排序结果写到了磁盘，说明当时并发跑了对账/统计类大查询；它不是本次超时的主因，但会额外吃 IO 和临时空间。</p>
+<p><strong>数据库机制：</strong> 排序/哈希放不进 <code>work_mem</code> 就落临时文件。它和锁等待是同一波并发里的两个表现，但对交易超时的因果链要弱于锁。</p>
+<h3>4. 🟡 WIN_WAIT_HEAVY / WIN_WAIT_SKEW：CPU 12.3%、锁等待占 88.2%</h3>
+<p><strong>证据：</strong> DB time 21920.8 秒里 CPU 只有 2697.5 秒；LOCK_EVENT 14909.34 秒，占总等待 88.2%。</p>
+<p><strong>应用视角 / 数据库机制：</strong> 这两条是对上面根因的交叉验证——瓶颈是&quot;等&quot;，不是&quot;算&quot;，不用往 CPU 扩容或参数调优方向找。</p>
+<h2>③ 解决方案</h2>
+<p><strong>P0：改应用事务边界，消灭 idle in transaction 持锁</strong></p>
+<ul><li>改什么：<code>fl:K1/root</code>、<code>fl:K6/parent</code>、<code>fl:K3/longread</code> 这几类事务，把外部接口调用、用户交互、长耗时逻辑移到事务外，事务内只做数据库操作并尽快提交。</li><li>为什么：本次 22 个被挡会话的根都是这类空闲事务（证据见 ②.2）。</li><li>详细做法：应用侧按事务边界拆分；异常分支必须显式 rollback/commit，连接归还前不能带未结束事务。</li><li>风险：低（应用改造）；<code>[需人工执行]</code>。</li></ul>
+<p><strong>P0（复发时应急）：只处理根会话</strong></p>
+<ul><li>改什么：定位根会话后，idle in transaction 先通知应用，10 分钟未解除经审批后终止；active 先 cancel 当前语句；不得杀链条中间的会话。</li><li>为什么：杀掉中间会话，后面的会话会立刻改为等根会话，阻塞不解除。</li><li>依据：<font color="#2f6fdb">锁等待超过 30 秒或阻塞链 3 层以上时，先用 gaussdb-lockwait 定位根会话；idle in transaction 通知应用，10 分钟未解除经值班经理审批后终止；active 先 cancel 当前语句；只处理根会话</font>(引用自处置手册库 RB-LCK-001)。</li><li>风险：中（会话回滚）；<code>[需人工执行]</code>。</li></ul>
+<p><strong>P1：会话级超时参数由 DBA 评估</strong></p>
+<ul><li>改什么：评估 <code>idle_in_transaction_session_timeout</code>（历史案例建议 300 秒）；DDL/变更会话的 <code>lockwait_timeout</code> 设为不超过 30 秒。</li><li>为什么：本次等待一直持续到接近 19 分钟，与 openGauss 5.0.x 默认 <code>lockwait_timeout</code> 20 分钟的水平相当，超时阈值过大会放大排队。</li><li>依据：<font color="#2f6fdb">DDL 执行前须检查目标表上的长事务与长查询，并把会话级 lockwait_timeout 设为不超过 30 秒</font>(引用自贵行规范库 GS-CHG-003)；<font color="#2f6fdb">idle in transaction 状态超过 300 秒的会话必须触发告警；数据库侧不得自行终止业务会话，须通知应用运维确认后处理</font>(引用自贵行规范库 GS-CONN-002)。</li><li>风险：中；<code>[需人工执行]</code>，取值须 DBA 结合业务确认。</li></ul>
+<p><strong>P1：DDL 与锁表操作移到变更窗口</strong></p>
+<ul><li>改什么：<code>LOCK TABLE fl.acct_child IN EXCLUSIVE MODE</code>、<code>ALTER TABLE fl.payments ADD COLUMN</code>、<code>CREATE INDEX ... ON fl.order_items</code> 放到低峰变更窗口；建索引用 <code>CREATE INDEX CONCURRENTLY</code>；DDL 前检查目标表上的长事务与长查询。</li><li>为什么：本次 DDL 排在空闲事务后面，<code>LOCK TABLE</code> 等了约 800 秒，<code>ALTER TABLE</code> 等了约 120 秒，并继续挡住后续读写。</li><li>风险：中；<code>[需人工执行]</code>。</li></ul>
+<p><strong>P1：咨询锁改为事务级</strong></p>
+<ul><li>改什么：把会话级 <code>pg_advisory_lock</code> 改为事务级 <code>pg_advisory_xact_lock</code>，异常分支确保释放；锁监控补上 <code>locktype=advisory</code> 的等待。</li><li>为什么：本次 advisory 等待约 920 秒、3 个会话被挡，且持有者没被常规表锁采样覆盖。</li><li>风险：低；<code>[需人工执行]</code>。</li></ul>
+<p><strong>P2：临时文件落盘治理</strong></p>
+<ul><li>改什么：对 sqlid 2858996927 的窗口函数查询做分批/改写或单独限流，必要时只对该会话 <code>SET work_mem</code>，不要全局调大。</li><li>为什么：它占时段临时文件落盘的 77%（5380MiB），会额外消耗 IO。</li><li>风险：低；<code>[需人工执行]</code>。</li></ul>
+<h2>④ 总结和结论</h2>
+<p>本次交易超时的根因是<strong>空闲事务持锁引发的连锁阻塞</strong>，不是死锁（0 次）、不是 CPU/IO 瓶颈。证据链清晰：4 个 idle in transaction 会话 → 账户/子表/支付表锁被占 → <code>UPDATE fl.acct</code> 等语句排队 1140 秒以上 → 应用侧交易超时；同窗口的 DDL 和 advisory 锁进一步放大了阻塞面。</p>
+<p>需要你配合确认两件事：一是<strong>这段时间是否演练</strong>——贵行基线 <code>BL-FL-ACTIVE_SESSIONS</code> 把 18:00–19:00 标为演练窗口（20–60 个活跃会话属预期），本次平均活跃 17.27，请确认是否演练；若为生产请按真实故障复盘。二是若要定位根会话为什么空闲，需要应用侧 <code>fl:K1/root</code>、<code>fl:K6/parent</code>、<code>fl:K3/longread</code> 在 18:20–18:40 的日志（数据库日志里没有死锁明细，因为死锁 0）。</p>
+<p>报告已存档：<a href="/dash/health?inst=api_10-x-x-x-postgres&amp;run=20261026T111839Z.span.json&amp;from=2026-10-24T18%3A19&amp;to=2026-10-24T18%3A40">打开报告</a></p>
+<p>需要我把这段时间的 WDR 等待事件明细再展开吗？需要我针对 sqlid 2858996927 的临时文件落盘做 SQL 级分析吗？需要我把这几条阻塞链整理成可复盘的会话清单吗？</p>
+</div></div></div></section><section id='F2'><h2>F2 · 故障排查</h2><p class='prompt'>og5 在 2026-10-24 18:20 到 18:40 之间的锁等待情况怎么样?根会话都有哪些,按本行规范和手册该怎么处置?</p><div class='two'><div><h3>改造前 <small>32 秒 · 3078 字 · 格式 0/5</small></h3><ul class='ck'><li class='bad'>✗ 段落:缺「现象」</li><li class='bad'>✗ 开头:开头没有「总体状态」</li><li class='bad'>✗ 展开提议:结尾没有展开提议</li><li class='bad'>✗ 两种读者:应用视角 0 处、数据库机制 0 处</li><li class='bad'>✗ 出处括号:10 处上色的句子后面没有「(引用自 …)」:依据《锁阻塞：定位并处理根会话》(RB-;依据《锁阻塞：定位并处理根会话》(RB-;依据《idle in transacti</li></ul><div class='ans'>
+<h2>结论</h2>
+<p>og5 在 <strong>2026-10-24 18:20–18:40</strong> 的锁等待：采样覆盖 3520 个样本，<strong>22 个会话被挡</strong>，最长约 <strong>1140 秒</strong>，脚本判定 <strong>CRITICAL（LOCK_WAIT_LONG，阈值 60s）</strong>，另有 4 个会话 idle in transaction 持锁。</p>
+<p>本实例画像 FL 的基线是「演练窗口 18:00–19:00，锁等待会话 15–25 个属预期」——本次 22 个在演练预期范围内，但单条链持续近 19 分钟，仍属 CRITICAL，需要按处置手册走。</p>
+<h2>根会话（7 个）</h2>
+<table>
+<tr><th>根会话</th><th>时段内最后状态</th><th>应用</th><th>事务开始</th><th>直接/间接受挡</th><th>特征</th></tr>
+<tr><td>10336</td><td>idle in transaction</td><td>fl:K1/root</td><td>18:20:39</td><td>5</td><td>最长链：10339→10340→10341→10338→10337→10336，5 层，<code>UPDATE fl.acct SET bal…</code> 在 transactionid/tuple 上排队</td></tr>
+<tr><td>10362</td><td>idle in transaction</td><td>fl:K6/parent</td><td>18:23:44</td><td>4</td><td><code>fl.acct_child</code> 上 INSERT 等 transactionid，随后 <code>LOCK TABLE … EXCLUSIVE</code> 把 relation 队列放大</td></tr>
+<tr><td>10369</td><td>未采到（空闲会话不采样，advisory 持有者）</td><td>—</td><td>—</td><td>3</td><td><code>SELECT pg_advisory_lock(?)</code> 会话级咨询锁未释放，3 个会话排咨询锁</td></tr>
+<tr><td>10343</td><td>active</td><td>fl:S1/q</td><td>18:20:44</td><td>4</td><td>长 SELECT 持 <code>fl.payments</code> AccessShareLock，挡住后面的 <code>ALTER TABLE fl.payments ADD COLUMN</code></td></tr>
+<tr><td>10522</td><td>idle in transaction</td><td>fl:K3/longread</td><td>18:29:55</td><td>4</td><td>同上 payments 队列的另一个根</td></tr>
+<tr><td>10365</td><td>idle in transaction</td><td>fl:K7/first</td><td>18:24:05</td><td>2</td><td><code>INSERT INTO fl.uniq_race</code> 首笔事务不提交，后续同主键 INSERT 排队</td></tr>
+<tr><td>10466</td><td>active</td><td>fl:K5/ddl</td><td>18:27:34</td><td>2</td><td><code>CREATE INDEX … ON fl.order_items</code>，两条 DML 等 relation 锁</td></tr>
+</table>
+<h2>按本行规范与手册的处置</h2>
+<p><strong>重要前提</strong>：这是事后回看，当时的会话多半已结束、会话号可能被复用，<strong>不能据此 kill</strong>；现在还堵着就先跑此刻的锁等待分析再处置。</p>
+<ol><li>通用原则：<font color="#2f6fdb">依据《锁阻塞：定位并处理根会话》(RB-LCK-001) 第二章：锁等待超过 30 秒或阻塞链 3 层以上时，先用 gaussdb-lockwait 定位根会话；只处理根会话，不得终止链条中间的会话。</font> 杀掉中间节点不会解堵（后面的会话会立刻改为等根）。</li><li>idle in transaction 根会话（10336 / 10362 / 10522 / 10365）：<font color="#2f6fdb">依据《锁阻塞：定位并处理根会话》(RB-LCK-001) 第二章：通知应用处理，10 分钟未解除经审批后用 pg_terminate_session(pid, sessionid)；执行前提是应用运维确认根会话正在执行的交易，联机时段由 DBA 终止会话须值班经理审批。</font> 同时对应规范：<font color="#2f6fdb">依据《idle in transaction 会话告警》(GS-CONN-002)：idle in transaction 超过 300 秒必须告警；数据库侧不得自行终止业务会话，须通知应用运维确认后处理；联机时段由 DBA 终止须值班经理审批。</font></li><li>active 根会话（10343 / 10466）：<font color="#2f6fdb">依据《锁阻塞：定位并处理根会话》(RB-LCK-001) 第二章：根会话 active 时先用 pg_cancel_session 取消当前语句，保住会话。</font></li><li>咨询锁根会话 10369：<font color="#2f6fdb">依据《锁阻塞：定位并处理根会话》(RB-LCK-001) 第二章：咨询锁持有者同样按根会话处理。</font> 会话结束时会话级咨询锁才释放，长期应改用事务级 <code>pg_advisory_xact_lock</code>。</li><li>DDL 相关（10466 的 CREATE INDEX、10523 排在 10343 后面的 ALTER）：<font color="#2f6fdb">依据《DDL 锁队列放大》(RB-DDL-001) 第三章：先 pg_cancel_session 取消 DDL 会话释放队列（不是终止后面排队的查询），找出 DDL 之前就在运行的长查询，再把 DDL 改到变更窗口、会话级 lockwait_timeout 设为 30 秒后重试。</font> <font color="#2f6fdb">依据《DDL 执行前须检查目标表上的长事务与长查询》(GS-CHG-003)：DDL 前须检查目标表长事务/长查询，且会话级 lockwait_timeout 不超过 30 秒；联机时段 DDL 须提交变更审批单并经值班经理批准。</font></li><li>长期整改（针对 10336/10362/10522/10365 这类持锁空闲事务）：<font color="#2f6fdb">依据案例《[模拟测试]某行SYSA日终批量更新阻塞》(S2-20260618-FSYSA-[模拟测试]某行SYSA日终批量更新阻塞)：应用调整事务边界，把外部接口调用移到事务外并尽快提交；评估设置 idle_in_transaction_session_timeout（如 300 秒，由 DBA 结合业务确认取值），并对 idle in transaction 超 60 秒且持锁的会话增加监控告警。</font></li><li>验证与复发标志：<font color="#2f6fdb">依据《锁阻塞：定位并处理根会话》(RB-LCK-001) 第二章：再跑 lockwait，阻塞链消失、活跃会话回落到基线即恢复。</font> 复发迹象为 transactionid/tuple 等待集中出现、存在 idle in transaction 持锁会话、阻塞关系最终都指向同一个根会话。</li></ol>
+<p>另外可排除两项已知缺陷：<font color="#2f6fdb">依据缺陷 KD-0003《千分区表锁管理器争用》，本环境 5.0.3 不受影响；依据缺陷 KD-0002《子事务过多时 CLog 相关锁争用》，本环境 5.0.3 不受影响。</font> 本次等待集中在业务行锁/表锁与咨询锁，不涉及这两类内核争用。</p>
+</div></div><div><h3>改造后 <small>91 秒 · 4200 字 · 格式 5/5</small></h3><ul class='ck'><li class='ok'>✓ 段落:现象 → 根因 → 解决方案 → 总结</li><li class='ok'>✓ 开头:开头有总体状态</li><li class='ok'>✓ 展开提议:结尾有「需要就 … 吗?」</li><li class='ok'>✓ 两种读者:应用视角 3 处、数据库机制 3 处</li><li class='ok'>✓ 引用:8 处上色引用,出处与颜色都对</li></ul><div class='ans'>
+<p><strong>评估时段</strong>：你要看 2026-10-24 18:20–18:40；健康检查实际按快照 3197（18:19）→ 3204（18:40）评估了 21.1 分钟，完整覆盖；锁等待回看使用活跃会话采样，每 10 秒一个样本。说明：lockwait 有一行覆盖提示写“这一段不在采样里”，但同一份输出给出了该时段 <strong>3520 个样本</strong>和逐条阻塞链，健康检查也取到同一批链，因此以下按实际采到的样本下结论；10 秒粒度下，短于 10 秒的等待可能漏采。</p>
+<p><strong>总体状态：🔴严重</strong>　驱动：最长锁等待约 1160 秒（阈值 60 秒），14 条阻塞链、22 个会话被挡，4 个根会话是空闲事务持锁。</p>
+<p>这 20 分钟是典型的锁等待连锁阻塞：多个会话开着事务不提交，或持有会话级咨询锁，把账户更新、子表写入、付款表变更一层层堵住，最长约 19 分钟。DB time 21920.8 秒里 CPU 只占 12.3%，LOCK_EVENT 占总等待 88.2%，所以不是 CPU 或 IO 不够。</p>
+<h2>① 现象</h2>
+<p><strong>应用视角</strong>：这段时间账户余额更新、子表写入、付款相关查询大面积卡住，交易超时，批量跑不完；不是机器扛不住，而是在排队等锁。</p>
+<p><strong>数据库机制</strong>：采样里 22 个会话被挡，最久从 18:20:46 等到 18:40:16，约 1160 秒；等待集中在 transactionid（6486.2 秒）、relation（3085.8 秒）、advisory（2879.2 秒）。同一时段提交 13001141、回滚 17、<strong>死锁 0</strong>；临时文件溢出 6.8G（其中 77% 来自 sqlid 2858996927）。<font color="#2f6fdb">锁等待会话数平时 0–2 个、演练窗口 15–25 个，超过 40 个视为异常</font>(引用自贵行基线库 BL-FL-LOCK_WAIT_SESSIONS)，本次 22 个落在演练预期区间内。连接数、长事务、膨胀、复制是瞬时状态，<strong>这段历史回看不了</strong>。</p>
+<h2>② 根因</h2>
+<p><strong>应用视角</strong>：几笔“开了事务却没往下走”的会话是源头——有的在事务里等外部调用，有的拿会话级咨询锁没释放，还有一条长查询和一条建索引语句把 DDL 队列顶住。后面所有等锁的会话都是被这几笔拖住的。</p>
+<p><strong>数据库机制</strong>：7 个根会话分三类，证据如下：</p>
+<table>
+<tr><th>根会话</th><th>状态/应用</th><th>事务开始</th><th>挡住</th><th>关键锁 / 对象</th><th>约等</th><th>链头语句</th></tr>
+<tr><td>10336</td><td>idle in transaction / fl:K1/root</td><td>18:20:39</td><td>5</td><td>tuple+transactionid / fl.acct</td><td>1160s</td><td><code>UPDATE fl.acct SET bal = bal + ? WHERE id = ?</code>（5 层链 10339→10340→10341→10338→10337→10336）</td></tr>
+<tr><td>10362</td><td>idle in transaction / fl:K6/parent</td><td>18:23:44</td><td>4</td><td>relation RowExclusiveLock / fl.acct_child</td><td>940s</td><td>链中 10360 执行 <code>LOCK TABLE fl.acct_child IN EXCLUSIVE MODE</code></td></tr>
+<tr><td>10369</td><td>未采到（会话级咨询锁持有者）</td><td>—</td><td>3</td><td>advisory ExclusiveLock</td><td>940s</td><td><code>SELECT pg_advisory_lock(?)</code>（10376→10377→10375→10369）</td></tr>
+<tr><td>10343</td><td>active / fl:S1/q</td><td>18:20:44</td><td>4</td><td>relation AccessShareLock / fl.payments</td><td>130s</td><td>长查询 SELECT，堵住后面的 ALTER TABLE</td></tr>
+<tr><td>10522</td><td>idle in transaction / fl:K3/longread</td><td>18:29:55</td><td>4</td><td>relation AccessShareLock / fl.payments</td><td>130s</td><td>持锁不提交，<code>ALTER TABLE fl.payments ADD COLUMN fl_k3_tmp int</code> 排在它后面</td></tr>
+<tr><td>10365</td><td>idle in transaction / fl:K7/first</td><td>18:24:05</td><td>2</td><td>transactionid</td><td>940s</td><td><code>INSERT INTO fl.uniq_race(k, who) VALUES (?, ?)</code></td></tr>
+<tr><td>10466</td><td>active / fl:K5/ddl</td><td>18:27:34</td><td>2</td><td>relation RowExclusiveLock / fl.order_items</td><td>130s</td><td><code>CREATE INDEX idx_fl_k5_items_note ON fl.order_items (...)</code></td></tr>
+</table>
+<p>其中 10343、10522 是 DDL 队列放大的源头：ALTER 等它们的 AccessShareLock，后面的读又排在 ALTER 后面。transactionid 等待是行锁冲突（在等对方事务结束），不是表锁。死锁为 0，没有牺牲者。</p>
+<h2>③ 解决方案</h2>
+<p><strong>应用视角</strong>：先解除根会话，且只处理根；随后把“事务里等外部接口、拿锁不释放”的写法改掉，否则下次还会重演。</p>
+<p><strong>数据库机制</strong>：</p>
+<p><strong>P0 应急（若同类阻塞再现；本次是事后回看，当时的会话多半已结束、会话号可能复用，不要按历史会话号直接 kill，先跑此刻模式拿新的 pid/sessionid。全部 <code>[需人工执行]</code>）</strong></p>
+<ol><li>idle in transaction 根（10336/10362/10522/10365）：<font color="#2f6fdb">通知应用运维确认交易，10 分钟未解除经值班经理审批后用 pg_terminate_session(pid, sessionid) 终止</font>(引用自处置手册库 RB-LCK-001)，<font color="#2f6fdb">数据库侧不得自行终止业务会话，联机时段由 DBA 终止须值班经理审批</font>(引用自贵行规范库 GS-CONN-002)。风险：中（根事务回滚，应用需重提）。</li><li>active 根：10343 的长查询先 <code>pg_cancel_session</code> 取消语句；10466 的建索引按 <font color="#2f6fdb">先取消 DDL 会话释放队列，再把 DDL 改到变更窗口、会话级 lockwait_timeout 设为 30 秒后重试</font>(引用自处置手册库 RB-DDL-001)。风险：低（只取消语句，会话保留）。</li><li>咨询锁持有者 10369 同样按根会话处理，<font color="#2f6fdb">只处理根会话，不得终止链条中间的会话</font>(引用自处置手册库 RB-LCK-001)。风险：中。</li><li>不要单独杀 10337/10338/10340/10341 等排队节点，杀了会立刻改等根会话，现场不变。</li></ol>
+<p><strong>P1 变更与监控（风险：低）</strong></p>
+<ul><li><font color="#2f6fdb">DDL 执行前须检查目标表上的长事务与长查询，并把会话级 lockwait_timeout 设为不超过 30 秒</font>(引用自贵行规范库 GS-CHG-003)；本次 18:27 的 CREATE INDEX 与 18:29 的 ALTER 在联机时段执行，需补变更审批记录。</li><li>对 idle in transaction 超过 300 秒的会话建告警，满足<font color="#2f6fdb">超过 300 秒必须触发告警</font>(引用自贵行规范库 GS-CONN-002)的要求。</li></ul>
+<p><strong>P2 应用改造（风险：中，需排期）</strong></p>
+<ul><li><font color="#2f6fdb">事务内调用外部接口超时会让会话 idle in transaction 持有账户行锁、批量逐级排队；应把外部接口调用移到事务外，事务内只做数据库操作并尽快提交，并评估设置 idle_in_transaction_session_timeout（如 300 秒，取值由 DBA 结合业务确认）</font>(引用自本行案例库 S2-20260618-FSYSA)。</li><li>会话级咨询锁改为事务级（事务结束自动释放），避免异常分支漏放；<code>fl.uniq_race</code> 这类同一唯一键并发插入由网关做幂等去重。</li></ul>
+<h2>④ 总结</h2>
+<p>18:20–18:40 共 14 条阻塞链、22 个会话被挡，最长约 19 分钟，源头是 4 类根会话（空闲事务、会话级咨询锁、长查询、联机时段 DDL），不是 CPU/IO。处置口径以 RB-LCK-001 为主：先定位根、只处理根，idle 先通知应用、审批后终止，active 先 cancel；DDL 按 RB-DDL-001 取消并移出联机时段。</p>
+<p>需要你配合：确认这是不是 18:00–19:00 的演练窗口（22 个被挡会话与基线 15–25 吻合）；若是生产，请应用 owner 确认 10336/10362/10522/10365 当时在跑什么交易。死锁为 0，不需要数据库日志。</p>
+<p>健康检查报告：<a href="/dash/health?inst=api_10-x-x-x-postgres&amp;run=20261026T112010Z.span.json&amp;from=2026-10-24T18%3A19&amp;to=2026-10-24T18%3A40">打开报告</a></p>
+<p>需要我把 10343 那条长查询的执行计划调出来看吗？需要我按此刻模式再查一次现在还有没有同类阻塞吗？需要看一下 6.8G 临时文件落盘的那条 SQL 吗？</p>
+</div></div></div></section><section id='F3'><h2>F3 · 故障排查</h2><p class='prompt'>og5 在 2026-10-24 18:32 到 18:36 的临时文件落盘严重吗?能不能直接把 work_mem 全局调大?</p><div class='two'><div><h3>改造前 <small>91 秒 · 1805 字 · 格式 0/6</small></h3><ul class='ck'><li class='bad'>✗ 段落:缺「现象」</li><li class='bad'>✗ 开头:开头没有「总体状态」</li><li class='bad'>✗ 展开提议:结尾没有展开提议</li><li class='bad'>✗ 两种读者:应用视角 0 处、数据库机制 0 处</li><li class='bad'>✗ 引用写法:还在用旧写法〔类型 ID〕</li><li class='bad'>✗ 出处括号:3 处上色的句子后面没有「(引用自 …)」:〔基线 BL-FL-TEMP_BYTES;〔手册 RB-TMP-001〕临时文件写;〔Wiki WK-0002〕旧 Wiki</li></ul><div class='ans'>
+<h2>结论</h2>
+<p><strong>落盘严重（🟠 告警，风险 L3），但不能全局调大 <code>work_mem</code>。</strong></p>
+<h3>1. 落盘情况</h3>
+<p>实际分析窗口是 <strong>18:28–18:36</strong>，比你问的 18:32–18:36 宽 4 分钟：该时段只有 18:28、18:36 两张快照，WDR 只能按 <code>3201 → 3203</code> 取。</p>
+<table>
+<tr><th>指标</th><th>数值</th></tr>
+<tr><td>库级临时文件落盘</td><td>5853.65 MiB / 8 分钟（约 43 GiB/h）</td></tr>
+<tr><td>可归因到语句</td><td>4483.64 MiB（77%），全部来自 sql_id <code>2858996927</code></td></tr>
+<tr><td>归不到语句</td><td>1370.01 MiB（23%）</td></tr>
+<tr><td>该 SQL 调用/耗时/CPU</td><td>5 次 / 231.5s / 111.2s，物理读 34000 块</td></tr>
+</table>
+<p>这条 SQL 叠了 4 个窗口函数（<code>row_number</code>、<code>sum() over</code>、<code>rank</code>、<code>first_value</code>），执行计划里对应 4 个 Sort + 4 个 WindowAgg——16MB 的 <code>work_mem</code> 放不下这些排序，就是这 4.5GB 落盘的来源。</p>
+<p><font color="#2f6fdb">〔基线 BL-FL-TEMP_BYTES_PER_HOUR〕FL 临时文件写入量平时低于 200MB/h，演练窗口（窗口函数落盘场景）2–8GB/h，超过 10GB/h 视为异常。</font></p>
+<p>按此基线，本次约 43GiB/h，是 10GB/h 阈值的 4 倍多，也超过演练窗口上限。考虑到 og5 是测试库、窗口内还有明显的压测类语句（DO 循环、<code>CREATE INDEX</code>、<code>ALTER TABLE</code>），业务影响面有限，但落盘量本身确实超标。另注：同窗口关系锁等待 564.86s（占等待 38.68%），DDL 各约 132s 且 CPU=0 是在等锁，与落盘是两件事。Top SQL 已排除 31 条内核系统 SQL（合计 3.7 秒）。</p>
+<h3>2. 为什么不能全局调大 <code>work_mem</code></h3>
+<ol><li><strong>已经超卖</strong>：现值 <code>work_mem=16MB</code>，实际并发上限是线程池 800，16MB × 800 = <strong>12.5GB &gt; <code>max_process_memory</code> 12.0GB</strong>，参数体检已报 <code>CFG_WORKMEM_OVERCOMMIT</code> 🟠。再全局调大，只会让“并发一上来就内存不足”的风险更高。</li><li><strong>本行手册明确禁止</strong>：<font color="#2f6fdb">〔手册 RB-TMP-001〕临时文件写入量超过基线（每小时 10GB）或磁盘使用率超过 85% 时，用 gaussdb-memanalyze 定位落盘最多的 SQL，审批后对该会话 SET work_mem，推动 SQL 改写或分批；不得全局调大 work_mem。</font></li><li><strong>旧建议已作废</strong>：<font color="#2f6fdb">〔Wiki WK-0002〕旧 Wiki 第 6 条“全局 work_mem 调到 1GB”与现行应急处置手册“不得全局调大 work_mem”冲突，已过时，不作为处置依据。</font></li></ol>
+<h3>3. 建议</h3>
+<ul><li><strong>只对该会话/该 SQL 调</strong>：审批后对执行这条 SQL 的会话 <code>SET work_mem = &lt;按会话内存余量评估&gt;</code> <code>[需人工执行]</code>，不要设成全局。</li><li><strong>更根本是改 SQL</strong>：4 个窗口函数要 4 次排序，先减少参与窗口的行数（过滤、预聚合、分批），或合并能共用一次排序的窗口。索引能否消掉 Sort 需用真实参数人工验证——本连接不支持 hypopg，脚本不会给未经验证的倍数。</li><li>剩余 23%（1370MiB）归不到具体语句，要再细分需开算子级采样/事后记录；现在只能确认不是上面这条 SQL 的。</li><li>手册里“磁盘使用率 &gt;85%”这一条本连接看不到数据库主机磁盘，需在主机侧确认临时表空间余量。</li></ul>
+<p>报告：<a href="/dash/wdr?inst=api_10-x-x-x-postgres&amp;run=20261026T100040Z.json&amp;from=2026-10-24T18%3A27&amp;to=2026-10-24T18%3A37">打开报告</a></p>
+</div></div><div><h3>改造后 <small>159 秒 · 4767 字 · 格式 5/5</small></h3><ul class='ck'><li class='ok'>✓ 段落:现象 → 根因 → 解决方案 → 总结</li><li class='ok'>✓ 开头:开头有总体状态</li><li class='ok'>✓ 展开提议:结尾有「需要就 … 吗?」</li><li class='ok'>✓ 两种读者:应用视角 5 处、数据库机制 5 处</li><li class='ok'>✓ 引用:6 处上色引用,出处与颜色都对</li></ul><div class='ans'>
+<p>评估时段：你要看的是 <strong>10-24 18:32–18:36（4 分钟）</strong>；实际评估的是 <strong>快照 3201（18:28）→ 快照 3203（18:36），共 8 分钟</strong>——起点取不晚于 18:32 的最近快照、终点取不早于 18:36 的最近快照，完整覆盖并比你要的宽 4 分钟。</p>
+<p><strong>总体状态：🔴严重</strong> 驱动：时段内最长锁等待约 <strong>470s</strong>（根会话 <code>idle in transaction</code> 持有 <code>fl.acct</code> 行锁），临时文件溢出 5.7G 是次一级的 🟠告警。 <strong>判断校验：✓ 已锚定（健康体检 3 条确定性发现全覆盖、无夸大、无遗漏）</strong></p>
+<p>短结论：<strong>临时文件落盘确实冲高</strong>——8 分钟写了 5.7G，其中 77% 集中在一条窗口聚合 SQL；但这次整体 🔴 严重是<strong>锁等待</strong>造成的，不是落盘。<strong>不能直接把 work_mem 全局调大</strong>：当前全局 16MB × 并发上限 800 已经超过实例 12G 内存预算（12.5G），再调大只会加重超卖。</p>
+<h2>① 现象</h2>
+<table>
+<tr><th>维度</th><th>级别</th><th>关键指标</th></tr>
+<tr><td>Window IO / Temp</td><td>🟠</td><td>临时文件溢出 <strong>5.7G</strong>；缓存命中率 99.95%；checkpoint 8 次</td></tr>
+<tr><td>Locks（锁等待）</td><td>🔴</td><td>最长约 <strong>470s</strong>；<strong>20 个会话被挡</strong>；14 条阻塞链</td></tr>
+<tr><td>Locks（空闲事务）</td><td>🟠</td><td><strong>4 个</strong> <code>idle in transaction</code> 持锁会话</td></tr>
+<tr><td>Window Load</td><td>—</td><td>DB time 3243.4s；平均活跃会话 6.76；CPU 占 34.9%</td></tr>
+<tr><td>Window Transactions</td><td>—</td><td>提交 11,572,554；回滚 5（0.00%）；死锁 0</td></tr>
+<tr><td>Window Waits</td><td>—</td><td>LOCK_EVENT 564.87s（38.7%）、IO 550.75s（37.7%）、LWLOCK 344.59s（23.6%）</td></tr>
+</table>
+<p>应用视角：这段时间业务侧会看到报表/批量类任务明显变慢，临时文件写入把 IO 推高；同时有多笔交易被锁住，最长等了近 8 分钟。   数据库机制：8 分钟窗口内 DB time 3243.4s、平均 6.76 个活跃会话；<code>pg_stat_database</code> 的临时文件增量 5.7G，能归到语句的占 77%；锁等待占全部等待时长的 38.7%。</p>
+<p>连接、长事务、死元组/膨胀、复制、占用量这几项是瞬时状态，当时没有采样，<strong>回看不了</strong>；本次也没有对具体 SQL 做执行计划/调优（那需要指定 sql_id 单独跑）。</p>
+<h2>② 根因和证据链</h2>
+<p><strong>临时文件溢出 5.7G（🟠）</strong></p>
+<p>证据：5.7G 是脚本阈值 512MB 的约 <strong>11 倍</strong>；其中 <strong>4483.64MiB（77%）</strong> 能归到 <code>sql_id 2858996927</code>，这条语句窗口内调用 5 次、总耗时 231.51s、平均 46.3s，形态是带窗口聚合（<code>rn</code> / <code>rsum</code> / <code>first_*</code>）的统计查询；其余 <strong>1370.01MiB 归不到具体语句</strong>。贵行基线是 <font color="#2f6fdb">平时低于 200MB/h；演练窗口 2–8GB/h；超过 10GB/h 视为异常</font>(引用自贵行基线库 BL-FL-TEMP_BYTES_PER_HOUR)。这 5.7G 集中在 8 分钟内，按速率线性折算约 40GB/h 量级，但整点累计本次未取，不能直接当成整小时总量。</p>
+<p>应用视角：一条大报表/窗口聚合一次算全量结果集，排序或哈希放不进 16MB 的 work_mem，就反复落盘；如果应用并发跑多条同类查询，落盘量会叠加。   数据库机制：<code>work_mem</code> 是<strong>每个排序/哈希算子</strong>的上限，不是整个库的缓存；这条 SQL 的窗口函数需要把大结果集排序，16MB 不够就写临时文件。5.7G 里 77% 能定位到这一条，说明优先处理它比动全局参数有效。</p>
+<p><strong>为什么不能全局调大 work_mem</strong></p>
+<p>证据：参数体检现值 <code>work_mem=16.0M</code>、<code>max_connections=1000</code>、线程池 800、<code>max_process_memory=12.0G</code>，<strong>16MB × 800 = 12.5G &gt; 12.0G</strong>，已经构成 <code>CFG_WORKMEM_OVERCOMMIT</code>；而且一条 SQL 可以有多个排序/哈希算子，这个估算还偏保守。环境画像记录本实例为 4 核 8G，往大调没有余量。</p>
+<p><font color="#2f6fdb">临时文件写入量超过基线（每小时 10GB）或磁盘使用率超过 85% 时，用 gaussdb-memanalyze 定位落盘最多的 SQL，审批后对该会话 SET work_mem，推动 SQL 改写或分批；不得全局调大 work_mem</font>(引用自处置手册库 RB-TMP-001,未验证)。手册要求<font color="#2f6fdb">会话级调大 work_mem 须 DBA 组长审批，单会话不超过 256MB</font>(引用自处置手册库 RB-TMP-001,未验证)。旧 Wiki 里“全局 work_mem 调到 1GB”的说法也明确不可用：<font color="#2f6fdb">旧 Wiki 第 6 条“全局 work_mem 调到 1GB”与应急处置手册“不得全局调大 work_mem”冲突，不作为处置依据</font>(引用自 Wiki 经验库 WK-0002,已过时)。</p>
+<p>应用视角：全局调大 work_mem 不是“给这条报表多一点内存”，而是给<strong>所有并发会话的每个算子</strong>都放大上限，高峰期更容易内存不足，甚至把原本能跑的语句逼到报错。   数据库机制：全局 <code>work_mem</code> 放大后，800 个并发连接按每连接至少一个排序/哈希估算，需求从 12.5G 继续上涨，超过 <code>max_process_memory</code>；内核会限制内存或让算子更早落盘，结果可能是“调大了反而更不稳”。正确做法是只给落盘的那条 SQL 会话级调整，并推动改写/分批。</p>
+<p><strong>锁等待约 470s（🔴，整体状态驱动）</strong></p>
+<p>证据：活跃会话采样回看有 <strong>14 条阻塞链、20 个会话被挡</strong>，最长约 470s；根会话 10336 从 <strong>18:20:39</strong> 起处于 <code>idle in transaction</code>，持有 <code>fl.acct</code> 的 tuple ExclusiveLock，直接或间接挡住 5 个会话；另有 10362（18:23:44 起）、10522（18:29:55 起）等空闲事务持锁会话。10-24 18:32–18:36 落在 FL 演练库的造数窗口内：<font color="#2f6fdb">FL 为故障演练模拟库，每日 18:00–19:00 为造数窗口，演练窗口外基本空闲</font>(引用自环境画像库 EP-FL)。</p>
+<p>应用视角：交易开着事务去等外部接口或做慢操作，事务不提交，行锁一直不放，后面的同账户/同表交易就排队；用户看到的是“卡住不动”，不是 SQL 本身慢。   数据库机制：<code>idle in transaction</code> 的会话不消耗 CPU，但持有事务快照和行锁；等待者会出现在 <code>LOCK_EVENT</code> / <code>transactionid</code> 等待上，形成阻塞链。这是事后回看，<strong>当时会话多半已结束、会话号可能被复用，不要据此 kill</strong>；现在还堵着就先跑此刻的锁等待分析。</p>
+<h2>③ 解决方案</h2>
+<p><strong>P0：不要全局调大 work_mem。</strong> 按手册对 <code>sql_id 2858996927</code> 的执行会话做<strong>会话级</strong> <code>SET work_mem</code>（DBA 组长审批，单会话 ≤256MB），并推动 SQL 改写或分批。依据是它单独占了语句级落盘的 100%、库级的 77%。预期 <code>temp_bytes</code> 增量回落；风险：中；<code>[需人工执行]</code>。</p>
+<p><strong>P0：处理锁等待（整体 🔴 的驱动）。</strong> 按规范先通知应用运维确认根会话，<font color="#2f6fdb">idle in transaction 状态超过 300 秒的会话必须触发告警；数据库侧不得自行终止业务会话，须通知应用运维确认后处理</font>(引用自贵行规范库 GS-CONN-002)；现在还堵着就跑此刻的 <code>gaussdb-lockwait</code>。长期评估 <code>idle_in_transaction_session_timeout</code>（当前 0，不限制），由 DBA 按业务定值。风险：中；<code>[需人工执行]</code>。</p>
+<p><strong>P1：收口 work_mem 超卖。</strong> 当前 16MB × 800 = 12.5G &gt; <code>max_process_memory</code> 12.0G。可选方向是降低全局 work_mem、降低并发上限，或调大 <code>max_process_memory</code>（需重启实例）；三选一由 DBA 结合业务峰值决定，<strong>不要用“全局调大”解决溢出</strong>。风险：中–高；<code>[需人工执行]</code>。</p>
+<p><strong>P1：改写 <code>sql_id 2858996927</code>。</strong> 窗口聚合避免对全量结果集排序，增加时间/业务过滤条件、利用索引、把大查询拆成分批；需要先看执行计划确认瓶颈在 Sort/WindowAgg 还是扫描。风险：低–中；<code>[需人工执行]</code>。</p>
+<p><strong>P2：对齐连接上限。</strong> <code>max_connections=1000</code> 大于线程池 800，超出的 200 永远用不上；按池大小对齐或调整线程池（需重启）。风险：中；<code>[需人工执行]</code>。</p>
+<p>应用视角：应用团队应把大报表改成带范围的分批查询，事务内不要等外部接口；数据库团队只对个别大查询做会话级内存放行，不把临时调整推广成全局参数。   数据库机制：会话级 <code>SET work_mem</code> 只影响当前会话，验证后 <code>RESET work_mem</code> 即可回退；全局参数要走变更审批，<code>max_process_memory</code> 和连接数相关参数需重启，不是 reload。</p>
+<h2>④ 总结和结论</h2>
+<p>这次落盘是真实的冲高：8 分钟 5.7G、77% 集中在一条窗口聚合 SQL；但<strong>全局调大 work_mem 会把已经超卖的内存预算推得更高</strong>，不是正确处置。优先做“会话级调整 + SQL 改写/分批”，同时处理导致整体 🔴 的 <code>idle in transaction</code> 锁等待。</p>
+<p>需要你确认：18:32–18:36 是否就是 FL 演练造数窗口内的脚本行为，5.7G 是否在演练预期内；如果这是生产同构语句，建议对 <code>sql_id 2858996927</code> 单独跑执行计划和调优。参数体检还发现口令加密算法偏弱、<code>statement_timeout</code> 未设置等，与本问题不直接相关，可另行处理。</p>
+<p>报告已存档：<a href="/dash/health?inst=api_10-x-x-x-postgres&amp;run=20261026T112035Z.span.json&amp;from=2026-10-24T18%3A28&amp;to=2026-10-24T18%3A36">打开报告</a></p>
+<p>需要我基于 <code>sql_id 2858996927</code> 取执行计划并给出改写/索引建议吗？需要我把这段时间的锁阻塞链按根会话再展开吗？</p>
+</div></div></div></section><section id='S1'><h2>S1 · SQL 优化</h2><p class='prompt'>对 og5 上 sql_id 4198238080 做调优,并贴出执行计划。</p><div class='two'><div><h3>改造前 <small>222 秒 · 6307 字 · 格式 0/7</small></h3><ul class='ck'><li class='bad'>✗ 段落:缺「现状与趋势」</li><li class='bad'>✗ 开头:开头没有「验证状态」</li><li class='bad'>✗ 展开提议:结尾没有展开提议</li><li class='bad'>✗ 两种读者:应用视角 0 处、数据库机制 0 处</li><li class='bad'>✗ 引用写法:还在用旧写法〔类型 ID〕</li><li class='bad'>✗ 不特意声明来源:出现了 客户知识库参照</li><li class='bad'>✗ 出处括号:3 处上色的句子后面没有「(引用自 …)」:依据《某行数据库应急处置手册》第三章〔手;依据《知识1-某行数据库运维规范(202;〔案例 S3-20260227-FLOA</li></ul><div class='ans'>
+<h2>结论先行</h2>
+<p>这条 SQL 的成本几乎全部集中在 <code>fl.orders</code> 的全表扫描：<code>cust_code</code> 过滤在 1,000,000 行上逐行判断，只返回约 5 行，而 <code>cust_code</code> 没有索引。连接侧的 <code>customers_pkey</code> 索引扫描每次只有 2.47，不是瓶颈。</p>
+<p>保守方案是补 <code>fl.orders(cust_code)</code> 索引。当前中间件连接不支持 hypopg，索引收益只能给代价推演，<strong>不能算已验证</strong>。另有一个估算便宜得多、但会改变过滤语义的改写，必须先由业务确认 <code>orders.cust_code</code> 与 <code>customers.code</code> 的关系，不能直接上线。</p>
+<h2>被分析的 SQL</h2>
+<pre><code>SELECT count(*) AS n, sum(o.amount) AS amt
+  FROM fl.orders o
+  JOIN fl.customers c ON c.id = o.cust_id
+ WHERE o.cust_code = &#x27;test&#x27;</code></pre>
+<blockquote><p><code>&#x27;test&#x27;</code> 是 sqltune 为生成计划合成的占位符值，不是生产实际绑定值；计划形状可靠，行数与选择率是近似值。真实值可用 <code>--bind</code> 重跑精确化。SQL 的 schema 为 <code>fl, public</code>，EXPLAIN 前已切到 <code>fl, public</code>。</p></blockquote>
+<h2>执行计划</h2>
+<pre><code>Aggregate  (cost=12164.58..12164.59 rows=1 width=45)
+  -&gt;  Nested Loop  (cost=0.00..12164.55 rows=5 width=5)  [P2]
+        -&gt;  Streaming(type: LOCAL GATHER dop: 1/2)  (cost=0.00..12152.15 rows=5 width=9)
+              -&gt;  Seq Scan on orders o  (cost=0.00..12152.00 rows=5 width=9)  [P1]
+                    Filter: (cust_code = &#x27;test&#x27;::text)
+        -&gt;  Index Only Scan using customers_pkey on customers c  (cost=0.00..2.47 rows=1 width=4)
+              Index Cond: (id = o.cust_id)</code></pre>
+<blockquote><p><code>Analyzed: false</code>，这是估算计划，不是 <code>EXPLAIN ANALYZE</code> 的实测。按 sql_id 直接 explain 需要真实绑定值，本次中间件未返回历史计划；以上计划由 sqltune 用合成值生成。</p></blockquote>
+<h2>计划走查</h2>
+<table>
+<tr><th>标签</th><th>这个节点在干什么</th><th>为什么这里慢</th><th>证据</th><th>对整条 SQL 的影响</th></tr>
+<tr><td>[P1]</td><td>对 <code>fl.orders</code> 做全表顺序扫描，逐行判断 <code>cust_code = &#x27;test&#x27;</code></td><td><code>cust_code</code> 上没有索引；表有 1,000,000 行、9804 页、162.6 MB，必须读完所有页并逐行求值</td><td><code>Seq Scan cost=12152.00 rows=5</code>；过滤后只剩 5 行；<code>cust_code</code> 的 <code>n_distinct=-0.20</code>（约 20 万个不同值）</td><td>它是整条 SQL 的成本主体，12152 占 Nested Loop 总成本 12164.55 的绝大部分</td></tr>
+<tr><td>[P2]</td><td>把 orders 的 5 行结果与 customers 按 <code>c.id = o.cust_id</code> 做嵌套循环连接</td><td>外层输入被 [P1] 拖慢；内层本身不慢，<code>customers_pkey</code> 索引扫描每次 2.47，循环 5 次约 12.35</td><td><code>Nested Loop cost=12164.55 rows=5</code>；<code>Index Only Scan cost=2.47 rows=1</code></td><td>连接算法本身合理，换成 Hash Join 也不会解决 [P1] 的全表扫描</td></tr>
+</table>
+<h2>证据链摘要</h2>
+<ul><li>从 [P1] 看，orders 的 <code>Seq Scan cost=12152.00</code>，扫描 1,000,000 行只返回 5 行；结合 <code>cust_code</code> 没有索引、表有 9804 页/162.6 MB，说明主要问题是过滤列缺少能提前过滤的索引，而不是返回行数多。</li><li>从 [P2] 看，<code>Nested Loop</code> 的 12164.55 几乎全部来自外层 [P1]；内层 <code>customers_pkey</code> 的 Index Only Scan 每次 2.47、循环 5 次约 12.35，说明连接侧已经走主键索引，改写连接方式不是优先项。</li><li>代价推演复算了 Seq Scan、Streaming、Nested Loop 三个节点，与 EXPLAIN 实测最大偏差 0.0011%，说明当前成本模型可信；但假设的 <code>orders(cust_code)</code> 索引扫描 6.94 是估算值，上层 Aggregate 未建模，所以报告里的 1.00× 不能当成“索引无效”或“索引有效”的证据。</li><li>把过滤条件改成 <code>customers.code</code> 后，EXPLAIN 估算 <code>cost=26.82</code>，能用现有 <code>idx_customers_code</code> 和 <code>idx_orders_cust</code>；但 <code>orders.cust_code</code> 与 <code>customers.code</code> 的 null 比例、distinct 数不同，且 orders 同时保留 <code>cust_id</code>/<code>cust_code</code>，不能假设二者等价，且本次没有结果集等价验证，不能直接上线。</li></ul>
+<h2>根因</h2>
+<ul><li><strong>直接根因是 <code>fl.orders.cust_code</code> 缺索引</strong>。现有索引分别覆盖 <code>region_id, order_date</code>、<code>order_date</code>、<code>cust_id</code>、<code>id</code>，没有一个能服务 <code>cust_code</code> 的等值过滤。</li><li>过滤条件选择性高：<code>cust_code</code> 的 <code>n_distinct=-0.20</code>（约 20 万个不同值），计划估算单值命中 5 行；但表有 1,000,000 行/9804 页/162.6 MB，全表扫描的固定成本很高。</li><li>连接侧不是根因：<code>customers_pkey</code> 已覆盖 <code>c.id</code>，Index Only Scan 每次 2.47；Nested Loop 的成本是外层 [P1] 传导上来的。</li><li>统计信息页偏离 0.0%，暂不把统计陈旧作为主因；如果真实 <code>cust_code</code> 的实际命中行数与估算 5 行差异很大，再在低峰执行 <code>ANALYZE fl.orders</code>。</li></ul>
+<h2>已验证推荐</h2>
+<p><strong>本次没有可放入“已验证推荐”的项。</strong> 当前连接是中间件模式，hypopg 虚拟索引不可用，<code>verify.py</code> 改写验证也不可用（每次调用都是独立连接）。因此没有经过实测的索引或改写收益，下面全部归入“未验证想法”，不能当成已经证明的优化。</p>
+<h2>未验证想法</h2>
+<h3>方案 A（保守，优先评估）：给 <code>fl.orders(cust_code)</code> 建索引</h3>
+<ul><li><strong>改动</strong>：</li></ul>
+<p>  ``<code>sql   CREATE INDEX idx_orders_cust_code ON fl.orders USING btree (cust_code);   </code>``</p>
+<ul><li><strong>为什么改</strong>：回指 [P1]。当前必须对 1,000,000 行做全表扫描才能找出 5 行，索引可以让规划器直接定位这些行。</li><li><strong>证据</strong>：<code>Seq Scan cost=12152.00 rows=5</code>；<code>orders</code> 有 9804 页、1,000,000 行、162.6 MB；现有索引没有 <code>cust_code</code> 前缀。代价推演中假设的索引扫描约为 <code>6.9438</code>，而当前 Seq Scan 是 <code>12152.00</code>；但上层 Aggregate 未建模，总代价仍沿用实测的 <code>12164.59</code>，所以不能把 1.00× 当成收益结论。</li><li><strong>验证状态</strong>：<strong>未验证</strong>。需要在直连通道用 hypopg，或在准生产/低峰用真实 <code>cust_code</code> 值建索引后跑 <code>EXPLAIN ANALYZE</code>，对比实际行数和耗时。</li><li><strong>落地说明</strong>：串行建索引，不要加并行构建选项；在业务低峰执行。OpenGauss 的 <code>CREATE INDEX</code> 持 ShareLock，会阻塞 <code>orders</code> 的写操作；索引预估约 3832 页（约 30 MB），会带来写入放大，需把 <code>orders</code> 的写入频率纳入评估。</li><li><strong>合成值提醒</strong>：本次过滤值是合成的 <code>&#x27;test&#x27;</code>，真实 <code>cust_code</code> 的选择性可能不同；可用 <code>sqltune.py --bind &lt;真实值&gt;</code> 重跑。</li></ul>
+<h3>方案 B（可能更省资源，但必须先确认业务语义）：改写为过滤 <code>customers.code</code></h3>
+<pre><code>SELECT count(*) AS n, sum(o.amount) AS amt
+  FROM fl.orders o
+  JOIN fl.customers c ON c.id = o.cust_id
+ WHERE c.code = &#x27;test&#x27;</code></pre>
+<p>EXPLAIN 估算计划：</p>
+<pre><code>Aggregate  (cost=26.81..26.82 rows=1 width=45)
+  -&gt;  Nested Loop  (cost=0.00..26.70 rows=21 width=5)
+        -&gt;  Index Scan using idx_customers_code on customers c  (cost=0.00..2.47 rows=1 width=4)
+              Index Cond: (code = &#x27;test&#x27;::text)
+        -&gt;  Index Scan using idx_orders_cust on orders o  (cost=0.00..24.03 rows=21 width=9)
+              Index Cond: (cust_id = c.id)</code></pre>
+<ul><li><strong>吸引力</strong>：估算 cost 从 <code>12164.59</code> 降到 <code>26.82</code>，使用现有 <code>idx_customers_code</code> 和 <code>idx_orders_cust</code>，不需要新建索引，也没有新增索引的写放大。</li><li><strong>为什么不能直接推荐</strong>：这改的是过滤对象，不是等价改写。<code>orders</code> 同时有 <code>cust_id</code> 和 <code>cust_code</code>，<code>cust_code</code> 很可能是下单时的冗余快照；如果客户 code 发生过变更，<code>c.code</code> 反映的是当前 code，<code>o.cust_code</code> 反映的是历史 code，结果集可能不同。列统计也不支持“二者等价”的假设：<code>orders.cust_code</code> 的 <code>null_frac=0</code>、<code>n_distinct=-0.20</code>；<code>customers.code</code> 的 <code>null_frac=0.010</code>、<code>n_distinct=-0.99</code> 且索引非唯一。两条计划的 rows 估算口径也不同（5 vs 21），不能据此判断等价。</li><li><strong>验证状态</strong>：<strong>未验证</strong>。<code>verify.py</code> 在当前中间件连接不可用，没有做结果集哈希比对。需要业务先确认 <code>orders.cust_code</code> 是否始终等于该订单所属客户的 <code>customers.code</code>，再在直连/准生产环境用真实数据比对结果集和 <code>EXPLAIN ANALYZE</code>。</li><li><strong>结论</strong>：如果业务确认二者等价，这可能是比新建索引更温和的方案；如果无法确认，选方案 A。</li></ul>
+<h3>方案 C（备选，未验证）</h3>
+<ul><li>覆盖索引 <code>(cust_code, cust_id, amount)</code> 可能减少回表，但索引更大、写放大更高；只有在方案 A 实测收益不足时再评估，不作为首选。</li><li>把 <code>JOIN</code> 改成 <code>EXISTS</code> 预计收益有限：连接侧已经是主键索引扫描，瓶颈不在连接方式；未验证，不建议为此改写。</li></ul>
+<h2>风险</h2>
+<p><strong>风险等级：L2（性能风险）</strong>。当前 SQL 会扫描 1,000,000 行，影响响应时间，但不影响数据正确性；具体耗时本次未实测。</p>
+<ul><li><strong>DDL 锁影响</strong>：<code>CREATE INDEX</code> 持 ShareLock，会阻塞 <code>orders</code> 的写操作；1,000,000 行/162.6 MB，必须串行构建并放在低峰/变更窗口。</li><li><strong>审批与锁队列</strong>：联机时段 DDL 需要审批；如果出现 DDL 锁队列放大，按知识库手册处置（见下方）。</li><li><strong>索引写放大与空间</strong>：新增索引约 30 MB（估算），<code>orders</code> 的 INSERT/UPDATE 需要维护该索引。</li><li><strong>计划回退</strong>：如果真实 <code>cust_code</code> 命中的行数很多，优化器可能仍然选择 Seq Scan；索引不会被使用，但不会导致结果错误。</li><li><strong><code>CONCURRENTLY</code> 差异</strong>：OpenGauss 上 <code>CREATE INDEX CONCURRENTLY</code> 的语义与 PostgreSQL 有差异，若要用必须先在 5.0.3 目标版本验证，不要直接照搬。</li><li><strong>方案 B 的正确性风险最高</strong>：在确认 <code>orders.cust_code</code> 与 <code>customers.code</code> 的业务关系前，改写可能返回不同结果，不能上线。</li></ul>
+<h2>客户知识库参照</h2>
+<p><font color="#2f6fdb">依据《某行数据库应急处置手册》第三章〔手册 RB-DDL-001〕，联机时段禁止 DDL，确需执行须提交变更审批单并经值班经理批准；DDL 前检查长事务与长查询，会话级 lockwait_timeout 不超过 30 秒。</font></p>
+<p><font color="#2f6fdb">依据《知识1-某行数据库运维规范(2026版)摘录-会话锁与变更》#6.3〔规范 GS-SQL-003〕，批量类 SQL 上线前须用生产量级数据压测并检查执行计划。</font></p>
+<p><font color="#2f6fdb">〔案例 S3-20260227-FSYSE-SYSE外键父子表互等导致借据录入超时〕记录的是外键子表缺索引导致 Seq Scan 与锁等待，与本条 cust_code 过滤缺索引不是同一场景，不能直接照搬其处置。</font></p>
+<p>就本条 <code>cust_code</code> 过滤缺索引而言，知识库没有完全对应的先例；以上方案属于通用做法，且因当前连接不支持 hypopg/verify，均未通过实测验证。</p>
+</div></div><div><h3>改造后 <small>179 秒 · 6708 字 · 格式 5/5</small></h3><ul class='ck'><li class='ok'>✓ 段落:现状与趋势 → SQL 文本和执行计划解读 → 怎么优化 → 总结</li><li class='ok'>✓ 开头:开头有验证状态</li><li class='ok'>✓ 展开提议:结尾有「需要就 … 吗?」</li><li class='ok'>✓ 两种读者:应用视角 4 处、数据库机制 4 处</li><li class='ok'>✓ 引用:3 处上色引用,出处与颜色都对</li></ul><div class='ans'>
+<p>已连 <strong>og5（主库，postgres）</strong>。以下按 SQL 调优四段输出。</p>
+<p>验证状态 <strong>未找到已验证方案</strong> · 驱动：<code>orders</code> 100 万行全表扫描后估算只留下约 5 行</p>
+<p><strong>短结论</strong>：这条 SQL 平均 106.8 ms、最大 507.0 ms，累计执行 2641 次；慢点不在 join，而在 <code>orders</code> 的 100 万行全表扫描。当前中间件通道不支持 hypopg 与结果集等价校验，索引和改写都只能作为<strong>未验证方向</strong>给出，不能当成已证实收益。</p>
+<h2>① 现状与趋势</h2>
+<p>应用视角：单次约 0.1 秒，最慢 0.5 秒，单看不算慢；但它累计执行 2641 次、总耗时 281.93 秒，属于高频中等耗时查询，调用量或并发上来后会持续占用 CPU。   数据库机制：CPU 196.07 s、数据 IO 0.4 ms，脚本口径 CPU + IO 占总耗时 70%，说明时间主要花在 CPU 扫描和过滤 100 万行，不是在等磁盘；近 7 天没有突然变慢的小时，记录到的计划也没变，属于稳定的结构性慢，不是计划跳变。</p>
+<table>
+<tr><th>执行次数</th><th>平均耗时</th><th>最大耗时</th><th>最小耗时</th><th>总耗时</th><th>CPU 时间</th><th>数据 IO 时间</th></tr>
+<tr><td>2641</td><td>106.8 ms</td><td>507.0 ms</td><td>64.2 ms</td><td>281.93 s</td><td>196.07 s</td><td>0.4 ms</td></tr>
+</table>
+<p><strong>趋势</strong></p>
+<ul><li>最近 24 小时平均 136.1 ms（615 次）；之前平均 123.2 ms（44532 次），是之前的 1.1 倍。</li><li>近 7 天没有突然变慢的小时（判定：某小时平均 ≥ 此前 24 小时中位数的 3 倍且 ≥ 100 ms）。</li><li>计数器在 2026-10-24 09:50、2026-10-26 14:09 前后被清零，跨清零的那一段不计。</li></ul>
+<table>
+<tr><th>日期</th><th>执行次数</th><th>平均耗时</th><th>平均最慢的一小时</th></tr>
+<tr><td>2026-10-21</td><td>18996</td><td>119.1 ms</td><td>19:00(126.1 ms)</td></tr>
+<tr><td>2026-10-24</td><td>25536</td><td>126.1 ms</td><td>10:00(155.3 ms)</td></tr>
+<tr><td>2026-10-26</td><td>615</td><td>136.1 ms</td><td>14:00(136.1 ms)</td></tr>
+</table>
+<p><strong>计划变化</strong>：记下的执行里最慢的一次在 2026-10-26 14:00 这一小时，595.9 ms；近 7 天记下的 1 个小时里，执行计划没有变过（节点结构一致）。</p>
+<h2>② SQL 文本和执行计划解读</h2>
+<h3>被分析的 SQL</h3>
+<pre><code>SELECT count(*) AS n, sum(o.amount) AS amt
+  FROM fl.orders o
+  JOIN fl.customers c ON c.id = o.cust_id
+ WHERE o.cust_code = &#x27;test&#x27;</code></pre>
+<blockquote><p><code>statement_history</code> 里存的是归一化文本，本次计划用合成值 <code>&#x27;test&#x27;</code> 取到；<strong>计划形状可靠，行数与选择性是估算</strong>。真实 <code>cust_code</code> 值不同，行数会变。</p></blockquote>
+<h3>执行计划</h3>
+<pre><code>Aggregate  (cost=12164.58..12164.59 rows=1 width=45)
+  -&gt;  Nested Loop  (cost=0.00..12164.55 rows=5 width=5)  [P3]
+        -&gt;  Streaming(type: LOCAL GATHER dop: 1/2)  (cost=0.00..12152.15 rows=5 width=9)  [P2]
+              -&gt;  Seq Scan on orders o  (cost=0.00..12152.00 rows=5 width=9)  [P1]
+                    Filter: (cust_code = &#x27;test&#x27;::text)
+        -&gt;  Index Only Scan using customers_pkey on customers c  (cost=0.00..2.47 rows=1 width=4)
+              Index Cond: (id = o.cust_id)</code></pre>
+<p>应用视角：这条查询要先在订单表里找出某个客户编码对应的订单，再汇总金额；现在为了找少量订单，把整张订单表读了一遍。   数据库机制：<code>orders</code> 上没有 <code>cust_code</code> 索引，规划器只能顺序扫描 100 万行，过滤后再拿少量结果去 <code>customers</code> 主键上做嵌套循环查找；join 侧很便宜，成本几乎都压在 <code>orders</code> 的扫描上。</p>
+<h3>计划走查</h3>
+<table>
+<tr><th>标签</th><th>这个节点在干什么</th><th>为什么这里慢</th><th>证据</th><th>对整条 SQL 的影响</th></tr>
+<tr><td>[P1]</td><td>对 <code>orders</code> 做全表顺序扫描，按 <code>cust_code=&#x27;test&#x27;</code> 过滤</td><td><code>orders</code> 有 100 万行、9804 页、162.6 MB；现有索引是 <code>region_id+order_date</code>、<code>order_date</code>、<code>cust_id</code>、主键，<strong>没有一列覆盖 <code>cust_code</code></strong></td><td><code>cost=0.00..12152.00</code>，<code>rows=5</code>，表 <code>1,000,000</code> 行</td><td>这一层读完几乎所有行才估算留下 5 行，是整条 SQL 的主要成本来源，后面 join 只拿到很少的行</td></tr>
+<tr><td>[P2]</td><td>把并行扫描结果汇总到上层（<code>dop 1/2</code>）</td><td>它只是汇总，不减少 <code>orders</code> 的扫描量</td><td><code>cost=0.00..12152.15</code>，<code>rows=5</code></td><td>成本几乎全部继承自 [P1]，汇总本身不是根因</td></tr>
+<tr><td>[P3]</td><td>用外层结果去 <code>customers</code> 主键上做嵌套循环查找</td><td>内层是 <code>customers_pkey</code> 的 Index Only Scan，单次 2.47，join 本身很便宜</td><td><code>cost=0.00..12164.55</code>，<code>rows=5</code>；内层 2.47</td><td>join 不是瓶颈；如果外层行数变大，内层查找次数会跟着增加，但仍是主键查找</td></tr>
+</table>
+<h3>根因</h3>
+<ul><li><code>orders.cust_code</code> 没有索引，现有 4 个索引都不覆盖这一列；规划器只能顺序扫描 1,000,000 行。</li><li>过滤后估算只剩 5 行，等于读了 100 万行、丢掉绝大部分，这是典型的“过滤列缺索引”。</li><li>join 侧 <code>customers_pkey</code> 的 Index Only Scan 只有 2.47，说明 join 不是问题；问题在驱动表 <code>orders</code> 的扫描。</li><li>脚本的 <code>nestloop_seqscan</code> 是通用提示；本条计划里 Seq Scan 位于<strong>外层</strong> <code>orders</code>，内层 <code>customers</code> 已经走主键索引，join key <code>orders.cust_id</code> 也有 <code>idx_orders_cust</code>，所以不要误判为 join key 缺索引——缺的是 <code>orders.cust_code</code> 的过滤索引。</li><li>统计信息页偏离 0%，<code>orders</code> 有 9 个统计列、<code>customers</code> 有 6 个，代价推演判定统计新鲜；本条<strong>不建议先 ANALYZE</strong>。</li></ul>
+<h3>证据链摘要</h3>
+<ul><li>从 [P1] 看到 <code>orders</code> 的 Seq Scan 成本 12152.00、<code>rows=5</code>，而表有 1,000,000 行 / 162.6 MB，说明 <code>cust_code</code> 过滤没有被索引接住；因此优先考虑在 <code>orders(cust_code)</code> 上补索引。该方向尚未通过 hypopg 实测验证，只有代价推演。</li><li>从 [P3] 看，Nested Loop 的 <code>customers</code> 侧是 <code>customers_pkey</code> 的 Index Only Scan，单次 2.47，join 本身不是瓶颈；真正的问题是外层扫描量太大。</li><li>从 Current Stats 看，CPU 196.07 s、数据 IO 0.4 ms，时间主要花在 CPU 扫描与过滤 100 万行，不是 IO 等待；减少扫描行数比调 IO 参数更对症。</li><li>从 Trend 和 Plan Changes 看，近 7 天没有突然变慢的小时，记录到的计划也没变，属于稳定的结构性慢，不是计划跳变。</li></ul>
+<h2>③ 怎么优化</h2>
+<p>应用视角：开发侧看到的是这个统计查询每次约 0.1 秒、偶尔 0.5 秒；如果调用频繁或并发上来，会持续占用 CPU。   数据库机制：最直接的办法是让 <code>cust_code</code> 过滤走索引，减少 <code>orders</code> 的扫描行数；另一条路是如果业务上 <code>cust_code</code> 就是 <code>customers.code</code>，可以先用 <code>customers.code</code> 索引定位客户，再走 <code>orders.cust_id</code> 索引取订单。</p>
+<h3>已验证推荐</h3>
+<p><strong>本次没有通过脚本验证的方案。</strong> 当前中间件通道不支持 hypopg 虚拟索引，也不支持 <code>verify.py</code> 的结果集等价校验；因此下面两条都只能算未验证方向，不能当成已证实的收益。</p>
+<h3>未验证想法</h3>
+<ol><li><strong>在 <code>fl.orders(cust_code)</code> 上补索引（未验证）</strong></li></ol>
+<ul><li><strong>改动</strong>：<code>CREATE INDEX idx_orders_cust_code ON fl.orders (cust_code);</code></li><li><strong>为什么改</strong>：回指 [P1]，当前 <code>orders</code> 只能全表扫描 100 万行。</li><li><strong>证据</strong>：<code>Seq Scan</code> 节点 <code>cost=12152.00</code>、<code>rows=5</code>；表 <code>1,000,000</code> 行 / 162.6 MB；<code>cust_code</code> 的 <code>n_distinct=-0.20</code>（约 20 万个不同值），平均每个 code 约 5 行。代价推演估算索引扫描节点约 <strong>6.94</strong>，对比当前 Seq Scan 节点 <strong>12152.00</strong>；但整条 SQL 的比值仍显示 <strong>1.00×</strong>（上层聚合未建模），所以不能把这个节点差当成整条 SQL 的加速比。</li><li><strong>验证状态</strong>：<strong>未验证</strong>；hypopg 不可用。建索引前需在测试环境用真实 <code>cust_code</code> 值实测；真实参数选择性不同，结论会变，可用 <code>--bind</code> 精确化。优化前实测平均 106.8 ms，优化后<strong>需实测</strong>。</li><li><strong>落地与风险</strong>：非并发 <code>CREATE INDEX</code> 会持 ShareLock 阻塞写；<font color="#2f6fdb">联机时段禁止 DDL，确需执行须提交变更审批单并经值班经理批准；DDL 前检查长事务与长查询，会话级 lockwait_timeout 不超过 30 秒</font>(引用自处置手册库 RB-DDL-001)。建议低峰窗口串行构建，不要并行建索引；建后观察写放大和索引空间占用。上线前按 <font color="#2f6fdb">批量类 SQL 上线前须用生产量级数据压测，并检查执行计划</font>(引用自贵行规范库 GS-SQL-003) 做验证。另：<font color="#2f6fdb">本行有一单已确认的类似案例，根因是缺索引导致全表扫描</font>(引用自本行案例库 S3-20260227-FSYSE-SYSE外键父子表互等导致借据录入超时)，但那条是子表外键列场景，本条是 <code>orders.cust_code</code> 过滤列，收益不能直接套用。</li></ul>
+<ol><li><strong>按 <code>customers.code</code> 过滤后再关联 <code>orders</code>（未验证，依赖业务语义）</strong></li></ol>
+<p>   ``<code>sql    SELECT count(*) AS n, sum(o.amount) AS amt      FROM fl.customers c      JOIN fl.orders o ON o.cust_id = c.id     WHERE c.code = &#x27;test&#x27;    </code>``</p>
+<ul><li><strong>为什么可能有效</strong>：如果 <code>orders.cust_code</code> 与 <code>customers.code</code> 是同一业务键并同步写入，改写后可以先用 <code>idx_customers_code</code> 定位客户，再用 <code>idx_orders_cust</code> 取订单，避免扫描 <code>orders</code> 全表。</li><li><strong>证据</strong>：改写后的估算计划 <code>cost=26.82</code>（<code>customers</code> 侧 Index Scan 2.47 + <code>orders</code> 侧 Index Scan 24.03），原计划 <code>12164.59</code>；这是规划器估算，不是实测耗时，cost 也不是时间，不能换算成毫秒。</li><li><strong>改写后估算计划</strong>：</li></ul>
+<p>     ``<code>      Aggregate  (cost=26.81..26.82 rows=1 width=45)        -&gt;  Nested Loop  (cost=0.00..26.70 rows=21 width=5)              -&gt;  Index Scan using idx_customers_code on customers c  (cost=0.00..2.47 rows=1 width=4)                    Index Cond: (code = &#x27;test&#x27;::text)              -&gt;  Index Scan using idx_orders_cust on orders o  (cost=0.00..24.03 rows=21 width=9)                    Index Cond: (cust_id = c.id)      </code>``</p>
+<ul><li><strong>验证状态</strong>：<strong>未验证</strong>；当前通道不能跑结果集等价校验，而且两次估算的行数不一致（原计划 <code>orders</code> 过滤后 5 行，改写计划 <code>orders</code> 侧 21 行），必须确认语义与数据一致性。知识库中未找到本行同类改写先例，以下为通用思路，仅供参考。优化前实测平均 106.8 ms，优化后<strong>需实测</strong>。</li><li><strong>风险</strong>：若 <code>cust_code</code> 与 <code>code</code> 不同步、不唯一或存在多值映射，结果会错；这是比索引更高的正确性风险，未做结果集比对前不要上线。</li></ul>
+<h2>④ 总结</h2>
+<p>应用视角：这条查询本身不复杂，慢在“扫得太多”，不是 join 写错；补上过滤列索引或改成按客户主键取订单，都能直接减少扫描。   数据库机制：当前证据只能确定瓶颈位置，不能确定收益大小；索引和改写都还需要在测试环境用真实值做实测和结果集比对。</p>
+<p>这条 SQL 平均 106.8 ms、最大 507.0 ms，瓶颈是 <code>orders(cust_code)</code> 缺索引导致的 100 万行全表扫描；join 和统计信息都不是主因。建议先在测试环境验证 <code>orders(cust_code)</code> 索引，收益明确后再按变更流程上生产；改写方案潜在收益更大，但依赖 <code>cust_code</code> 与 <code>customers.code</code> 的业务等价性，必须先做结果集比对。</p>
+<p>需要你配合：确认 <code>orders.cust_code</code> 与 <code>customers.code</code> 是否同一业务键、是否同步写入；如果确认，建议用真实值在测试环境跑一次结果集比对和耗时对比。</p>
+<p>需要我给出在测试环境实测的步骤吗？需要我把这条 SQL 的现状、计划和候选方案整理成变更评审材料吗？需要我继续查这条 SQL 最近一周按小时的耗时趋势吗？</p>
+</div></div></div></section><section id='S2'><h2>S2 · SQL 优化</h2><p class='prompt'>og5 上 sql_id 4198238080 为什么慢?</p><div class='two'><div><h3>改造前 <small>53 秒 · 3685 字 · 格式 0/7</small></h3><ul class='ck'><li class='bad'>✗ 段落:缺「现状与趋势」</li><li class='bad'>✗ 开头:开头没有「验证状态」</li><li class='bad'>✗ 展开提议:结尾没有展开提议</li><li class='bad'>✗ 两种读者:应用视角 0 处、数据库机制 0 处</li><li class='bad'>✗ 引用写法:还在用旧写法〔类型 ID〕</li><li class='bad'>✗ 不特意声明来源:出现了 客户知识库参照</li><li class='bad'>✗ 出处括号:2 处上色的句子后面没有「(引用自 …)」:本行规范 GS-SQL-003 要求批量;历史上有同类机制的单子：FSYSE 借据</li></ul><div class='ans'>
+<p><strong>连接</strong>：og5 / postgres（主库）；SQL_ID <code>4198238080</code>，Schema <code>fl, public</code>。计划为估算计划（<code>Analyzed: false</code>，中间件只读路径不执行 SQL）。</p>
+<h2>被分析的 SQL</h2>
+<pre><code>SELECT count(*) AS n, sum(o.amount) AS amt
+  FROM fl.orders o
+  JOIN fl.customers c ON c.id = o.cust_id
+ WHERE o.cust_code = &#x27;test&#x27;</code></pre>
+<blockquote><p>占位符按脚本合成值 <code>&#x27;test&#x27;</code> 替换（Source=rule），计划形状可靠，行数是近似值。</p></blockquote>
+<h2>执行计划</h2>
+<pre><code>Aggregate  (cost=12164.58..12164.59 rows=1 width=45)
+  -&gt;  Nested Loop  (cost=0.00..12164.55 rows=5 width=5)
+        -&gt;  Streaming(type: LOCAL GATHER dop: 1/2)  (cost=0.00..12152.15 rows=5 width=9)
+              -&gt;  Seq Scan on orders o  (cost=0.00..12152.00 rows=5 width=9)  [P1]
+                    Filter: (cust_code = &#x27;test&#x27;::text)
+        -&gt;  Index Only Scan using customers_pkey on customers c  (cost=0.00..2.47 rows=1 width=4)
+              Index Cond: (id = o.cust_id)</code></pre>
+<h2>计划走查</h2>
+<table>
+<tr><th>标签</th><th>这个节点在干什么</th><th>为什么这里慢</th><th>证据</th><th>对整条 SQL 的影响</th></tr>
+<tr><td>[P1]</td><td>在 <code>fl.orders</code> 上按 <code>cust_code = &#x27;test&#x27;</code> 做全表顺序扫描</td><td><code>orders</code> 上没有任何以 <code>cust_code</code> 开头的索引，只能把 100 万行全部读一遍再逐行过滤</td><td><code>cost=0.00..12152.00</code>、<code>rows=5</code>、表 9804 页 / 100 万行 / 162.6MB</td><td>吃掉 12152 / 12164.59 ≈ 99.9% 的代价，是整条 SQL 慢的唯一主因</td></tr>
+<tr><td>—</td><td>拿 5 行结果去 <code>customers</code> 主键做 5 次索引探测</td><td>内层走的是 <code>customers_pkey</code> 索引扫描，单次 2.47，5 次合计 12.35</td><td><code>Index Only Scan ... 2.47</code></td><td>代价可忽略，不是瓶颈</td></tr>
+<tr><td>—</td><td>最后 <code>count(*)</code> / <code>sum(amount)</code> 聚合</td><td>输入只有 5 行</td><td><code>Aggregate 12164.59</code></td><td>无影响</td></tr>
+</table>
+<h2>证据链摘要</h2>
+<ul><li>从 [P1] 能看到 <code>orders</code> 走的是 Seq Scan，扫描 9804 页、按 100 万行计 CPU 与过滤求值，代价 12152，而过滤后只剩 5 行，说明绝大多数工作都花在“读完整张表只为找几行”上；因此首要方向是给 <code>cust_code</code> 补一个能直接定位的索引。</li><li>从 <code>## Indexes</code> 看，<code>orders</code> 现有索引是 <code>(region_id, order_date)</code>、<code>(order_date)</code>、<code>(cust_id)</code>、<code>(id)</code>，没有一条能接住 <code>cust_code</code> 等值条件，这一点与 [P1] 的全表扫描互相印证。</li><li>从 [P1] 的 <code>rows=5</code> 和 <code>cust_code</code> 的 <code>n_distinct=-0.20</code>（约 20 万个不同值）、<code>null_frac=0</code> 看，等值条件选择性很高，属于“典型该走索引”的形状，而不是统计信息把行数算错导致的偏差。</li><li>这个索引方向<strong>尚未验证</strong>：本次连接是中间件白名单模型，hypopg 虚拟索引与 <code>verify.py</code> 都不可用，脚本的代价推演也没能给出收益结论（见下节），所以只能作为待人工验证的建议。</li></ul>
+<h2>根因</h2>
+<ul><li><strong><code>fl.orders.cust_code</code> 缺索引</strong>：现象是 [P1] 出现 Seq Scan、扫描 9804 页 / 100 万行、过滤后仅 5 行；判断是过滤条件没有被任何索引接住，只能全表扫描。这是这条 SQL 慢的根因，占 99.9% 代价。</li><li><strong>不是统计信息问题</strong>：推演的统计新鲜度检查通过（<code>orders</code> 冻结页 9804 = 实时页 9804，页偏离 0.0%，统计列 9 个；<code>customers</code> 同样通过）。<code>last_analyze</code> 显示 <code>never</code>、<code>live_tup/dead_tup</code> 为 0 只是采集计数器没记录，不代表没统计，不建议为此跑 ANALYZE。</li><li><strong>不是关联或聚合问题</strong>：<code>customers</code> 侧走主键 <code>Index Only Scan</code>，5 次循环合计 12.35，聚合输入只有 5 行，二者都不是瓶颈。</li></ul>
+<h2>已验证推荐</h2>
+<p>本次没有可验证结论。当前连接（api/GRMP 中间件）不提供跨语句持久会话，<code>hypopg</code> 虚拟索引验证与 <code>verify.py</code> 改写验证都无法执行，<code>## Verified Index Candidates</code> 明确为空。按规则，不把任何未验证的索引或改写放进本小节。</p>
+<h2>未验证想法</h2>
+<ul><li><strong>给 <code>fl.orders(cust_code)</code> 建索引</strong>（未验证）。推演里的假设索引扫描单项估算约 <code>6.94</code>，而当前顺序扫描复算为 <code>12152</code>；但报告给出的总代价比是 <code>1.00×</code>——因为推演没有对上层 <code>Aggregate</code> 建模、总代价沿用了实测值，这个 1.00× 是模型局限造成的，不能当作“索引无效”的结论，也不能当作收益证明。需要人工用 <code>EXPLAIN</code>（或直连通道上的 hypopg）在目标版本上实测后再决定：</li></ul>
+<p>  ``<code>sql   CREATE INDEX idx_orders_cust_code ON fl.orders(cust_code);   </code>``</p>
+<ul><li><strong>可考虑去掉 <code>customers</code> 的 JOIN</strong>（未验证，且不是性能修复）。SQL 里 <code>c</code> 只用于连接、没有投影任何列，作用是“过滤掉没有对应客户的订单”。只有在 <code>orders.cust_id</code> 确实有外键指向 <code>customers.id</code>（或业务上保证无孤儿行）时才可去掉，否则会改变结果集。注意这条 JOIN 只花约 12.35 代价，去掉不会解决慢的问题。</li><li><strong>用真实参数复核</strong>：本次筛选值是脚本合成的 <code>&#x27;test&#x27;</code>（2 万行里约 5 行）。如果真实 <code>cust_code</code> 的命中行数明显不同，索引收益与计划形状都会变化，建议用 <code>--bind</code> 传真实值再跑一次。</li></ul>
+<h2>风险</h2>
+<ul><li><code>CREATE INDEX</code> 在 openGauss 上持 <code>ShareLock</code>，会阻塞该表的写操作；<code>orders</code> 有 100 万行 / 162.6MB，建议<strong>串行</strong>在业务低峰执行，不要用并行构建，上线前按变更流程申请窗口。</li><li>索引会带来写放大与约几十 MB 空间占用；<code>cust_code</code> 上有 20 万个不同值，选择性对索引友好，但如果该列写入极频繁需评估维护成本。</li><li>若后续出现计划跳变，可先核对 <code>cust_code</code> 的统计与真实值分布，不要直接上 hint 固化。</li></ul>
+<h2>客户知识库参照</h2>
+<ul><li><font color="#2f6fdb">本行规范 GS-SQL-003 要求批量类 SQL 上线前用生产量级数据压测并核对执行计划，本次结论基于合成值，正式落地前应补生产量级计划核对（〔规范 GS-SQL-003〕）。</font></li><li><font color="#2f6fdb">历史上有同类机制的单子：FSYSE 借据录入超时最终定位为子表外键列缺索引导致全表扫描，长期处置是给该列在线建索引（〔案例 S3-20260227-FSYSE〕）。</font> 本单是过滤列 <code>cust_code</code> 缺索引，与那单的外键检查场景不完全相同，仅供参考；且 openGauss 上 <code>CREATE INDEX CONCURRENTLY</code> 语义与 PostgreSQL 有差异，采用前需在目标版本验证。</li><li>本行未登记“过滤列缺索引”这一具体场景的规范或案例，以上索引与改写建议为通用做法。</li></ul>
+</div></div><div><h3>改造后 <small>76 秒 · 4438 字 · 格式 5/5</small></h3><ul class='ck'><li class='ok'>✓ 段落:现状与趋势 → SQL 文本和执行计划解读 → 怎么优化 → 总结</li><li class='ok'>✓ 开头:开头有验证状态</li><li class='ok'>✓ 展开提议:结尾有「需要就 … 吗?」</li><li class='ok'>✓ 两种读者:应用视角 1 处、数据库机制 1 处</li><li class='ok'>✓ 引用:4 处上色引用,出处与颜色都对</li></ul><div class='ans'>
+<p>验证状态 未找到已验证方案 · 驱动：对 <code>fl.orders</code> 的全表扫描（<code>cust_code</code> 上没有索引）</p>
+<p><strong>短结论</strong>：这条 SQL 平均 106.8 ms、最慢 507.0 ms，累计执行 2641 次、总耗时 281.93 s；慢的原因固定在对 <code>orders</code> 的 Seq Scan —— 每执行一次就把整张 100 万行表扫一遍，再用 <code>cust_code</code> 过滤，而列上正好没有索引。近 7 天计划没变、也没有突然变慢，属于&quot;一直就这么慢&quot;，不是某天变坏。索引方案在本次连接下无法做虚拟索引验证，收益倍数不能当已验证结论。</p>
+<h2>① 现状与趋势</h2>
+<p>应用视角：这多半是一个&quot;按客户编码统计订单笔数和金额&quot;的查询，平均每次要等约 0.1 秒，偶尔到 0.5 秒；一天调用两千多次，合起来在数据库里吃掉近 5 分钟。业务上表现为该接口偶发变慢、并发上来后进一步排队。</p>
+<p>数据库机制：2641 次执行累计 281.93 s，其中 CPU 时间 196.07 s、数据 IO 仅 0.4 ms（CPU + 数据 IO 占 70%）。IO 几乎为零说明 162.6 MB 的 <code>orders</code> 基本常驻缓存，代价花在&quot;把 100 万行逐行读出来、逐行判 <code>cust_code</code>&quot;的 CPU 上。趋势上最近 24 小时平均 136.1 ms（615 次），之前 123.2 ms（44532 次），只有 1.1 倍；近 7 天没有突然变慢的小时，记下的执行计划结构也没变过（最慢一次 595.9 ms，出现在 2026-10-26 14:00 那小时）。计数器在 10-24 09:50、10-26 14:09 前后被清零，跨清零的那段不计。</p>
+<h2>② SQL 文本和执行计划解读</h2>
+<h3>被分析的 SQL</h3>
+<pre><code>SELECT count(*) AS n, sum(o.amount) AS amt
+  FROM fl.orders o
+  JOIN fl.customers c ON c.id = o.cust_id
+ WHERE o.cust_code = &#x27;test&#x27;</code></pre>
+<h3>执行计划</h3>
+<pre><code>Aggregate  (cost=12164.58..12164.59 rows=1 width=45)
+  -&gt;  Nested Loop  (cost=0.00..12164.55 rows=5 width=5)   [P3]
+        -&gt;  Streaming(type: LOCAL GATHER dop: 1/2)  (cost=0.00..12152.15 rows=5 width=9)   [P2]
+              -&gt;  Seq Scan on orders o  (cost=0.00..12152.00 rows=5 width=9)   [P1]
+                    Filter: (cust_code = &#x27;test&#x27;::text)
+        -&gt;  Index Only Scan using customers_pkey on customers c  (cost=0.00..2.47 rows=1 width=4)
+              Index Cond: (id = o.cust_id)</code></pre>
+<h3>计划走查</h3>
+<table>
+<tr><th>标签</th><th>这个节点在干什么</th><th>为什么这里慢</th><th>证据</th><th>对整条 SQL 的影响</th></tr>
+<tr><td>[P1]</td><td>从 <code>orders</code> 顺序读全表，逐行判断 <code>cust_code = &#x27;test&#x27;</code></td><td>过滤列 <code>cust_code</code> 上没有索引（现有索引只有 <code>region_id+order_date</code>、<code>order_date</code>、<code>cust_id</code>、主键），只能整表扫</td><td>Seq Scan cost=12152.00 rows=5，表 9804 页 / 1,000,000 行 / 162.6 MB</td><td>这条 SQL 的代价几乎全部压在这一步，父节点 Nested Loop 的 12164.55 基本由它带入</td></tr>
+<tr><td>[P2]</td><td>把并行扫描结果汇总回上层（dop 1/2）</td><td>本身不贵，是条过路节点，但扫描量有多大它就搬多大</td><td>Streaming cost 12152.15，子节点 12152</td><td>把全表扫描的代价原样传给 Nested Loop</td></tr>
+<tr><td>[P3]</td><td>用外层匹配到的行数去 <code>customers</code> 主键取数</td><td>内层走 <code>customers_pkey</code> 的 Index Only Scan，只重复约 5 次，不是瓶颈</td><td>Nested Loop cost=12164.55，内侧 Index Only Scan cost=2.47</td><td>几乎不额外增加代价，问题仍在 [P1]</td></tr>
+</table>
+<h3>根因</h3>
+<ul><li>[P1] 是 Seq Scan：扫描 1,000,000 行、9804 页，<code>cust_code</code> 过滤后只剩约 5 行（rows=5），说明&quot;过滤很严但过滤条件没被索引接住&quot;。列统计 <code>cust_code</code> 的 n_distinct=-0.20，即约 20 万个不同取值，平均每个编码约 5 行，与计划里 rows=5 一致 —— 选择性估算本身没错，错在没有可用索引。</li><li>连接方式没问题：<code>customers</code> 侧走的是 <code>customers_pkey</code> 的 Index Only Scan（cost=2.47），不需要动。</li><li>统计信息可用：冻结页数与实时页数一致（<code>orders</code> 9804/9804、<code>customers</code> 1667/1667，偏离 0.0%），统计列齐全；<code>last_analyze</code> 显示 never 是统计计数器被清零后的表象，不代表没分析过，因此不需要先做 ANALYZE。</li><li>变慢不是计划回归：近 7 天计划未变、也没有突然变慢的小时，慢是这条 SQL 的固有形态。</li></ul>
+<h3>证据链摘要</h3>
+<ul><li>从 [P1] 可以看到 <code>orders</code> 每次都被整表扫描（1,000,000 行、9804 页），而 <code>cust_code</code> 过滤后只剩 5 行，说明过滤条件没有被索引接住；因此优先方向是给 <code>fl.orders(cust_code)</code> 补索引。这条建议尚未通过验证（本次连接不支持虚拟索引），代价推演只能证明当前 Seq Scan 的代价怎么算出来。</li><li>从 [P3] 看，<code>customers</code> 侧已经用主键索引只扫了 2.47 的代价，问题不在关联方式；因此不建议改写 JOIN 或加 hint。</li><li>从累计数据看，CPU 196.07 s、数据 IO 0.4 ms，说明慢在&quot;重复读 100 万行的 CPU&quot;，而不是 IO 等待或锁 —— 所以建索引减少的是逐行过滤的工作量，不是磁盘压力。</li></ul>
+<h2>③ 怎么优化</h2>
+<h3>已验证推荐</h3>
+<p>本次没有已验证方案：该连接不支持 hypopg 虚拟索引验证，脚本明确说明索引与改写收益都未经实测背书。SQL 本身结构简单（两表等值 JOIN + 一个过滤 + 聚合），也没有需要验证的改写点。</p>
+<h3>未验证想法</h3>
+<ul><li><strong>给 <code>fl.orders(cust_code)</code> 建索引（未验证）</strong>：代价推演把当前 Seq Scan 复算成 12152.00 并与实测完全吻合（3/5 个节点吻合、最大偏差 0.0011%），说明模型可信；对假设的 <code>cust_code</code> 索引，索引扫描本身估算为 6.94（索引读页 1.1 + 回表约 5.33 + 少量 CPU），而当前 Seq Scan 是 12152.00。但推演没有重算上层 Aggregate，总代价仍显示 12164.59、比值 1.00× —— 这个 1.00× 不是&quot;没收益&quot;，而是这份推演回答不了总收益，<strong>不能作为收益倍数引用</strong>，落地前请在直连通道用 hypopg 或测试环境实测确认。</li><li><strong>风险</strong>：<code>orders</code> 100 万行 / 162.6 MB，非并发 <code>CREATE INDEX</code> 会持 ShareLock 阻塞写入；建议串行构建（不要并行建索引）、放业务低峰，会话级 <code>lockwait_timeout</code> 不超过 30 秒<font color="#2f6fdb">，联机时段禁止 DDL，确需执行须提交变更审批单并经值班经理批准</font>(引用自处置手册库 RB-DDL-001)。</li><li><strong>落地方式参考</strong>：本行处理&quot;缺索引导致全表扫描&quot;的既有案例是<font color="#2f6fdb">用 CREATE INDEX CONCURRENTLY 在子表外键列上在线建索引，并把批量作业移到夜间分批提交</font>(引用自本行案例库 S3-20260227-FSYSE-SYSE外键父子表互等导致借据录入超时)。注意那单的根因还叠加了外键父子表互等锁，本条 SQL 当前没有锁等待证据，只借用它的建索引方式，不要照搬&quot;暂停批次&quot;等应急动作。</li><li><strong>上线前核对</strong>：<font color="#2f6fdb">批量类 SQL 上线前须用生产量级数据压测，并检查执行计划</font>(引用自贵行规范库 GS-SQL-003)。</li><li><strong>可选覆盖索引（未验证）</strong>：若希望 <code>count(*)</code>/<code>sum(amount)</code> 完全走索引，可考虑 <code>(cust_code, amount)</code>；它已覆盖 <code>(cust_code)</code> 前缀，不要两条都建。这只是在索引仍处假设阶段的思路，未经任何验证。</li><li><strong>可选改写</strong>：本次无——改写不会改变&quot;必须扫全表&quot;的事实，索引才是对症项；不加 hint、不改写 JOIN。</li><li><strong>运行环境</strong>：<font color="#2f6fdb">本实例为 openGauss 5.0.3、单机 4 核 8G 的测试库</font>(引用自环境画像库 EP-FL)，建索引耗时与锁影响在测试库上可直接观察，但生产结论要以生产量级压测为准。</li></ul>
+<h2>④ 总结</h2>
+<p>这条 SQL 的慢因很集中：<code>orders</code> 上 100 万行全表扫描 + <code>cust_code</code> 无索引，过滤后只剩约 5 行，属于典型的&quot;选择性高但没索引&quot;，且不是计划退化或锁等待——近 7 天计划一致、无突然变慢、数据 IO 仅 0.4 ms。索引方向明确，但本次连接无法做虚拟索引验证，因此只能作为未验证建议，收益需实测确认。</p>
+<p>需要我给出在测试环境实测的步骤吗？需要我也检查一下这张表上其他高频 SQL 是否同样缺 <code>cust_code</code> 类索引吗？</p>
+</div></div></div></section><section id='Q1'><h2>Q1 · 知识问答</h2><p class='prompt'>lockwait_timeout 默认是多少?我们行里 DDL 变更时应该设成多少?</p><div class='two'><div><h3>改造前 <small>30 秒 · 874 字 · 格式 1/5</small></h3><ul class='ck'><li class='bad'>✗ 段落:缺「解答正文」</li><li class='bad'>✗ 开头:第一行不是「解答来源」</li><li class='bad'>✗ 展开提议:结尾没有展开提议</li><li class='bad'>✗ 引用写法:还在用旧写法〔类型 ID〕</li><li class='ok'>✓ 引用:7 处上色引用,出处与颜色都对</li></ul><div class='ans'>
+<p><strong>默认值</strong></p>
+<p><font color="#2f6fdb">〔画像 EP-FL〕本行 FL 环境 lockwait_timeout = 20min（默认值）。</font> <font color="#2f6fdb">〔产品文档 PD-0001〕openGauss 5.0.x 的 lockwait_timeout 默认 20min，但原文单位表述有矛盾（写作毫秒），使用前需按实际版本核对。</font></p>
+<p>GaussDB 集中式 505 还要区分两个独立参数：</p>
+<p><font color="#2f6fdb">〔产品文档 PD-G25132C-02897〕ddl_lockwait_timeout 控制部分 DDL 申请 5~8 级锁时单个锁的最长等待，默认 120000ms（2min）。</font> <font color="#2f6fdb">〔产品文档 PD-0002〕update_lockwait_timeout 默认 2min，与 lockwait_timeout 分开生效。</font></p>
+<p><strong>DDL 时怎么设</strong></p>
+<p><font color="#2f6fdb">〔规范 GS-CHG-003〕DDL 执行前须检查目标表上的长事务与长查询，并把会话级 lockwait_timeout 设为不超过 30 秒。</font> <font color="#2f6fdb">〔手册 RB-DDL-001〕DDL 改到变更窗口，会话级 lockwait_timeout 设为 30 秒后重试。</font></p>
+<p>即：<strong>在 DDL 会话内设为 30s</strong>（如 <code>SET lockwait_timeout = 30s;</code>），只影响当前会话，不要改全局值；若 30s 内拿不到锁就报错退出，而不是无限排队。</p>
+<p>另注意执行时段：<font color="#2f6fdb">〔规范 GS-CHG-001〕联机时段（工作日 08:00–20:00）禁止执行 DDL，确需执行须提交变更审批单并经值班经理批准。</font></p>
+<p>知识库大盘：<a href="/dash/kb">打开知识库大盘</a></p>
+</div></div><div><h3>改造后 <small>45 秒 · 2115 字 · 格式 4/4</small></h3><ul class='ck'><li class='ok'>✓ 段落:解答正文 → 举例说明 → 引申和拓展</li><li class='ok'>✓ 开头:第一行是解答来源</li><li class='ok'>✓ 展开提议:结尾有「需要就 … 吗?」</li><li class='ok'>✓ 引用:9 处上色引用,出处与颜色都对</li></ul><div class='ans'>
+<p>解答来源：贵行规范库 GS-CHG-003；处置手册库 RB-DDL-001；GaussDB 官方文档库 PD-G25132C-02895、PD-G25132C-02897；产品文档库 PD-0001、PD-0002；贵行规范库 GS-CHG-001、GS-CONN-002</p>
+<p>① 解答正文</p>
+<p><font color="#0f7c86">lockwait_timeout 的默认值是 1200000 毫秒，也就是 20 分钟</font>（引用自GaussDB 官方文档库 PD-G25132C-02895）。但它目前只兜底其他专项参数覆盖范围之外的锁：update_lockwait_timeout 和 ddl_lockwait_timeout 覆盖的锁各自按自己的超时处理，其余常规锁才落到 lockwait_timeout。尤其注意 <font color="#0f7c86">DDL 对表、索引、存储过程/package/函数对象申请 5~8 级高级锁时，由 ddl_lockwait_timeout 单独控制，默认 120000 毫秒（2 分钟）</font>（引用自GaussDB 官方文档库 PD-G25132C-02897）。</p>
+<p>贵行对 DDL 变更的要求是：<font color="#2f6fdb">DDL 执行前须检查目标表上的长事务与长查询，并把会话级 lockwait_timeout 设为不超过 30 秒</font>（引用自贵行规范库 GS-CHG-003）。<font color="#2f6fdb">处置手册给出的做法也是把 DDL 改到变更窗口、会话级 lockwait_timeout 设为 30 秒后重试</font>（引用自处置手册库 RB-DDL-001）。所以按贵行规定，DDL 执行会话应设成 <strong>30 秒</strong>（例如 <code>SET lockwait_timeout = &#x27;30s&#x27;;</code>），不要沿用默认的 20 分钟。补充一点：在 GaussDB 集中式 505.x 上，DDL 的高级锁超时已由 ddl_lockwait_timeout 单独控制，只改 lockwait_timeout 不一定能把 DDL 压到 30 秒；如果版本支持，建议把 ddl_lockwait_timeout 也设为 30s（该参数是 SUSET，需相应权限），这样“DDL 30 秒内失败”才真正生效。</p>
+<p>如果你的实例是 openGauss 5.0.x，<font color="#0f7c86">默认值同为 20min，但原文对“20min 与毫秒单位”的表述存在矛盾，落地前请核对实际版本的参数单位</font>（引用自产品文档库 PD-0001，仅适用于 openGauss 5.0.x，不适用于 GaussDB 505）。</p>
+<p>② 举例说明</p>
+<p>应用视角：如果联机交易里有一条长查询或长事务一直持有目标表的读锁，DDL 就只能排在它后面等待；等待期间，DDL 发出的排他锁请求还会把后续的查询和更新请求一并挡住，业务侧表现为接口批量变慢甚至超时。把会话级 lockwait_timeout 压到 30 秒，最坏情况是 DDL 在 30 秒后报错退出，而不是让整条队列陪着等 20 分钟。</p>
+<p>数据库机制：DDL 会话申请的是高等级锁，与已有长事务持有的低等级锁冲突时进入锁队列。<font color="#2f6fdb">不检查长事务会让 DDL 在锁队列中等待，lockwait_timeout 过长会放大排队时间</font>（引用自贵行规范库 GS-CHG-003）。真出现排队放大时，应先取消 DDL 会话释放队列，再找出 DDL 之前就在运行的长查询，然后改到变更窗口重试（引用自处置手册库 RB-DDL-001）。</p>
+<p>③ 引申和拓展</p>
+<ul><li><font color="#2f6fdb">联机时段（工作日 08:00–20:00）禁止执行 ALTER TABLE、非 CONCURRENTLY 的 CREATE INDEX、VACUUM FULL 等 DDL；确需执行须提交变更审批单并经值班经理批准</font>（引用自贵行规范库 GS-CHG-001）。</li><li><font color="#2f6fdb">idle in transaction 超过 300 秒的会话必须告警，数据库侧不得自行终止业务会话</font>（引用自贵行规范库 GS-CONN-002）——这类会话正是 DDL 最常见的挡路者。</li><li>容易混淆的三个参数：lockwait_timeout（常规锁，默认 20min）、ddl_lockwait_timeout（DDL 高级锁，默认 2min）、update_lockwait_timeout（并发更新行锁，默认 2min，仅 GaussDB 提供，openGauss 5.0.x 没有）——<font color="#0f7c86">不要混用或互相替代</font>（引用自产品文档库 PD-0002）。</li></ul>
+<p>需要我说明 DDL 前怎么查目标表上的长事务与长查询吗？需要了解联机时段 DDL 的审批要求吗？</p>
+</div></div></div></section><section id='Q2'><h2>Q2 · 知识问答</h2><p class='prompt'>报错 GAUSS-10512 是什么意思,怎么处理?</p><div class='two'><div><h3>改造前 <small>42 秒 · 942 字 · 格式 1/5</small></h3><ul class='ck'><li class='bad'>✗ 段落:缺「解答正文」</li><li class='bad'>✗ 开头:第一行不是「解答来源」</li><li class='bad'>✗ 展开提议:结尾没有展开提议</li><li class='bad'>✗ 引用写法:还在用旧写法〔类型 ID〕</li><li class='ok'>✓ 引用:1 处上色引用,出处与颜色都对</li></ul><div class='ans'>
+<h2>含义</h2>
+<p><font color="#2f6fdb">〔产品文档 PD-G25132C-04238〕GAUSS-10512 的原文是 expected message sequence is &lt;number&gt;, actual message sequence is &lt;number&gt;，SQLSTATE 22000，CAUSE 为期望的报文序号与实际收到的序号不一致，ACTION 建议联系华为技术支持。（出自《GaussDB 集中式版产品文档 25.1.32》错误码参考 GAUSS-10501--GAUSS-11000）</font></p>
+<p>通俗说：<strong>客户端与服务端（或 CN 与 DN 之间）的报文流错位了</strong>——一方发出的消息序号与对方期待的序号对不上，通讯协议同步丢失，当前这条语句或这个连接已经不可用。</p>
+<h2>常见成因（通用经验，知识库未登记该码的案例）</h2>
+<ol><li>同一连接被多线程、多协程共用，或上一条语句的结果集没有取完就发下一条 → 协议错位，最常见</li><li>连接池归还连接时没有清理会话状态（未关闭游标、未回滚事务）</li><li>驱动版本与内核协议不匹配，或批量绑定参数不一致（<code>support_batch_bind</code> 与 <code>UseBatchProtocol</code> 不统一）</li><li>中间有代理、负载均衡、SSL 卸载设备改动了报文，或网络丢包、乱序</li><li>少数情况是内核通讯层异常，需要厂商介入</li></ol>
+<h2>处理建议</h2>
+<ul><li><strong>先定范围</strong>：只有个别会话报 → 按应用侧处理；成批出现 → 查网络与代理，并收集 CN/DN 日志</li><li><strong>单会话</strong>：断开重连即可恢复；排查连接池是否“每线程独占连接、结果集消费完、游标关闭”</li><li><strong>驱动</strong>：升级 JDBC/ODBC 到与当前内核版本配套的版本；批量场景统一 <code>support_batch_bind</code> 与驱动批量参数</li><li><strong>网络</strong>：看丢包/重传、代理是否做连接复用或多路复用</li><li><strong>复现时留证</strong>：报错时间点、SQL、驱动版本、连接池配置、对应 CN/DN 日志段，按文档建议提交华为技术支持</li></ul>
+<p>若报错时伴随“卡住不动”，可以让我跑一次健康检查或锁等待看看是不是等锁引起的连带异常；也可以把报错时间段的数据库日志贴给我一起看。</p>
+</div></div><div><h3>改造后 <small>48 秒 · 1159 字 · 格式 4/4</small></h3><ul class='ck'><li class='ok'>✓ 段落:解答正文 → 举例说明 → 引申和拓展</li><li class='ok'>✓ 开头:第一行是解答来源</li><li class='ok'>✓ 展开提议:结尾有「需要就 … 吗?」</li><li class='ok'>✓ 引用:3 处上色引用,出处与颜色都对</li></ul><div class='ans'>
+<p>解答来源：GaussDB 官方文档库 PD-G25132C-04238（其余部分为通用知识，仅供参考）</p>
+<p><strong>① 解答正文</strong></p>
+<p>GAUSS-10512 是「消息序号不匹配」错误：通信双方对同一条消息的序号预期与实际收到的不一致，属于协议/通信层异常，并非业务数据违反约束。</p>
+<p><font color="#0f7c86">GAUSS-10512: expected message sequence is <code>&lt;number&gt;</code>, actual message sequence is <code>&lt;number&gt;</code></font>（引用自 GaussDB 官方文档库 PD-G25132C-04238）</p>
+<p><font color="#0f7c86">SQLSTATE 为 22000，CAUSE 为 expected sequence data num 与 actual sequence data num 不一致</font>（引用自 GaussDB 官方文档库 PD-G25132C-04238）</p>
+<p><font color="#0f7c86">官方给出的处理动作为联系华为技术支持</font>（引用自 GaussDB 官方文档库 PD-G25132C-04238）</p>
+<p>处理上建议先从链路排查，而不是反复重试：</p>
+<ol><li><strong>先定位触发场景</strong>：看报错发生在普通查询、<code>COPY</code> 批量导入、长事务还是连接池借还时；记下报错里的两个序号值。</li><li><strong>对齐驱动与集群版本</strong>：客户端 JDBC/ODBC/libpq 版本与 GaussDB 版本不匹配是常见诱因，优先用官方配套驱动复测。</li><li><strong>排查中间环节</strong>：连接池、负载均衡、代理、防火墙是否超时切断大包、复用旧连接或改写报文；条件允许时直连数据库绕开中间件验证。</li><li><strong>保留证据</strong>：客户端完整报错、驱动版本、<code>gsql</code> 服务端日志对应时间段、可复现的最小操作；按官方 ACTION 提交华为技术支持。</li><li><strong>应用侧防重复</strong>：批量导入或事务若自动重试，必须有幂等控制，避免消息重放造成重复提交。</li></ol>
+<p><strong>② 举例说明</strong></p>
+<p>通用场景：日终批量用 <code>COPY</code> 或大事务导入时，中间代理把大包连接提前断开，重连后序号从中间继续，就会报这个错；业务侧表现为导入中断、事务失败，重试后可能出现部分数据重复。另一种常见情形是新旧驱动混用，某类报文序号规则不一致。</p>
+<p><strong>③ 引申和拓展</strong></p>
+<p>不要把它当成数据错误去改数据，也不要只靠无限重试掩盖；重点在「驱动版本、中间件、网络链路」三者。它和锁等待、主键冲突类错误（如 40P01、23505）根因完全不同，排查方向不要混。</p>
+<p>需要我帮你整理一份针对该报错的证据采集清单吗？需要了解同属 GAUSS-105xx 的其他错误码吗？</p>
+</div></div></div></section><section id='Q3'><h2>Q3 · 知识问答</h2><p class='prompt'>用 Plan Hint 指定 join 顺序怎么写?给个例子。</p><div class='two'><div><h3>改造前 <small>33 秒 · 1276 字 · 格式 1/4</small></h3><ul class='ck'><li class='bad'>✗ 段落:缺「解答正文」</li><li class='bad'>✗ 开头:第一行不是「解答来源」</li><li class='bad'>✗ 展开提议:结尾没有展开提议</li><li class='ok'>✓ 引用:4 处上色引用,出处与颜色都对</li></ul><div class='ans'>
+<p>用 <code>leading</code> hint 来指定 join 顺序，也就是 Join 顺序的 hint。</p>
+<p><strong>语法</strong></p>
+<pre><code>/* 只定顺序，内外表不限 */
+select /*+ leading(t1 t2 t3 t4) */ ...
+from t1, t2, t3, t4
+where ...;
+
+/* 同时定顺序和内外表（仅最外层生效） */
+select /*+ leading((t1 t2 t3 t4)) */ ...
+from t1, t2, t3, t4
+where ...;</code></pre>
+<p>两种写法的区别：</p>
+<p><font color="#2f6fdb">依据《Join顺序的Hint》(PD-G25132C-01060)：<code>leading(t1 t2 t3 t4)</code> 表示各表先后 join 的顺序不限内外表；<code>leading((t1 t2 t3 t4))</code> 表示 t1 与 t2 先 join、t2 做内表，再依次与 t3、t4 join 且它们都做内表。</font></p>
+<p>括号还可以用来控制子集的 join 顺序：</p>
+<pre><code>/* t2、t3、t4 先 join，再和 t1、t5 join */
+select /*+ leading(t1 (t2 t3 t4) t5) */ ...</code></pre>
+<p><font color="#2f6fdb">依据《Join顺序的Hint》(PD-G25132C-01060)：表列表中可用括号指定优先级，表之间用空格分隔；表须在当前层（或提升的子查询）中存在且唯一，同一张表只能出现一次；有别名时必须写别名，且不能带 schema，否则报语义错误。</font></p>
+<p><strong>官方示例</strong></p>
+<pre><code>explain select /*+ leading((((((store_sales store) promotion) item) customer) ad2) store_returns)
+                 leading((store store_sales)) */ ...</code></pre>
+<p><font color="#2f6fdb">依据《Join顺序的Hint》(PD-G25132C-01060)：该 hint 表示 store_sales 与 store 先 join（store_sales 做内表），再依次与 promotion、item、customer、ad2、store_returns join。</font></p>
+<p>注意：</p>
+<ul><li>写完后用 <code>explain</code> 对照计划验证 hint 是否真的被采用；若 hint 冲突或失效，计划顶端通常会给 warning 提示。</li><li>以上语法出自 GaussDB 集中式 505.2 官方文档，<font color="#2f6fdb">该文档在当前环境标记为「适用性未知」</font>，在贵行生产版本落地前建议先确认版本行为一致。</li><li>需要现场取计划验证的话，我可以走 <code>gaussdb-explain</code> 对具体 SQL 跑一下。</li></ul>
+</div></div><div><h3>改造后 <small>31 秒 · 1410 字 · 格式 4/4</small></h3><ul class='ck'><li class='ok'>✓ 段落:解答正文 → 举例说明 → 引申和拓展</li><li class='ok'>✓ 开头:第一行是解答来源</li><li class='ok'>✓ 展开提议:结尾有「需要就 … 吗?」</li><li class='ok'>✓ 引用:2 处上色引用,出处与颜色都对</li></ul><div class='ans'>
+<p>解答来源：GaussDB 官方文档库 PD-G25132C-01060；GaussDB 官方文档库 PD-G25132C-01057</p>
+<p>① 解答正文</p>
+<p>要指定 join 顺序，可以选用 leading hint。hint 必须以注释的形式紧跟在 <code>SELECT</code>、<code>INSERT</code>、<code>UPDATE</code>、<code>DELETE</code>、<code>MERGE</code> 这些关键字之后；同一个查询里可以写多个 hint，hint 之间用空格分隔；关键字和 hint 之间不能夹注释，否则 hint 会失效。</p>
+<p><font color="#0f7c86">指定 join 顺序的写法有两种：<code>leading([@queryblock] join_table_list)</code> 只固定顺序，不限定内外表；<code>leading((join_table_list))</code> 在外层再套一层括号，连内外表一起固定，而且内外表的顺序只在当前层最外层生效</font>（引用自 GaussDB 官方文档库 PD-G25132C-01060）</p>
+<pre><code>-- 只定顺序，不限定谁是内表
+SELECT /*+ leading(t1 t2 t3) */ *
+  FROM t1 JOIN t2 ON t1.id = t2.id JOIN t3 ON t2.id = t3.id;
+
+-- 同时定顺序和内外表：t1 与 t2 先 join（t2 为内表），再与 t3 join（t3 为内表）
+SELECT /*+ leading((t1 t2 t3)) */ *
+  FROM t1 JOIN t2 ON t1.id = t2.id JOIN t3 ON t2.id = t3.id;</code></pre>
+<p>表列表中可再套括号指定优先级，如 <code>leading(t1 (t2 t3 t4) t5)</code> 表示 t2、t3、t4 先 join。表名规则：<font color="#0f7c86"><code>join_table_list</code> 中的表必须在当前层或提升后的子查询中存在且唯一，每张表只能出现一次；表有别名时必须用别名，且不能带 schema</font>（引用自 GaussDB 官方文档库 PD-G25132C-01060）</p>
+<p>② 举例说明</p>
+<p>通用场景：多表关联时优化器选错了驱动表，比如先做两张小表的大结果集，再去关联大表，中间结果集膨胀导致查询超时。这时可以用 <code>leading((小表A 大表B 维表C))</code> 固定先做 A、B 的 join 且让大表 B 作为内表，再关联 C。也可以用 <code>leading(t1 t2 t3)</code> 只约束顺序、把内外表仍交给优化器挑。（通用场景，非本行案例）</p>
+<p>③ 引申和拓展</p>
+<ul><li>hint 只作用于当前层；子查询的 hint 要写在子查询自己的 <code>select</code> 之后。</li><li>把 join 顺序和 join 方式（<code>NestLoop</code>、<code>HashJoin</code>、<code>MergeJoin</code>）组合使用，效果更稳定；改完用 <code>EXPLAIN</code> 对照计划验证。</li><li>参数 <code>plan_mode_seed</code> 不为 0（random plan）时，指定的 hint 不会被使用；不改 SQL 想让 hint 生效，可用 SQL PATCH。</li></ul>
+<p>需要我给一个三表（含别名）的完整 hint 示例并逐层解读执行计划吗？需要了解用 SQL PATCH 免改语句固化 hint 的做法吗？</p>
+</div></div></div></section><section id='W1'><h2>W1 · WDR 解读</h2><p class='prompt'>对 og5 做 2026-10-21 18:32 到 18:52 的 WDR 分析。</p><div class='two'><div><h3>改造前 <small>211 秒 · 17411 字 · 格式 1/6</small></h3><ul class='ck'><li class='bad'>✗ 段落:缺「负载画像」</li><li class='ok'>✓ 开头:开头有总体状态</li><li class='bad'>✗ 展开提议:结尾没有展开提议</li><li class='bad'>✗ 两种读者:应用视角 0 处、数据库机制 0 处</li><li class='bad'>✗ 引用写法:还在用旧写法〔类型 ID〕</li><li class='bad'>✗ 出处括号:6 处上色的句子后面没有「(引用自 …)」:应用对同族表按主键升序统一加锁顺序，并捕;应用禁止执行 LOCK TABLE IN;〔基线 BL-FL-TEMP_BYTES</li></ul><div class='ans'>
+<p>分析窗口实际为快照 3073（18:31）→ 3079（18:52），比你要的 18:32 早 1 分钟；已排除 44 条内核系统 SQL（合计 2894.8 秒）。</p>
+<p>锁等待主导（LOCK_EVENT 占 90%，relation/transactionid/tuple），叠加 26 次死锁与 6.2GiB 临时落盘；CPU 仅占 DB time 11.5%，不要往扩容 CPU 方向查。</p>
+<p>要定位 26 次死锁的具体环，请把数据库日志中本窗口的 <code>deadlock detected</code> 段（含其后 DETAIL）贴回；膨胀与回收水位 WDR 看不到，需另外用 vacuum 技能检查。</p>
+<hr>
+<h1>WDR 报告 — api/10-x-x-x-postgres</h1>
+<p>总体状态 🟠告警  驱动：锁等待主导：LOCK_EVENT 占等待 90%，26 次死锁叠加 6.2GiB 临时落盘，CPU 仅占 DB time 11.5%</p>
+<p>判断校验 ✓ 已锚定（6 条发现全覆盖、无夸大、无遗漏；0 条建议经 hypopg/cost 实证、13 条建议性）</p>
+<h2>报告窗口</h2>
+<p>snap 3073 (2026-10-21 18:31) → snap 3079 (2026-10-21 18:52)，时长 21 分钟，scope=node node=og5</p>
+<h2>维度概览</h2>
+<table>
+<tr><th>维度</th><th>严重度</th><th>关键指标</th></tr>
+<tr><td>Load Profile</td><td>🟡关注</td><td>DB time 30819.0s（其中 CPU 3531.6s=11%，余为等待/锁/IO/睡眠）、平均并发活跃会话 24.5、commits 769714、物理读 896990 块、逻辑读 1394168657 块</td></tr>
+<tr><td>Database Stat</td><td>🟠告警</td><td>commit 769714 / rollback 43（回滚率 0.0%）、死锁 26、临时溢出 6395.10MiB、命中率 99.9%</td></tr>
+<tr><td>Top SQL</td><td>🟡关注</td><td>各维度元凶 — DB time:3167133288(22%,CPU占0%) ｜ CPU:4198238080(667s) ｜ 溢出:2858996927(3587MB) ｜ 物理读:759758051(282034块) ｜ 调用:1872435845(379347次)；元凶从耗时前 60 条里找，表里显示前 10 条，另列 3 条榜外元凶；已排除 44 条内核系统 SQL(648622204、3290797567、115833279等,合计 2894.8 秒)</td></tr>
+<tr><td>Wait Events / Classes</td><td>🟠告警</td><td>Top 等待类 LOCK_EVENT 占 90%，最多的事件 relation</td></tr>
+<tr><td>Checkpoint / BgWriter / Redo</td><td>🟢健康</td><td>checkpoint timed 22 / req 0（req 占 0%）</td></tr>
+<tr><td>Cache / Memory</td><td>🟢健康</td><td>物理读 Top 对象：wal_log（命中率详见 Database Stat）</td></tr>
+<tr><td>File IO</td><td>🟢健康</td><td>物理读 Top 文件：db14725/spc1663/f14189</td></tr>
+</table>
+<h2>图示</h2>
+<p><strong>等待类占比（窗口内总等待时长的分布）</strong></p>
+<pre><code>  LOCK_EVENT  ██████████████████░░  90.1%
+    IO_EVENT  ██░░░░░░░░░░░░░░░░░░   7.8%
+LWLOCK_EVENT  ░░░░░░░░░░░░░░░░░░░░   2.0%</code></pre>
+<p><strong>Top SQL 的 占DB time%</strong></p>
+<pre><code>3167133288  ████░░░░░░░░░░░░░░░░  22.0%
+ 169551786  ███░░░░░░░░░░░░░░░░░  14.2%
+ 226085226  ██░░░░░░░░░░░░░░░░░░   8.6%
+ 547475528  █░░░░░░░░░░░░░░░░░░░   7.0%
+  26287510  █░░░░░░░░░░░░░░░░░░░   6.4%</code></pre>
+<h2>全景分析（自顶向下）</h2>
+<h3>Load Profile</h3>
+<p>DB time 30819.0s（其中 CPU 3531.6s=11%，余为等待/锁/IO/睡眠）、平均并发活跃会话 24.5、commits 769714、物理读 896990 块、逻辑读 1394168657 块</p>
+<table>
+<tr><th>DB time(s)</th><th>CPU time(s)</th><th>CPU占DBtime%</th><th>commits</th><th>物理读(块)</th><th>逻辑读(块)</th><th>平均并发活跃会话</th></tr>
+<tr><td>30819.04</td><td>3531.63</td><td>11.46</td><td>769714</td><td>896990</td><td>1394168657</td><td>24.46</td></tr>
+</table>
+<h3>Database Stat</h3>
+<p>commit 769714 / rollback 43（回滚率 0.0%）、死锁 26、临时溢出 6395.10MiB、命中率 99.9%</p>
+<table>
+<tr><th>commits</th><th>rollbacks</th><th>回滚率%</th><th>死锁</th><th>临时溢出</th><th>cache_hit%</th></tr>
+<tr><td>769714</td><td>43</td><td>0.01</td><td>26</td><td>6395.10MiB</td><td>99.94</td></tr>
+</table>
+<h3>Wait Events / Classes</h3>
+<p>Top 等待类 LOCK_EVENT 占 90%，最多的事件 relation</p>
+<table>
+<tr><th>等待类</th><th>waits</th><th>wait_s</th><th>占比%</th><th>主要事件</th></tr>
+<tr><td>LOCK_EVENT</td><td>3948</td><td>23656.86</td><td>90.14</td><td>relation 8094.73s、transactionid 7459.07s、tuple 6168.89s</td></tr>
+<tr><td>IO_EVENT</td><td>1449288279</td><td>2058.64</td><td>7.84</td><td>BufHashTableSearch 1578.98s、DataFileWrite 133.98s、WALWrite 97.39s</td></tr>
+<tr><td>LWLOCK_EVENT</td><td>335479</td><td>529.42</td><td>2.02</td><td>WALFlushWait 468.07s、BufferContentLock 22.83s、DoubleWriteLock 20.68s</td></tr>
+</table>
+<h3>Top SQL</h3>
+<p>各维度元凶 — DB time:3167133288(22%,CPU占0%) ｜ CPU:4198238080(667s) ｜ 溢出:2858996927(3587MB) ｜ 物理读:759758051(282034块) ｜ 调用:1872435845(379347次)；元凶从耗时前 60 条里找，表里显示前 10 条，另列 3 条榜外元凶；已排除 44 条内核系统 SQL(648622204、3290797567、115833279等,合计 2894.8 秒)</p>
+<table>
+<tr><th>sql_id</th><th>calls</th><th>elapsed_s</th><th>cpu_s</th><th>spill_MB</th><th>物理读(块)</th><th>占DB time%</th><th>query</th></tr>
+<tr><td>3167133288</td><td>75</td><td>6773.31</td><td>0.03</td><td>0.00</td><td>9</td><td>21.98</td><td>UPDATE fl.acct SET bal = bal + ? WHERE id = ?</td></tr>
+<tr><td>169551786</td><td>38</td><td>4366.04</td><td>0.05</td><td>0.00</td><td>6</td><td>14.17</td><td>UPDATE fl.acct_child SET amount = amount + ? WHERE…</td></tr>
+<tr><td>226085226</td><td>10</td><td>2643.32</td><td>0.02</td><td>0.00</td><td>46</td><td>8.58</td><td>INSERT INTO fl.acct_child(id, acct_id, amount) VAL…</td></tr>
+<tr><td>547475528</td><td>58</td><td>2142.57</td><td>0.03</td><td>0.00</td><td>7</td><td>6.95</td><td>UPDATE fl.acct SET bal = bal + ? WHERE id = ?</td></tr>
+<tr><td>26287510</td><td>20</td><td>1968.37</td><td>0.01</td><td>0.00</td><td>2</td><td>6.39</td><td>INSERT INTO fl.uniq_race(k, who) VALUES (?, ?)</td></tr>
+<tr><td>2416487437</td><td>354263</td><td>1240.49</td><td>54.79</td><td>0.00</td><td>2</td><td>4.03</td><td>SELECT bal FROM fl.acct WHERE id = ? FOR SHARE</td></tr>
+<tr><td>3091214944</td><td>11</td><td>1177.35</td><td>660.00</td><td>577.76</td><td>65493</td><td>3.82</td><td>WITH lvl1 AS ( SELECT i.order_id, sum(i.amount) AS…</td></tr>
+<tr><td>4198238080</td><td>9128</td><td>1125.01</td><td>666.71</td><td>0.00</td><td>14297</td><td>3.65</td><td>SELECT count(*) AS n, sum(o.amount) AS amt FROM fl…</td></tr>
+<tr><td>3509710879</td><td>1</td><td>1021.27</td><td>625.65</td><td>0.00</td><td>1193</td><td>3.31</td><td>SELECT count(*) AS kept, sum(o.amount) AS amt FROM…</td></tr>
+<tr><td>3973385787</td><td>2</td><td>839.62</td><td>0.00</td><td>0.00</td><td>0</td><td>2.72</td><td>LOCK TABLE fl.acct_child IN EXCLUSIVE MODE</td></tr>
+<tr><td>2858996927</td><td>4</td><td>303.08</td><td>136.31</td><td>3587.00</td><td>14553</td><td>0.98</td><td>〔榜外·溢出冠军〕SELECT count(*) AS n, max(x.rn) AS max_rn, max(x.r…</td></tr>
+<tr><td>759758051</td><td>4385</td><td>192.86</td><td>53.25</td><td>0.00</td><td>282034</td><td>0.63</td><td>〔榜外·物理读冠军〕INSERT INTO fl.wal_log(who, payload) SELECT ?, rep…</td></tr>
+<tr><td>1872435845</td><td>379347</td><td>15.78</td><td>20.03</td><td>0.00</td><td>0</td><td>0.05</td><td>〔榜外·调用冠军〕BEGIN</td></tr>
+</table>
+<h3>Checkpoint / BgWriter / Redo</h3>
+<p>checkpoint timed 22 / req 0（req 占 0%）</p>
+<table>
+<tr><th>timed_ckpt</th><th>req_ckpt</th><th>req占比%</th></tr>
+<tr><td>22</td><td>0</td><td>0.00</td></tr>
+</table>
+<h3>Cache / Memory</h3>
+<p>物理读 Top 对象：wal_log（命中率详见 Database Stat）</p>
+<table>
+<tr><th>对象</th><th>物理读(块)</th><th>逻辑读(块)</th></tr>
+<tr><td>wal_log</td><td>288598</td><td>19613831</td></tr>
+<tr><td>statement_history</td><td>275830</td><td>5810081</td></tr>
+<tr><td>bloat_hot</td><td>150518</td><td>807715813</td></tr>
+<tr><td>order_items</td><td>60906</td><td>44324630</td></tr>
+<tr><td>orders</td><td>20758</td><td>92272070</td></tr>
+<tr><td>xmin_hold</td><td>16421</td><td>61355704</td></tr>
+<tr><td>payments</td><td>15955</td><td>106241684</td></tr>
+<tr><td>shipments</td><td>12484</td><td>33943</td></tr>
+<tr><td>bloat_slow</td><td>11812</td><td>118569943</td></tr>
+<tr><td>snap_global_statio_all_indexes</td><td>7633</td><td>41202</td></tr>
+</table>
+<h3>File IO</h3>
+<p>物理读 Top 文件：db14725/spc1663/f14189</p>
+<table>
+<tr><th>文件</th><th>物理读</th><th>物理写</th></tr>
+<tr><td>db14725/spc1663/f14189</td><td>433927</td><td>453005</td></tr>
+<tr><td>db14725/spc1663/f3375119</td><td>62302</td><td>10740</td></tr>
+<tr><td>db14725/spc1663/f3353392</td><td>44401</td><td>3</td></tr>
+<tr><td>db14725/spc1663/f3197477</td><td>17571</td><td>0</td></tr>
+<tr><td>db14725/spc1663/f3353399</td><td>16434</td><td>6</td></tr>
+<tr><td>db14725/spc1663/f3197499</td><td>15900</td><td>0</td></tr>
+<tr><td>db14725/spc1663/f3353367</td><td>10062</td><td>73566</td></tr>
+<tr><td>db14725/spc1663/f3197508</td><td>9615</td><td>0</td></tr>
+<tr><td>db14725/spc1663/f39096</td><td>7586</td><td>986</td></tr>
+<tr><td>db14725/spc1663/f3353381</td><td>6268</td><td>13562</td></tr>
+</table>
+<h2>高风险发现（根因 → 引发请求 → 优化）</h2>
+<h3>🟠告警 WDR_DEADLOCK · Database Stat</h3>
+<ul><li>证据：死锁数 26 vs 阈值 ≥5（snap_summary_stat_database.deadlocks —— <strong>这个数字是硬数据，但「哪几条语句成环」WDR 里没有</strong>：快照只有一个计数器，没有环的任何信息。要确定具体的死锁对（环上几个会话、各自持有/等待什么锁、完整语句、谁被选为牺牲者），唯一权威来源是<strong>数据库日志</strong>：在 <code>$PGDATA/pg_log/</code> 下按本窗口的时间段 grep <code>deadlock detected</code>，紧随其后的 DETAIL 段就是完整的环。本工具读不到日志文件（需 initial account 权限）——<strong>请用户把那几段（连同后面的 DETAIL 几行）贴过来</strong>，<code>gaussdb-lockwait --deadlock-log -</code> 能逐个解析出环、各自的语句与牺牲者，按模式归类并给出改法。若要从 Top SQL 反推候选语句，<strong>必须标明是候选、不是证据</strong> —— 实测过三方环被反推成「两条语句在抢」的情形。）</li><li>根因：窗口内死锁 26 次（硬计数），WDR 只有计数器、没有成环信息。Top SQL 中同族 DML 候选为：fl.acct 的两条 UPDATE（3167133288、547475528）、fl.acct_child 的 UPDATE（169551786）与 INSERT（226085226）、fl.uniq_race 的 INSERT（26287510），另有显式 LOCK TABLE fl.acct_child IN EXCLUSIVE MODE（3973385787，2 次、839.62s、CPU 约 0）。这些只是候选、不是证据；确切的环、持有等待的锁与牺牲者必须看数据库日志。</li><li>建议：</li><li>请按窗口时间段从数据库日志提取 deadlock detected 段及其后 DETAIL 约 12 行贴回对话，用死锁日志解析得到确切的环与牺牲者；Top SQL 反推只能算候选  风险:低 [需人工执行]</li><li><font color="#2f6fdb">应用对同族表按主键升序统一加锁顺序，并捕获 SQLSTATE 40P01 后重试整个事务（〔案例 S3-20260827〕）</font>  风险:中 [需人工执行]</li><li><font color="#2f6fdb">应用禁止执行 LOCK TABLE IN EXCLUSIVE MODE / ACCESS EXCLUSIVE MODE（〔规范 GS-LOCK-001〕）</font>  风险:中 [需人工执行]</li></ul>
+<h3>🟠告警 WDR_TEMP_SPILL · Database Stat</h3>
+<ul><li>证据：临时文件溢出 6395.10MiB vs 阈值 &gt;2048.00MiB（snap_summary_stat_database.temp_bytes（库级合计）。其中能归到语句的 4164.76MiB（占库级 65%）；落盘最多的是 sqlid 2858996927（3587.00MiB，占语句级的 86%、占库级的 56%），它<strong>不在按耗时排的前 10 名里</strong> —— 按耗时找元凶会漏掉它；其余 2230.34MiB 归不到具体语句）</li><li>根因：库级临时落盘 6395.10MiB，其中可归到语句的 4164.76MiB；2858996927 一条 3587.00MiB，占语句级 86%、库级 56%。它只有 4 次调用、303.08s，执行计划为 4 层 WindowAgg 叠加 4 次 Sort，每次对约 279.8 万行排序落盘。对照<font color="#2f6fdb">〔基线 BL-FL-TEMP_BYTES_PER_HOUR〕演练窗口 2 到 8GB/h 属预期、超过 10GB/h 视为异常</font>，本窗口折算约 18GB/h。</li><li>建议：</li><li><font color="#2f6fdb">按〔手册 RB-TMP-001〕先定位落盘最多的会话，经审批后只对该会话 SET work_mem，不得全局调大 work_mem</font>  风险:中 [需人工执行]</li><li>把 4 个使用不同分区键与排序键的窗口函数拆分或减少排序键，评估分批汇总，避免对 279.8 万行反复排序；改写在生产量级验证后再上线  风险:中 [需人工执行]</li></ul>
+<h3>🟠告警 WDR_WAIT_CLASS_SKEW · Wait Events / Classes</h3>
+<ul><li>证据：等待类倾斜 LOCK_EVENT 90% vs 阈值 &gt;60%（snap_global_wait_events 等待类聚合；其中最多的是 relation（8094.73s））</li><li>根因：LOCK_EVENT 占等待 90.14%：relation 8094.73s、transactionid 7459.07s、tuple 6168.89s、advisory 1919.84s。CPU 只占 DB time 11.46%，瓶颈在锁而不是算力。Top SQL 的 3167133288（elapsed 6773.31s、CPU 0.03s）与 169551786（elapsed 4366.04s、CPU 0.05s）是典型被锁阻塞；3973385787 的 LOCK TABLE fl.acct_child IN EXCLUSIVE MODE（2 次、839.62s、CPU 约 0）与 relation 等待高度吻合。窗口已过约 5 天，超过活跃会话采样约 2 天的保留期，本次无法重建当时的阻塞链。</li><li>建议：</li><li><font color="#2f6fdb">按〔手册 RB-LCK-001〕定位根会话：idle in transaction 通知应用，10 分钟未解除经值班经理审批后终止；active 先 cancel 当前语句；只处理根会话</font>  风险:高 [需人工执行]</li><li><font color="#2f6fdb">遵守〔规范 GS-CONN-002〕：idle in transaction 超过 300 秒必须告警，数据库侧不得自行终止业务会话，联机时段终止须值班经理审批</font>  风险:中 [需人工执行]</li><li>下一次复现时立即用锁等待工具抓现场阻塞链，不要事后回看；本窗口只能靠日志中的死锁段补充  风险:低</li></ul>
+<h3>🟡关注 WDR_DBTIME_WAIT_HEAVY · Load Profile</h3>
+<ul><li>证据：CPU 占 DB time 11.5% vs 阈值 &lt;30%（snap_global_instance_time：DB time 30819s、CPU 3532s —— 时间主要花在等待(锁/IO/睡眠),真凶看等待事件维度,不是 CPU 不够）</li><li>根因：DB time 30819s，CPU 3531.63s 仅占 11.46%，约 88.5% 的时间在等待；不是 CPU 不足，扩容 CPU 解决不了锁等待。</li><li>建议：</li><li>按锁等待与死锁条目先解除阻塞源，再评估 CPU 与资源扩容  风险:低</li></ul>
+<h3>🟡关注 WDR_TOPSQL_CPU_HEAVY · Top SQL</h3>
+<ul><li>证据：高耗时且 CPU 占主导 CPU 占其耗时 56%（1177s × 11 次） vs 阈值 &gt;50%（snap_summary_statement：sqlid 3091214944（WITH lvl1 AS ( SELECT i.order_id, sum(i.amount) AS amt, count(*) AS n FROM fl.or…）—— 在真干活（算/排序/扫数据），不是被锁住；下一步看执行计划与调优，不要往锁的方向查）</li><li>根因：3091214944：11 次、1177.35s，CPU 660.00s（56%）。计划显示 lvl1 聚合 100 万行、lvl2 Hash Join 100 万行，最后 c.code LIKE l3.k || ? 的模式取自另一侧列，customers 上的 idx_customers_code 用不上，只能嵌套循环逐行比对，另有 4 次 Sort。4198238080：9128 次、1125.01s，CPU 666.71s（59%），计划为 orders 全表 Seq Scan（cust_code 无索引）。</li><li>建议：</li><li>3091214944 把 c.code LIKE l3.k || ? 改为等值关联（前缀长度固定时 substr(c.code,1,N) = l3.k），使其能走 Hash Join；改写需用生产量级数据验证等价与收益  风险:中 [需人工执行]</li><li>3091214944 减少不必要的排序层级，重点关注 lvl1 的 100 万行聚合与后续 4 次排序  风险:中 [需人工执行]</li><li>4198238080 是否在 orders(cust_code) 建索引须先人工实测；本次代价推演因上层聚合未建模只给出总体 1.00x，不能作为已验证收益  风险:中 [需人工执行]</li></ul>
+<h3>🟡关注 WDR_TOPSQL_LOW_CPU · Top SQL</h3>
+<ul><li>证据：高 DB time 但 CPU 极低 CPU 仅占其耗时 0.0% vs 阈值 &lt;10%（sqlid 3167133288（UPDATE fl.acct SET bal = bal + ? WHERE id = ?）elapsed 6773.3s / cpu 0.0s → 阻塞/睡眠主导(锁/等待/pg_sleep)，非资源消耗；真凶看 CPU time 与等待事件）</li><li>根因：3167133288 的 UPDATE fl.acct 共 75 次、累计 6773.31s，CPU 仅 0.03s（约 0%），几乎全部在等锁；与 LOCK_EVENT 的 transactionid、tuple、relation 等待一致。它不是慢在 SQL 写法，而是被阻塞；优化这条 UPDATE 的索引或写法解决不了本窗口的问题。</li><li>建议：</li><li>不要为这条 UPDATE 加索引或改写；现场按锁阻塞抓根会话，只处理根会话  风险:低</li></ul>
+<h2>本报告没覆盖的</h2>
+<ul><li><strong>膨胀与回收水位</strong>：死元组、autovacuum 追不追得上、回收被谁卡住（长事务 / 两阶段事务 /复制槽），WDR 的快照里都没有这些数 —— 实测一张有 540 万死元组的表，快照里记的是 0。</li><li><strong>一直没跑完的 SQL</strong>：WDR 只统计<strong>已完成</strong>的执行，正卡着没返回的语句在这里一行都没有。</li><li><strong>窗口之前的历史</strong>：快照只记当下的累计值，窗口开始前的膨胀程度、长事务已经开了多久，事后都重建不出来。</li></ul>
+<h2>SQL 附录（根因里提到的语句）</h2>
+<h3>sql_id <code>2858996927</code></h3>
+<pre><code>SELECT count(*) AS n, max(x.rn) AS max_rn, max(x.rsum) AS max_rsum, min(x.first_trk) AS trk
+FROM (
+SELECT o.id, o.amount, c.grade, r.zone, s.tracking, i.note,
+row_number() OVER (PARTITION BY c.grade ORDER BY o.amount DESC, s.tracking) AS rn,
+sum(o.amount) OVER (PARTITION BY r.zone ORDER BY o.order_date, s.tracking) AS rsum,
+rank() OVER (ORDER BY i.note, o.amount) AS rk,
+first_value(s.tracking) OVER (PARTITION BY c.channel_id ORDER BY i.note) AS first_trk
+FROM (SELECT * FROM fl.orders WHERE id &lt;= ?) o
+JOIN fl.customers c ON c.id = o.cust_id
+JOIN fl.regions r ON r.id = o.region_id
+JOIN fl.shipments s ON s.order_id = o.id
+JOIN fl.order_items i ON i.order_id = o.id
+) x</code></pre>
+<ul><li>执行计划（SQL 历史里记下的真实执行计划：2026-10-21 18:46:27 那次执行，耗时 73897.7 ms，返回 1 行）：</li></ul>
+<pre><code>Aggregate  (cost=3245570.64..3245570.65 rows=1 width=152) (actual time=73869.743..73869.743 rows=1 loops=1)
+  -&gt;  WindowAgg  (cost=3134052.68..3189811.66 rows=2787949 width=49) (actual time=57484.963..72912.012 rows=2798422 loops=1)
+        -&gt;  Sort  (cost=3134052.68..3141022.55 rows=2787949 width=49) (actual time=57484.949..60370.254 rows=2798422 loops=1)
+              Sort Key: c.channel_id, i.note
+              -&gt;  WindowAgg  (cost=2428206.74..2483965.72 rows=2787949 width=49) (actual time=44086.614..47271.129 rows=2798422 loops=1)
+                    -&gt;  Sort  (cost=2428206.74..2435176.61 rows=2787949 width=49) (actual time=44086.606..45314.977 rows=2798422 loops=1)
+                          Sort Key: i.note, orders.amount
+                          -&gt;  WindowAgg  (cost=1715390.92..1778119.78 rows=2787949 width=49) (actual time=32159.591..35543.486 rows=2798422 loops=1)
+                                -&gt;  Sort  (cost=1715390.92..1722360.80 rows=2787949 width=49) (actual time=32159.580..33630.531 rows=2798422 loops=1)
+                                      Sort Key: r.zone, orders.order_date, s.tracking
+                                      -&gt;  WindowAgg  (cost=1002575.11..1065303.96 rows=2787949 width=49) (actual time=17584.424..19838.426 rows=2798422 loops=1)
+                                            -&gt;  Sort  (cost=1002575.11..1009544.98 rows=2787949 width=49) (actual time=17584.412..18885.339 rows=2798422 loops=1)
+                                                  Sort Key: c.grade, orders.amount DESC, s.tracking
+                                                  -&gt;  Hash Join  (cost=85123.96..352488.15 rows=2787949 width=49) (actual time=1773.131..7339.977 rows=2798422 loops=1)
+                                                        Hash Cond: (s.order_id = orders.id)
+                                                        -&gt;  Merge Join  (cost=1.30..146383.18 rows=2787949 width=32) (actual time=0.017..2240.770 rows=2798422 loops=1)
+                                                              Merge Cond: (s.order_id = i.order_id)
+                                                              -&gt;  Index Scan using idx_shipments_order on shipments s  (cost=0.00..27858.57 rows=932487 width=20) (actual time=0.007..258.248 rows=932792 loops=1)
+                                                                    Index Cond: (order_id &lt;= &#x27;***&#x27;)
+                                                              -&gt;  Index Scan using idx_items_order on order_items i 
+…（计划更长，到大盘或重跑 explain 看全）</code></pre>
+<h3>sql_id <code>3091214944</code></h3>
+<pre><code>WITH lvl1 AS (
+SELECT i.order_id, sum(i.amount) AS amt, count(*) AS n
+FROM fl.order_items i
+GROUP BY i.order_id
+), lvl2 AS (
+SELECT o.id, o.cust_code, o.order_date, l1.amt, l1.n
+FROM fl.orders o
+JOIN lvl1 l1 ON l1.order_id = o.id
+WHERE o.id &lt;= ?
+), lvl3 AS (
+SELECT substr(l2.cust_code, ?, ?) AS k, sum(l2.amt) AS amt, count(*) AS n
+FROM lvl2 l2
+GROUP BY 1
+)
+SELECT l3.k, l3.amt, l3.n, c.name AS cust, r.name AS region,
+w.name AS warehouse, cu.name AS courier, pdt.name AS product
+FROM lvl3 l3
+JOIN fl.customers c ON c.code LIKE l3.k || ?
+JOIN fl.regions r ON r.id = c.region_id
+JOIN fl.warehouses w ON w.id = (c.id % ?) + ?
+JOIN fl.couriers cu ON cu.id = (c.id % ?) + ?
+JOIN fl.products pdt ON pdt.id = (c.id % ?) + ?
+ORDER BY l3.amt DESC</code></pre>
+<ul><li>执行计划（SQL 历史里记下的真实执行计划：2026-10-21 18:49:43 那次执行，耗时 157115.0 ms，返回 197939 行）：</li></ul>
+<pre><code>Sort  (cost=263475.81..263500.81 rows=10000 width=123) (actual time=156940.047..156981.124 rows=197939 loops=1)
+  Sort Key: (sum(l2.amt)) DESC
+  CTE lvl1
+    -&gt;  GroupAggregate  (cost=0.00..110799.28 rows=1003413 width=49) (actual time=0.291..4320.084 rows=1000000 loops=1)
+          Group By Key: i.order_id
+          -&gt;  Index Scan using idx_items_order on order_items i  (cost=0.00..78265.13 rows=3000002 width=9) (actual time=0.254..2352.578 rows=3000046 loops=1)
+  CTE lvl2
+    -&gt;  Hash Join  (cost=47500.00..101091.77 rows=334471 width=59) (actual time=2171.859..11423.267 rows=1000000 loops=1)
+          Hash Cond: (l1.order_id = o.id)
+          -&gt;  CTE Scan on lvl1 l1  (cost=0.00..22576.79 rows=334471 width=44) (actual time=0.313..5911.549 rows=1000000 loops=1)
+                Filter: (order_id &lt;= &#x27;***&#x27;)
+          -&gt;  Hash  (cost=22304.00..22304.00 rows=1000000 width=19) (actual time=2169.668..2169.668 rows=1000000 loops=1)
+                 Buckets: 65536  Batches: 16  Memory Usage: 3694kB
+                -&gt;  Seq Scan on orders o  (cost=0.00..22304.00 rows=1000000 width=19) (actual time=0.010..554.580 rows=1000000 loops=1)
+                      Filter: (id &lt;= &#x27;***&#x27;)
+  -&gt;  Hash Join  (cost=11628.13..50920.38 rows=10000 width=123) (actual time=14080.827..155847.301 rows=197939 loops=1)
+        Hash Cond: (((c.id % &#x27;***&#x27;) + &#x27;***&#x27;) = pdt.id)
+        -&gt;  Hash Join  (cost=10082.13..49211.88 rows=10000 width=114) (actual time=14062.385..155023.977 rows=197939 loops=1)
+              Hash Cond: (((c.id % &#x27;***&#x27;) + &#x27;***&#x27;) = cu.id)
+              -&gt;  Hash Join  (cost=10058.13..49025.38 rows=10000 width=103) (actual time=14062.063..154517.492 rows=197939 loops=1)
+                    Hash Cond: (((c.id % &#x27;***&#x27;) + &#x27;***&#x27;) = w.id)
+                    -&gt;  Hash Join  (cost=10049.38..48854.13 rows=10000 width=97) (actual time=14061.920..153884.815 rows=197939 loops=1)
+                          Hash Cond: (c.region_id = r.id)
+                          -&gt;  Nested Loop  (cost=10034.13..48701.38 rows=10000 width=91) (actual time=14061.703..152870.568 rows=197939 loops=1)
+                                Join Filter: (c.code ~~ ((substr(l2.cust_code, &#x27;***&#x27;, &#x27;***&#x27;)) || &#x27;***&#x27;::text))
+                                -&gt;  Seq Scan on customers c  (cost=0.00..3667.00 rows=200000 width=30) (actual time=0.002..98.119 rows=200000 loops=1)
+                                -&gt;  Materialize  (cost=10034.13..10034.40 rows=10 width=72) (actual time=14093.957..31492.697 rows=400200000 loops=200000)
+
+…（计划更长，到大盘或重跑 explain 看全）</code></pre>
+<h3>sql_id <code>3167133288</code></h3>
+<pre><code>UPDATE fl.acct SET bal = bal + ? WHERE id = ?</code></pre>
+<ul><li>执行计划（SQL 历史里记下的真实执行计划：2026-10-21 18:49:11 那次执行，耗时 1041.1 ms，返回 0 行）：</li></ul>
+<pre><code>Update on acct  (cost=0.00..2.47 rows=1 width=24)
+  -&gt;  Index Scan using acct_pkey on acct  (cost=0.00..2.47 rows=1 width=24)
+        Index Cond: (id = &#x27;***&#x27;)</code></pre>
+<p>—— 本报告经脚本只读采集；结论已对确定性发现锚定校验，建议经实证。</p>
+<p><a href="/dash/wdr?inst=api_10-x-x-x-postgres&amp;run=20261026T100302Z.json&amp;from=2026-10-21T18%3A30&amp;to=2026-10-21T18%3A53">打开报告</a></p>
+</div></div><div><h3>改造后 <small>229 秒 · 19917 字 · 格式 5/5</small></h3><ul class='ck'><li class='ok'>✓ 段落:负载画像 → 问题与元凶 → 解决方案 → 总结和结论 → 附录</li><li class='ok'>✓ 开头:开头有总体状态</li><li class='ok'>✓ 展开提议:结尾有「需要就 … 吗?」</li><li class='ok'>✓ 两种读者:应用视角 7 处、数据库机制 7 处</li><li class='ok'>✓ 引用:11 处上色引用,出处与颜色都对</li></ul><div class='ans'>
+<h1>WDR 报告 — api/10-x-x-x-postgres</h1>
+<p>评估窗口：snap 3073 (2026-10-21 18:31) → snap 3079 (2026-10-21 18:52)，时长 21 分钟，scope=node node=og5</p>
+<p>总体状态 🟠告警  驱动：锁等待占 DB time 90%（LOCK_EVENT 23,657s）、26 次死锁、临时文件落盘 6,395MiB</p>
+<p>判断校验 ✓ 已锚定（6 条发现全覆盖、无夸大、无遗漏；0 条建议经 hypopg/cost 实证、14 条建议性）</p>
+<p><strong>短结论</strong>：这 21 分钟是锁与表锁队列放大，不是算力不足：DB time 30,819s 里 CPU 只有 3,532s（11.5%），LOCK_EVENT 占 90%，26 次死锁集中在账户与子表的 DML 上。先停用 LOCK TABLE EXCLUSIVE 并统一加锁顺序，再处理 3,587MiB 窗口函数落盘和两条 CPU 型大查询。</p>
+<h2>① 负载画像</h2>
+<table>
+<tr><th>维度</th><th>严重度</th><th>关键指标</th></tr>
+<tr><td>Load Profile</td><td>🟡关注</td><td>DB time 30819.0s（其中 CPU 3531.6s=11%，余为等待/锁/IO/睡眠）、平均并发活跃会话 24.5、commits 769714、物理读 896990 块、逻辑读 1394168657 块</td></tr>
+<tr><td>Database Stat</td><td>🟠告警</td><td>commit 769714 / rollback 43（回滚率 0.0%）、死锁 26、临时溢出 6395.10MiB、命中率 99.9%</td></tr>
+<tr><td>Top SQL</td><td>🟡关注</td><td>各维度元凶 — DB time:3167133288(22%,CPU占0%) ｜ CPU:4198238080(667s) ｜ 溢出:2858996927(3587MB) ｜ 物理读:759758051(282034块) ｜ 调用:1872435845(379347次)；元凶从耗时前 60 条里找，表里显示前 10 条，另列 3 条榜外元凶；已排除 44 条内核系统 SQL(648622204、3290797567、115833279等,合计 2894.8 秒)</td></tr>
+<tr><td>Wait Events / Classes</td><td>🟠告警</td><td>Top 等待类 LOCK_EVENT 占 90%，最多的事件 relation</td></tr>
+<tr><td>Checkpoint / BgWriter / Redo</td><td>🟢健康</td><td>checkpoint timed 22 / req 0（req 占 0%）</td></tr>
+<tr><td>Cache / Memory</td><td>🟢健康</td><td>物理读 Top 对象：wal_log（命中率详见 Database Stat）</td></tr>
+<tr><td>File IO</td><td>🟢健康</td><td>物理读 Top 文件：db14725/spc1663/f14189</td></tr>
+</table>
+<p>应用视角：联机交易（账户余额更新、子账户入账、流水插入）成片变慢甚至超时；同一账户或同一批数据的并发请求互相等待，业务侧表现为接口几十秒无响应、重试增加。</p>
+<p>数据库机制：DB time 30,819s 中 CPU 仅 3,531.6s（11.5%），等待 90% 集中在 LOCK_EVENT（23,656.9s：relation 8,094.7s、transactionid 7,459.1s、tuple 6,168.9s、advisory 1,919.8s），平均并发活跃会话 24.5，瓶颈是锁队列而不是算力或 IO。</p>
+<h3>Load Profile</h3>
+<p>DB time 30819.0s（其中 CPU 3531.6s=11%，余为等待/锁/IO/睡眠）、平均并发活跃会话 24.5、commits 769714、物理读 896990 块、逻辑读 1394168657 块</p>
+<table>
+<tr><th>DB time(s)</th><th>CPU time(s)</th><th>CPU占DBtime%</th><th>commits</th><th>物理读(块)</th><th>逻辑读(块)</th><th>平均并发活跃会话</th></tr>
+<tr><td>30819.04</td><td>3531.63</td><td>11.46</td><td>769714</td><td>896990</td><td>1394168657</td><td>24.46</td></tr>
+</table>
+<h3>Database Stat</h3>
+<p>commit 769714 / rollback 43（回滚率 0.0%）、死锁 26、临时溢出 6395.10MiB、命中率 99.9%</p>
+<table>
+<tr><th>commits</th><th>rollbacks</th><th>回滚率%</th><th>死锁</th><th>临时溢出</th><th>cache_hit%</th></tr>
+<tr><td>769714</td><td>43</td><td>0.01</td><td>26</td><td>6395.10MiB</td><td>99.94</td></tr>
+</table>
+<p><strong>等待类占比（窗口内总等待时长的分布）</strong></p>
+<pre><code>  LOCK_EVENT  ██████████████████░░  90.1%
+    IO_EVENT  ██░░░░░░░░░░░░░░░░░░   7.8%
+LWLOCK_EVENT  ░░░░░░░░░░░░░░░░░░░░   2.0%</code></pre>
+<h3>Wait Events / Classes</h3>
+<p>Top 等待类 LOCK_EVENT 占 90%，最多的事件 relation</p>
+<table>
+<tr><th>等待类</th><th>waits</th><th>wait_s</th><th>占比%</th><th>主要事件</th></tr>
+<tr><td>LOCK_EVENT</td><td>3948</td><td>23656.86</td><td>90.14</td><td>relation 8094.73s、transactionid 7459.07s、tuple 6168.89s</td></tr>
+<tr><td>IO_EVENT</td><td>1449288279</td><td>2058.64</td><td>7.84</td><td>BufHashTableSearch 1578.98s、DataFileWrite 133.98s、WALWrite 97.39s</td></tr>
+<tr><td>LWLOCK_EVENT</td><td>335479</td><td>529.42</td><td>2.02</td><td>WALFlushWait 468.07s、BufferContentLock 22.83s、DoubleWriteLock 20.68s</td></tr>
+</table>
+<h2>② 问题与元凶</h2>
+<h3>Top SQL</h3>
+<p>各维度元凶 — DB time:3167133288(22%,CPU占0%) ｜ CPU:4198238080(667s) ｜ 溢出:2858996927(3587MB) ｜ 物理读:759758051(282034块) ｜ 调用:1872435845(379347次)；元凶从耗时前 60 条里找，表里显示前 10 条，另列 3 条榜外元凶；已排除 44 条内核系统 SQL(648622204、3290797567、115833279等,合计 2894.8 秒)</p>
+<table>
+<tr><th>sql_id</th><th>calls</th><th>elapsed_s</th><th>cpu_s</th><th>spill_MB</th><th>物理读(块)</th><th>占DB time%</th><th>query</th></tr>
+<tr><td>3167133288</td><td>75</td><td>6773.31</td><td>0.03</td><td>0.00</td><td>9</td><td>21.98</td><td>UPDATE fl.acct SET bal = bal + ? WHERE id = ?</td></tr>
+<tr><td>169551786</td><td>38</td><td>4366.04</td><td>0.05</td><td>0.00</td><td>6</td><td>14.17</td><td>UPDATE fl.acct_child SET amount = amount + ? WHERE…</td></tr>
+<tr><td>226085226</td><td>10</td><td>2643.32</td><td>0.02</td><td>0.00</td><td>46</td><td>8.58</td><td>INSERT INTO fl.acct_child(id, acct_id, amount) VAL…</td></tr>
+<tr><td>547475528</td><td>58</td><td>2142.57</td><td>0.03</td><td>0.00</td><td>7</td><td>6.95</td><td>UPDATE fl.acct SET bal = bal + ? WHERE id = ?</td></tr>
+<tr><td>26287510</td><td>20</td><td>1968.37</td><td>0.01</td><td>0.00</td><td>2</td><td>6.39</td><td>INSERT INTO fl.uniq_race(k, who) VALUES (?, ?)</td></tr>
+<tr><td>2416487437</td><td>354263</td><td>1240.49</td><td>54.79</td><td>0.00</td><td>2</td><td>4.03</td><td>SELECT bal FROM fl.acct WHERE id = ? FOR SHARE</td></tr>
+<tr><td>3091214944</td><td>11</td><td>1177.35</td><td>660.00</td><td>577.76</td><td>65493</td><td>3.82</td><td>WITH lvl1 AS ( SELECT i.order_id, sum(i.amount) AS…</td></tr>
+<tr><td>4198238080</td><td>9128</td><td>1125.01</td><td>666.71</td><td>0.00</td><td>14297</td><td>3.65</td><td>SELECT count(*) AS n, sum(o.amount) AS amt FROM fl…</td></tr>
+<tr><td>3509710879</td><td>1</td><td>1021.27</td><td>625.65</td><td>0.00</td><td>1193</td><td>3.31</td><td>SELECT count(*) AS kept, sum(o.amount) AS amt FROM…</td></tr>
+<tr><td>3973385787</td><td>2</td><td>839.62</td><td>0.00</td><td>0.00</td><td>0</td><td>2.72</td><td>LOCK TABLE fl.acct_child IN EXCLUSIVE MODE</td></tr>
+<tr><td>2858996927</td><td>4</td><td>303.08</td><td>136.31</td><td>3587.00</td><td>14553</td><td>0.98</td><td>〔榜外·溢出冠军〕SELECT count(*) AS n, max(x.rn) AS max_rn, max(x.r…</td></tr>
+<tr><td>759758051</td><td>4385</td><td>192.86</td><td>53.25</td><td>0.00</td><td>282034</td><td>0.63</td><td>〔榜外·物理读冠军〕INSERT INTO fl.wal_log(who, payload) SELECT ?, rep…</td></tr>
+<tr><td>1872435845</td><td>379347</td><td>15.78</td><td>20.03</td><td>0.00</td><td>0</td><td>0.05</td><td>〔榜外·调用冠军〕BEGIN</td></tr>
+</table>
+<p><strong>Top SQL 的 占DB time%</strong></p>
+<pre><code>3167133288  ████░░░░░░░░░░░░░░░░  22.0%
+ 169551786  ███░░░░░░░░░░░░░░░░░  14.2%
+ 226085226  ██░░░░░░░░░░░░░░░░░░   8.6%
+ 547475528  █░░░░░░░░░░░░░░░░░░░   7.0%
+  26287510  █░░░░░░░░░░░░░░░░░░░   6.4%</code></pre>
+<h3>🟠告警 WDR_WAIT_CLASS_SKEW · Wait Events / Classes</h3>
+<ul><li>证据：等待类倾斜 LOCK_EVENT 90% vs 阈值 &gt;60%（snap_global_wait_events 等待类聚合；其中最多的是 relation（8094.73s））</li><li>应用视角：账户更新和子账户入账请求成片排队，短事务被拉到几十秒；只要批量作业拿一次表锁，在线交易就整批等它。</li><li>数据库机制：LOCK_EVENT 共 23,656.9s 占 DB time 76.8%，其中 relation 8,094.7s、transactionid 7,459.1s、tuple 6,168.9s、advisory 1,919.8s；平均并发活跃会话 24.5，说明排队在会话间扩散。</li><li>根因：relation 等待 8,094.7s 是最大单项，与 LOCK TABLE fl.acct_child IN EXCLUSIVE MODE（3973385787，单次 1,021s、CPU 0s）吻合：表级 EXCLUSIVE 与 DML 的 ROW EXCLUSIVE 互斥，且表锁请求排队后会挡住后续 DML。</li><li><font color="#2f6fdb">禁止应用执行 LOCK TABLE ... IN EXCLUSIVE MODE / ACCESS EXCLUSIVE MODE</font>(引用自贵行规范库 GS-LOCK-001)</li><li><font color="#2f6fdb">锁等待超过 30 秒或阻塞链 3 层以上时先用锁等待工具定位根会话，只处理根会话</font>(引用自处置手册库 RB-LCK-001)</li><li><font color="#2f6fdb">会话级 advisory 锁在异常分支未释放会导致排队，应改用事务级锁</font>(引用自本行案例库 S3-20260309-FSYSD-SYSD清算作业咨询锁未释放导致排队)</li></ul>
+<h3>🟠告警 WDR_DEADLOCK · Database Stat</h3>
+<ul><li>证据：死锁数 26 vs 阈值 ≥5（snap_summary_stat_database.deadlocks —— <strong>这个数字是硬数据，但「哪几条语句成环」WDR 里没有</strong>：快照只有一个计数器，没有环的任何信息。要确定具体的死锁对（环上几个会话、各自持有/等待什么锁、完整语句、谁被选为牺牲者），唯一权威来源是<strong>数据库日志</strong>：在 <code>$PGDATA/pg_log/</code> 下按本窗口的时间段 grep <code>deadlock detected</code>，紧随其后的 DETAIL 段就是完整的环。本工具读不到日志文件（需 initial account 权限）——<strong>请用户把那几段（连同后面的 DETAIL 几行）贴过来</strong>，<code>gaussdb-lockwait --deadlock-log -</code> 能逐个解析出环、各自的语句与牺牲者，按模式归类并给出改法。若要从 Top SQL 反推候选语句，<strong>必须标明是候选、不是证据</strong> —— 实测过三方环被反推成「两条语句在抢」的情形。）</li><li>应用视角：清算或对账相关事务偶发被数据库整笔回滚（SQLSTATE 40P01），业务侧看到随机失败和重试，重试又加重锁竞争。</li><li>数据库机制：transactionid 7,459.1s、tuple 6,168.9s 说明多会话在等同一批行锁；同一批账户或子表按不同顺序更新时，行锁与唯一键插入最容易组成环。</li><li>根因：计数器记录 26 次死锁；候选环落在 fl.acct 的 UPDATE（3167133288、547475528）、fl.acct_child 的 UPDATE/INSERT（169551786、226085226）、fl.uniq_race INSERT（26287510）与 SELECT ... FOR SHARE（2416487437）之间。具体哪几条成环只能从数据库日志确认，Top SQL 反推只能算候选。</li><li><font color="#2f6fdb">对账与冲正作业统一按主键升序加锁，先 SELECT ... ORDER BY ... FOR UPDATE 再更新；捕获 40P01 后重试整个事务</font>(引用自本行案例库 S3-20260827-FSYSB-[模拟测试]某行SYSB清算对账作业死锁频发)</li><li><font color="#2f6fdb">主键或唯一键冲突的重试必须有幂等控制，同一业务流水号不得并发提交</font>(引用自贵行规范库 GS-LOCK-003)</li></ul>
+<h3>🟠告警 WDR_TEMP_SPILL · Database Stat</h3>
+<ul><li>证据：临时文件溢出 6395.10MiB vs 阈值 &gt;2048.00MiB（snap_summary_stat_database.temp_bytes（库级合计）。其中能归到语句的 4164.76MiB（占库级 65%）；落盘最多的是 sqlid 2858996927（3587.00MiB，占语句级的 86%、占库级的 56%），它<strong>不在按耗时排的前 10 名里</strong> —— 按耗时找元凶会漏掉它；其余 2230.34MiB 归不到具体语句）</li><li>应用视角：带多重排名和累计求和的报表查询每次执行都把大量中间结果写到磁盘，拖慢同机交易。</li><li>数据库机制：四层窗口各需一次排序，16MB work_mem 放不下便逐层落盘；库级 6,395MiB 中 65% 能归到语句，其中 86% 来自这一条。</li><li>根因：sql 2858996927 的四层 WindowAgg 加 4 次 Sort 在 work_mem 16MB 下溢出 3,587MiB，占库级 6,395MiB 的 56%；该语句 303.1s/4 次、CPU 136.3s。另有 2,230MiB 归不到具体语句。</li><li>引发它的语句：sql_id <code>2858996927</code>（全文与执行计划见附录）</li><li><font color="#2f6fdb">落盘超基线时定位落盘最多的 SQL，审批后对该会话 SET work_mem，推动改写或分批；不得全局调大 work_mem</font>(引用自处置手册库 RB-TMP-001,未验证)</li><li><font color="#2f6fdb">FL 临时文件写入量平时低于 200MB/h，超过 10GB/h 视为异常</font>(引用自贵行基线库 BL-FL-TEMP_BYTES_PER_HOUR)</li></ul>
+<h3>🟡关注 WDR_DBTIME_WAIT_HEAVY · Load Profile</h3>
+<ul><li>证据：CPU 占 DB time 11.5% vs 阈值 &lt;30%（snap_global_instance_time：DB time 30819s、CPU 3532s —— 时间主要花在等待(锁/IO/睡眠),真凶看等待事件维度,不是 CPU 不够）</li><li>应用视角：业务感觉数据库整体变慢，但机器 CPU 并不高；加 CPU 解决不了问题。</li><li>数据库机制：CPU 占比 11.5% 低于 30% 阈值，等待主要集中在 LOCK_EVENT；应先处理锁，而不是调大并行或加核。</li><li>根因：DB time 30,819s 中 CPU 仅 3,531.6s（11.5%），其余是锁等待、IO 与睡眠；瓶颈不是 CPU 不足。</li></ul>
+<h3>🟡关注 WDR_TOPSQL_CPU_HEAVY · Top SQL</h3>
+<ul><li>证据：高耗时且 CPU 占主导 CPU 占其耗时 56%（1177s × 11 次） vs 阈值 &gt;50%（snap_summary_statement：sqlid 3091214944（WITH lvl1 AS ( SELECT i.order_id, sum(i.amount) AS amt, count(*) AS n FROM fl.or…）—— 在真干活（算/排序/扫数据），不是被锁住；下一步看执行计划与调优，不要往锁的方向查）</li><li>应用视角：对账或汇总报表单次能跑 100 秒以上，按客户号查汇总的接口单次约 150ms 但调用近万次，两类请求一起吃掉约 2,300s 数据库时间。</li><li>数据库机制：3091214944 的非等值 LIKE 连接让 customers 与 lvl2 退化成 20 万次内层 Materialize，lvl2 估算 350,311 行、实际 1,000,000 行；4198238080 每次扫 orders 22,304 页、只返回 1 行，缺的是 cust_code 索引。</li><li>根因：两条 CPU 型大查询在真干活：sql 3091214944 的 customers 与 lvl2 用 c.code LIKE substr(...) 做 Nested Loop 的 Join Filter，内层 Materialize 实际输出 400,200,000 行（loops=200,000），单次 134.9s，CPU 660.0s/1,177.4s；sql 4198238080 的 WHERE o.cust_code = ? 在 fl.orders 上无索引，9,128 次全表 Seq Scan 累计 1,125.0s、CPU 666.7s，每次只返回 1 行。</li><li>引发它的语句：sql_id <code>3091214944</code>（全文与执行计划见附录）</li><li><font color="#2f6fdb">批量类 SQL 上线前须用生产量级数据压测并检查执行计划</font>(引用自贵行规范库 GS-SQL-003)</li><li><font color="#2f6fdb">生产环境建索引必须使用 CREATE INDEX CONCURRENTLY</font>(引用自贵行规范库 GS-CHG-002)</li></ul>
+<h3>🟡关注 WDR_TOPSQL_LOW_CPU · Top SQL</h3>
+<ul><li>证据：高 DB time 但 CPU 极低 CPU 仅占其耗时 0.0% vs 阈值 &lt;10%（sqlid 3167133288（UPDATE fl.acct SET bal = bal + ? WHERE id = ?）elapsed 6773.3s / cpu 0.0s → 阻塞/睡眠主导(锁/等待/pg_sleep)，非资源消耗；真凶看 CPU time 与等待事件）</li><li>应用视角：余额更新接口长时间无响应，客户端重试后排队更长。</li><li>数据库机制：CPU 0.03s 对 6,773.3s 说明它是锁等待的受害者；transactionid 与 tuple 等待集中，根因是持锁事务和表锁队列，不是这条语句本身算得慢。</li><li>根因：UPDATE fl.acct SET bal = bal + ? WHERE id = ? 单次约 90s、CPU 仅 0.03s，75 次累计 6,773.3s（占 DB time 22%），几乎全部时间在等行锁。</li><li>引发它的语句：sql_id <code>3167133288</code>（全文与执行计划见附录）</li><li><font color="#2f6fdb">应用不得在数据库事务内调用外部接口，外部调用必须在事务提交之后进行</font>(引用自贵行规范库 GS-CONN-001)</li><li><font color="#2f6fdb">idle in transaction 状态超过 300 秒的会话必须触发告警，不得自行终止业务会话</font>(引用自贵行规范库 GS-CONN-002)</li></ul>
+<h2>③ 解决方案</h2>
+<h3>P0(最优先)</h3>
+<ul><li>WDR_WAIT_CLASS_SKEW：下线或整改应用侧 LOCK TABLE fl.acct_child IN EXCLUSIVE MODE 用法，改用行级锁或按主键分批处理；这是 relation 等待最可能的直接来源。  风险:低 [需人工执行]</li><li>WDR_WAIT_CLASS_SKEW：把批量或变更作业移到变更窗口，并把会话级 lockwait_timeout 设为不超过 30 秒，避免表锁无限排队。  风险:低 [需人工执行]</li><li>WDR_WAIT_CLASS_SKEW：核查 advisory 锁 1,919.8s（2 次等待）对应的会话级咨询锁是否在异常分支未释放，改用事务级 pg_advisory_xact_lock。  风险:中 [需人工执行]</li><li>WDR_DEADLOCK：对 fl.acct 与 fl.acct_child 的批量更新统一按主键升序加锁：先按序 SELECT ... FOR UPDATE 再更新；应用捕获 40P01 后重试整个事务。  风险:低 [需人工执行]</li><li>WDR_DEADLOCK：请 DBA 导出本窗口数据库日志中 deadlock detected 的 DETAIL 段，确认具体环与牺牲者后再做针对性调整。  风险:低 [需人工执行]</li><li>WDR_DEADLOCK：检查 fl.acct_child.acct_id 外键列是否有索引，缺失时按 GS-LOCK-002 用 CREATE INDEX CONCURRENTLY 补建。  风险:中 [需人工执行]</li></ul>
+<h3>P1(次优先)</h3>
+<ul><li>WDR_TEMP_SPILL：审批后仅对该会话 SET work_mem，不全局调大；同时评估把四层窗口拆成两步、减少重复排序。  风险:中 [需人工执行]</li><li>WDR_TEMP_SPILL：把该报表挪到批量窗口执行，避开联机交易时段。  风险:低 [需人工执行]</li><li>WDR_TOPSQL_CPU_HEAVY：改写 lvl3 与 customers 的连接：先把 cust_code 前缀算成等值键再做等值 JOIN，去掉 LIKE 驱动的 Nested Loop；按 GS-SQL-003 用生产量级数据验证后再上线。  风险:中 [需人工执行]</li><li>WDR_TOPSQL_CPU_HEAVY：评估在 fl.orders(cust_code) 建索引，生产按 GS-CHG-002 使用 CREATE INDEX CONCURRENTLY；当前访问路径不支持 hypopg 实证，索引收益需在测试环境按生产量级人工验证。  风险:中 [需人工执行]</li><li>WDR_TOPSQL_CPU_HEAVY：对 fl.orders、fl.customers 执行 ANALYZE，修正 3091214944 的 350,311 与 1,000,000 估算偏差，并补上 last_analyze 为 never 的统计信息。  风险:低 [需人工执行]</li><li>WDR_TOPSQL_LOW_CPU：定位持锁根会话并缩短事务：外部接口调用移出事务，idle in transaction 超过 300 秒触发告警。  风险:中 [需人工执行]</li><li>WDR_TOPSQL_LOW_CPU：批量更新按主键排序、缩小单事务行数，降低与联机更新的交叉等待。  风险:低 [需人工执行]</li></ul>
+<h3>P2</h3>
+<ul><li>WDR_DBTIME_WAIT_HEAVY：按锁等待与落盘两条线处理，不要按 CPU 扩容；补 ANALYZE fl.orders、fl.customers（last_analyze 为 never）。  风险:低 [需人工执行]</li></ul>
+<h2>④ 总结和结论</h2>
+<p>这 21 分钟是典型的锁与表锁队列放大：LOCK_EVENT 占 90%、26 次死锁、CPU 只占 11.5%。先停用 LOCK TABLE EXCLUSIVE 并统一账户与子表的加锁顺序，再处理 3,587MiB 落盘与两条 CPU 型大查询。请 DBA 提供本窗口 deadlock detected 的日志段以确认具体死环；膨胀与回收、当前阻塞链要现场另测，WDR 回看不了。</p>
+<p>—— 本报告经脚本只读采集；结论已对确定性发现锚定校验，建议经实证。</p>
+<ul><li>需要就 sql_id 2858996927 做一次落盘与 work_mem 的专项调优吗？</li><li>需要就 sql_id 3091214944 的改写方案做收益验证吗？</li><li>需要就 26 次死锁的候选环展开说明吗？</li></ul>
+<h2>附录</h2>
+<h3>其余全景数据</h3>
+<h4>Checkpoint / BgWriter / Redo</h4>
+<p>checkpoint timed 22 / req 0（req 占 0%）</p>
+<table>
+<tr><th>timed_ckpt</th><th>req_ckpt</th><th>req占比%</th></tr>
+<tr><td>22</td><td>0</td><td>0.00</td></tr>
+</table>
+<h4>Cache / Memory</h4>
+<p>物理读 Top 对象：wal_log（命中率详见 Database Stat）</p>
+<table>
+<tr><th>对象</th><th>物理读(块)</th><th>逻辑读(块)</th></tr>
+<tr><td>wal_log</td><td>288598</td><td>19613831</td></tr>
+<tr><td>statement_history</td><td>275830</td><td>5810081</td></tr>
+<tr><td>bloat_hot</td><td>150518</td><td>807715813</td></tr>
+<tr><td>order_items</td><td>60906</td><td>44324630</td></tr>
+<tr><td>orders</td><td>20758</td><td>92272070</td></tr>
+<tr><td>xmin_hold</td><td>16421</td><td>61355704</td></tr>
+<tr><td>payments</td><td>15955</td><td>106241684</td></tr>
+<tr><td>shipments</td><td>12484</td><td>33943</td></tr>
+<tr><td>bloat_slow</td><td>11812</td><td>118569943</td></tr>
+<tr><td>snap_global_statio_all_indexes</td><td>7633</td><td>41202</td></tr>
+</table>
+<h4>File IO</h4>
+<p>物理读 Top 文件：db14725/spc1663/f14189</p>
+<table>
+<tr><th>文件</th><th>物理读</th><th>物理写</th></tr>
+<tr><td>db14725/spc1663/f14189</td><td>433927</td><td>453005</td></tr>
+<tr><td>db14725/spc1663/f3375119</td><td>62302</td><td>10740</td></tr>
+<tr><td>db14725/spc1663/f3353392</td><td>44401</td><td>3</td></tr>
+<tr><td>db14725/spc1663/f3197477</td><td>17571</td><td>0</td></tr>
+<tr><td>db14725/spc1663/f3353399</td><td>16434</td><td>6</td></tr>
+<tr><td>db14725/spc1663/f3197499</td><td>15900</td><td>0</td></tr>
+<tr><td>db14725/spc1663/f3353367</td><td>10062</td><td>73566</td></tr>
+<tr><td>db14725/spc1663/f3197508</td><td>9615</td><td>0</td></tr>
+<tr><td>db14725/spc1663/f39096</td><td>7586</td><td>986</td></tr>
+<tr><td>db14725/spc1663/f3353381</td><td>6268</td><td>13562</td></tr>
+</table>
+<h3>本报告没覆盖的</h3>
+<ul><li><strong>膨胀与回收水位</strong>：死元组、autovacuum 追不追得上、回收被谁卡住（长事务 / 两阶段事务 /复制槽），WDR 的快照里都没有这些数 —— 实测一张有 540 万死元组的表，快照里记的是 0。</li><li><strong>一直没跑完的 SQL</strong>：WDR 只统计<strong>已完成</strong>的执行，正卡着没返回的语句在这里一行都没有。</li><li><strong>窗口之前的历史</strong>：快照只记当下的累计值，窗口开始前的膨胀程度、长事务已经开了多久，事后都重建不出来。</li></ul>
+<h3>SQL 附录（根因里提到的语句）</h3>
+<h4>sql_id <code>2858996927</code></h4>
+<pre><code>SELECT count(*) AS n, max(x.rn) AS max_rn, max(x.rsum) AS max_rsum, min(x.first_trk) AS trk
+FROM (
+SELECT o.id, o.amount, c.grade, r.zone, s.tracking, i.note,
+row_number() OVER (PARTITION BY c.grade ORDER BY o.amount DESC, s.tracking) AS rn,
+sum(o.amount) OVER (PARTITION BY r.zone ORDER BY o.order_date, s.tracking) AS rsum,
+rank() OVER (ORDER BY i.note, o.amount) AS rk,
+first_value(s.tracking) OVER (PARTITION BY c.channel_id ORDER BY i.note) AS first_trk
+FROM (SELECT * FROM fl.orders WHERE id &lt;= ?) o
+JOIN fl.customers c ON c.id = o.cust_id
+JOIN fl.regions r ON r.id = o.region_id
+JOIN fl.shipments s ON s.order_id = o.id
+JOIN fl.order_items i ON i.order_id = o.id
+) x</code></pre>
+<ul><li>执行计划（SQL 历史里记下的真实执行计划：2026-10-21 18:46:27 那次执行，耗时 73897.7 ms，返回 1 行）：</li></ul>
+<pre><code>Aggregate  (cost=3245570.64..3245570.65 rows=1 width=152) (actual time=73869.743..73869.743 rows=1 loops=1)
+  -&gt;  WindowAgg  (cost=3134052.68..3189811.66 rows=2787949 width=49) (actual time=57484.963..72912.012 rows=2798422 loops=1)
+        -&gt;  Sort  (cost=3134052.68..3141022.55 rows=2787949 width=49) (actual time=57484.949..60370.254 rows=2798422 loops=1)
+              Sort Key: c.channel_id, i.note
+              -&gt;  WindowAgg  (cost=2428206.74..2483965.72 rows=2787949 width=49) (actual time=44086.614..47271.129 rows=2798422 loops=1)
+                    -&gt;  Sort  (cost=2428206.74..2435176.61 rows=2787949 width=49) (actual time=44086.606..45314.977 rows=2798422 loops=1)
+                          Sort Key: i.note, orders.amount
+                          -&gt;  WindowAgg  (cost=1715390.92..1778119.78 rows=2787949 width=49) (actual time=32159.591..35543.486 rows=2798422 loops=1)
+                                -&gt;  Sort  (cost=1715390.92..1722360.80 rows=2787949 width=49) (actual time=32159.580..33630.531 rows=2798422 loops=1)
+                                      Sort Key: r.zone, orders.order_date, s.tracking
+                                      -&gt;  WindowAgg  (cost=1002575.11..1065303.96 rows=2787949 width=49) (actual time=17584.424..19838.426 rows=2798422 loops=1)
+                                            -&gt;  Sort  (cost=1002575.11..1009544.98 rows=2787949 width=49) (actual time=17584.412..18885.339 rows=2798422 loops=1)
+                                                  Sort Key: c.grade, orders.amount DESC, s.tracking
+                                                  -&gt;  Hash Join  (cost=85123.96..352488.15 rows=2787949 width=49) (actual time=1773.131..7339.977 rows=2798422 loops=1)
+                                                        Hash Cond: (s.order_id = orders.id)
+                                                        -&gt;  Merge Join  (cost=1.30..146383.18 rows=2787949 width=32) (actual time=0.017..2240.770 rows=2798422 loops=1)
+                                                              Merge Cond: (s.order_id = i.order_id)
+                                                              -&gt;  Index Scan using idx_shipments_order on shipments s  (cost=0.00..27858.57 rows=932487 width=20) (actual time=0.007..258.248 rows=932792 loops=1)
+                                                                    Index Cond: (order_id &lt;= &#x27;***&#x27;)
+                                                              -&gt;  Index Scan using idx_items_order on order_items i 
+…（计划更长，到大盘或重跑 explain 看全）</code></pre>
+<h4>sql_id <code>3091214944</code></h4>
+<pre><code>WITH lvl1 AS (
+SELECT i.order_id, sum(i.amount) AS amt, count(*) AS n
+FROM fl.order_items i
+GROUP BY i.order_id
+), lvl2 AS (
+SELECT o.id, o.cust_code, o.order_date, l1.amt, l1.n
+FROM fl.orders o
+JOIN lvl1 l1 ON l1.order_id = o.id
+WHERE o.id &lt;= ?
+), lvl3 AS (
+SELECT substr(l2.cust_code, ?, ?) AS k, sum(l2.amt) AS amt, count(*) AS n
+FROM lvl2 l2
+GROUP BY 1
+)
+SELECT l3.k, l3.amt, l3.n, c.name AS cust, r.name AS region,
+w.name AS warehouse, cu.name AS courier, pdt.name AS product
+FROM lvl3 l3
+JOIN fl.customers c ON c.code LIKE l3.k || ?
+JOIN fl.regions r ON r.id = c.region_id
+JOIN fl.warehouses w ON w.id = (c.id % ?) + ?
+JOIN fl.couriers cu ON cu.id = (c.id % ?) + ?
+JOIN fl.products pdt ON pdt.id = (c.id % ?) + ?
+ORDER BY l3.amt DESC</code></pre>
+<ul><li>执行计划（SQL 历史里记下的真实执行计划：2026-10-21 18:49:43 那次执行，耗时 157115.0 ms，返回 197939 行）：</li></ul>
+<pre><code>Sort  (cost=263475.81..263500.81 rows=10000 width=123) (actual time=156940.047..156981.124 rows=197939 loops=1)
+  Sort Key: (sum(l2.amt)) DESC
+  CTE lvl1
+    -&gt;  GroupAggregate  (cost=0.00..110799.28 rows=1003413 width=49) (actual time=0.291..4320.084 rows=1000000 loops=1)
+          Group By Key: i.order_id
+          -&gt;  Index Scan using idx_items_order on order_items i  (cost=0.00..78265.13 rows=3000002 width=9) (actual time=0.254..2352.578 rows=3000046 loops=1)
+  CTE lvl2
+    -&gt;  Hash Join  (cost=47500.00..101091.77 rows=334471 width=59) (actual time=2171.859..11423.267 rows=1000000 loops=1)
+          Hash Cond: (l1.order_id = o.id)
+          -&gt;  CTE Scan on lvl1 l1  (cost=0.00..22576.79 rows=334471 width=44) (actual time=0.313..5911.549 rows=1000000 loops=1)
+                Filter: (order_id &lt;= &#x27;***&#x27;)
+          -&gt;  Hash  (cost=22304.00..22304.00 rows=1000000 width=19) (actual time=2169.668..2169.668 rows=1000000 loops=1)
+                 Buckets: 65536  Batches: 16  Memory Usage: 3694kB
+                -&gt;  Seq Scan on orders o  (cost=0.00..22304.00 rows=1000000 width=19) (actual time=0.010..554.580 rows=1000000 loops=1)
+                      Filter: (id &lt;= &#x27;***&#x27;)
+  -&gt;  Hash Join  (cost=11628.13..50920.38 rows=10000 width=123) (actual time=14080.827..155847.301 rows=197939 loops=1)
+        Hash Cond: (((c.id % &#x27;***&#x27;) + &#x27;***&#x27;) = pdt.id)
+        -&gt;  Hash Join  (cost=10082.13..49211.88 rows=10000 width=114) (actual time=14062.385..155023.977 rows=197939 loops=1)
+              Hash Cond: (((c.id % &#x27;***&#x27;) + &#x27;***&#x27;) = cu.id)
+              -&gt;  Hash Join  (cost=10058.13..49025.38 rows=10000 width=103) (actual time=14062.063..154517.492 rows=197939 loops=1)
+                    Hash Cond: (((c.id % &#x27;***&#x27;) + &#x27;***&#x27;) = w.id)
+                    -&gt;  Hash Join  (cost=10049.38..48854.13 rows=10000 width=97) (actual time=14061.920..153884.815 rows=197939 loops=1)
+                          Hash Cond: (c.region_id = r.id)
+                          -&gt;  Nested Loop  (cost=10034.13..48701.38 rows=10000 width=91) (actual time=14061.703..152870.568 rows=197939 loops=1)
+                                Join Filter: (c.code ~~ ((substr(l2.cust_code, &#x27;***&#x27;, &#x27;***&#x27;)) || &#x27;***&#x27;::text))
+                                -&gt;  Seq Scan on customers c  (cost=0.00..3667.00 rows=200000 width=30) (actual time=0.002..98.119 rows=200000 loops=1)
+                                -&gt;  Materialize  (cost=10034.13..10034.40 rows=10 width=72) (actual time=14093.957..31492.697 rows=400200000 loops=200000)
+
+…（计划更长，到大盘或重跑 explain 看全）</code></pre>
+<h4>sql_id <code>3167133288</code></h4>
+<pre><code>UPDATE fl.acct SET bal = bal + ? WHERE id = ?</code></pre>
+<ul><li>执行计划（SQL 历史里记下的真实执行计划：2026-10-21 18:49:11 那次执行，耗时 1041.1 ms，返回 0 行）：</li></ul>
+<pre><code>Update on acct  (cost=0.00..2.47 rows=1 width=24)
+  -&gt;  Index Scan using acct_pkey on acct  (cost=0.00..2.47 rows=1 width=24)
+        Index Cond: (id = &#x27;***&#x27;)</code></pre>
+<p><a href="/dash/wdr?inst=api_10-x-x-x-postgres&amp;run=20261026T112646Z.json&amp;from=2026-10-21T18%3A30&amp;to=2026-10-21T18%3A53">打开报告</a></p>
+</div></div></div></section></div></body></html>

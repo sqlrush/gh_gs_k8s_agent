@@ -1,0 +1,29 @@
+# SQL 优化第 ① 段「趋势」(2026-10-26 回答模板化 R4):近 N 天每个 WDR 快照时刻这条语句的累计执行次数与总耗时。
+#
+# 快照里存的是**快照那一刻的累计值**,相邻两个快照相减才是这段时间里的次数与耗时 —— 相减、按小时归并、
+# 判「突然变慢」都在脚本里做(skills/gaussdb-sqltune/scripts/sqltrend.py),不让模型拿数去推。
+# 后一个比前一个小 = 中间计数器清零过(实例重启 / 统计重置),那一段脚本丢弃并注明。
+# snap_max_elapse_time 也是累计口径(自清零以来的最大值),算不出「某一小时最慢多少」,所以不取;
+# 每小时最慢一次看 sqltune.exec_history。同一语句按用户拆成多行,按快照聚合。
+# 快照多久一个由 wdr_snapshot_interval 决定、保留几天由 wdr_snapshot_retention_days 决定,超出的查不到。
+name: sqltune.stat_trend
+description: 按 unique_sql_id 取近 N 天每个 WDR 快照时刻这条语句的累计执行次数与总耗时(用于按小时的趋势)
+readonly: true
+sql: |
+  SELECT s.snapshot_id,
+         to_char(s.start_ts, 'YYYY-MM-DD HH24:MI:SS') AS snap_ts,
+         sum(t.snap_n_calls) AS calls,
+         sum(t.snap_total_elapse_time) AS total_us
+    FROM snapshot.snap_summary_statement t
+    JOIN snapshot.snapshot s ON s.snapshot_id = t.snapshot_id
+   WHERE t.snap_unique_sql_id = {{sid}}
+     AND s.start_ts >= now() - {{days}} * INTERVAL '1 day'
+   GROUP BY s.snapshot_id, s.start_ts
+   ORDER BY s.snapshot_id;
+params:
+  - key: sid
+    type: INTEGER
+    description: unique_sql_id(整数,可能为负)
+  - key: days
+    type: INTEGER
+    description: 往回看几天(调用方传 7)

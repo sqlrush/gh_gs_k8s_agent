@@ -14,7 +14,7 @@ import pytest
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
 _SCRIPTS = _ROOT / "skills" / "gaussdb-wdr" / "scripts"
-for _m in ("model", "thresholds", "util", "collectors", "report", "native", "snaps", "interp", "recheck", "finalreport", "ansi", "render"):
+for _m in ("model", "thresholds", "util", "collectors", "report", "native", "snaps", "interp", "recheck", "finalreport", "kbrefs", "appendix", "mdreport", "ansi", "render"):
     sys.modules.pop(_m, None)
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_ROOT))

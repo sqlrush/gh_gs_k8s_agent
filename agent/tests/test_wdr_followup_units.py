@@ -25,7 +25,7 @@ _ROOT = pathlib.Path(__file__).resolve().parents[1]
 _SCRIPTS = _ROOT / "skills" / "gaussdb-wdr" / "scripts"
 
 for _m in ("followup", "model", "thresholds", "util", "collectors", "report",
-           "native", "snaps", "interp", "recheck", "finalreport", "ansi"):
+           "native", "snaps", "interp", "recheck", "finalreport", "kbrefs", "appendix", "mdreport", "render", "ansi"):
     sys.modules.pop(_m, None)
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_ROOT))

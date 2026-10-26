@@ -41,18 +41,57 @@ class Suggestion:
 
 
 @dataclass(frozen=True)
+class KbRef:
+    """引用的一条知识:编号 + 那句话(+ 可选标签,如「未验证」)。由脚本上色、加出处括号(common/kb/citestyle.py)。"""
+    id: str = ""
+    text: str = ""
+    note: str = ""
+
+    @staticmethod
+    def from_dict(d) -> "Optional[KbRef]":
+        if not isinstance(d, dict):
+            return None
+        ref = KbRef(id=str(d.get("id") or "").strip(), text=str(d.get("text") or "").strip(),
+                    note=str(d.get("note") or "").strip())
+        return ref if ref.id and ref.text else None
+
+
+# 2026-10-26 回答模板化(R7):每条发现分「应用视角」与「数据库机制」两小段、带处置优先级与知识引用;
+# 报告开头的短结论、负载画像的两小段、结尾的总结与展开提议都由 interp 给。全是可选字段 ——
+# 旧格式的 interp.json 照样能渲染(缺的段落不出现或写「本次未给出」),旧会话里的报告重渲染不会失败。
+PRIORITIES = ("P0", "P1", "P2")
+
+
+def _priority(raw) -> str:
+    s = str(raw or "").strip().upper()
+    return s if s in PRIORITIES else ""
+
+
+def _text(raw) -> str:
+    return raw.strip() if isinstance(raw, str) else ""
+
+
+@dataclass(frozen=True)
 class InterpFinding:
     code: str = ""
     root_cause: str = ""
     sql_id: str = ""
     suggestions: list = field(default_factory=list)
+    app_view: str = ""
+    mechanism: str = ""
+    priority: str = ""          # P0 | P1 | P2;空 = 按严重度排
+    kb_refs: list = field(default_factory=list)
 
     @staticmethod
     def from_dict(d: dict) -> "InterpFinding":
+        raw_refs = d.get("kbRefs")
+        refs = [KbRef.from_dict(x) for x in raw_refs] if isinstance(raw_refs, list) else []
         return InterpFinding(
             code=d.get("code", ""), root_cause=d.get("rootCause", ""),
             sql_id=d.get("sqlId", ""),
-            suggestions=[Suggestion.from_dict(s) for s in d.get("suggestions", []) or []])
+            suggestions=[Suggestion.from_dict(s) for s in d.get("suggestions", []) or []],
+            app_view=_text(d.get("appView")), mechanism=_text(d.get("mechanism")),
+            priority=_priority(d.get("priority")), kb_refs=[r for r in refs if r is not None])
 
 
 @dataclass(frozen=True)
@@ -69,15 +108,25 @@ class Interp:
     # sql_id → 执行计划正文。模型在写 interp 之前跑 explain 取回来,附录里**直接展示计划**,
     # 而不是给用户一条「你去跑 explain」的命令 —— 他要的是计划,不是取计划的办法。
     plans: dict = field(default_factory=dict)
+    summary: str = ""            # 开头的短结论(2–3 句)
+    load_app_view: str = ""      # ① 负载画像的「应用视角」
+    load_mechanism: str = ""     # ① 负载画像的「数据库机制」
+    conclusion: str = ""         # ④ 总结和结论
+    followups: list = field(default_factory=list)   # ④ 末尾的展开提议(1–3 条)
 
     @staticmethod
     def from_dict(d: dict) -> "Interp":
         ov = d.get("overall", {}) or {}
+        lv = d.get("loadView") if isinstance(d.get("loadView"), dict) else {}
+        ups = d.get("followups") if isinstance(d.get("followups"), list) else []
         return Interp(
             overall=InterpOverall(severity=ov.get("severity", ""), driver=ov.get("driver", "")),
             verification_badge=d.get("verificationBadge", ""),
             findings=[InterpFinding.from_dict(f) for f in d.get("findings", []) or []],
-            plans=_plans_from_dict(d.get("plans")))
+            plans=_plans_from_dict(d.get("plans")),
+            summary=_text(d.get("summary")), load_app_view=_text(lv.get("appView")),
+            load_mechanism=_text(lv.get("mechanism")), conclusion=_text(d.get("conclusion")),
+            followups=[_text(x) for x in ups if _text(x)][:3])
 
 
 def _plans_from_dict(raw) -> dict:

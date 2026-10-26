@@ -12,7 +12,7 @@ _ROOT = pathlib.Path(__file__).resolve().parents[1]
 _SCRIPTS = _ROOT / "skills" / "gaussdb-wdr" / "scripts"
 
 for _m in ("model", "thresholds", "util", "collectors", "report",
-           "native", "snaps", "interp", "recheck", "finalreport", "ansi"):
+           "native", "snaps", "interp", "recheck", "finalreport", "kbrefs", "appendix", "mdreport", "render", "ansi"):
     sys.modules.pop(_m, None)
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_ROOT))
@@ -153,8 +153,12 @@ def test_render_report_md_sections():
     assert "# WDR 报告 — og" in out
     assert "总体状态 🟠告警" in out
     assert "判断校验 ✓ 已锚定" in out
-    assert "## 维度概览" in out
-    assert "## 全景分析（自顶向下）" in out
+    # 2026-10-26 回答模板化(R7):负载画像 → 问题与元凶 → 解决方案 → 总结和结论 → 附录,顺序固定
+    heads = ["评估窗口：", "## ① 负载画像", "## ② 问题与元凶", "## ③ 解决方案", "## ④ 总结和结论", "## 附录"]
+    pos = [out.index(h) for h in heads]
+    assert pos == sorted(pos), out
+    assert out.index("### Wait Events / Classes") < out.index("## ② 问题与元凶")      # 等待放在负载画像里
+    assert "### P1(次优先)" in out and "WDR_WAIT_CLASS_SKEW：加索引" in out          # 告警级、没给优先级 → P1
     assert "WDR_WAIT_CLASS_SKEW" in out
     assert "✅实证 6602→2.47" in out
     # ansi path renders too

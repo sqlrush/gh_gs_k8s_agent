@@ -34,6 +34,7 @@ from common import access  # noqa: E402
 from common import cli  # noqa: E402
 from cost import explain_cost, quote_columns, quote_ident, quote_sql_literal  # noqa: E402
 from evidence import is_dml  # noqa: E402
+import rewritediff  # noqa: E402
 from sqlfetch import count_placeholders  # noqa: E402
 
 # CREATE INDEX ... WITH (parallel_workers=N) —— openGauss 的并行建索引开关。
@@ -73,6 +74,10 @@ class RewriteVerdict:
     equivalent: Optional[bool] = None
     equiv_note: str = ""
     reason: str = ""
+    # 前后对比(回答模板 R4):SQL 文本差异与两棵计划
+    diff: str = ""
+    orig_plan: str = ""
+    new_plan: str = ""
 
 
 @dataclass(frozen=True)
@@ -86,6 +91,9 @@ class CombinedVerdict:
     applied_indexes: list = field(default_factory=list)
     failed_indexes: list = field(default_factory=list)
     reason: str = ""
+    diff: str = ""
+    orig_plan: str = ""
+    combo_plan: str = ""      # 改写后、带假设索引的计划
 
 
 def _trim_trailing_semicolon(sql: str) -> str:
@@ -154,6 +162,7 @@ def verify_rewrite(db, orig_sql: str, rewrite_sql: str,
     if new_cost <= 0:
         raise ValueError(f"verify rewrite: rewrite cost {new_cost} <= 0, cannot compare")
     speedup = orig_cost / new_cost
+    orig_plan, new_plan = rewritediff.explain_text(db, orig_sql), rewritediff.explain_text(db, rewrite_sql)
 
     equivalent: Optional[bool] = None
     equiv_note = ""
@@ -172,7 +181,8 @@ def verify_rewrite(db, orig_sql: str, rewrite_sql: str,
     elif equivalent is not None and not equivalent:
         reason = "结果集不等价"
 
-    return RewriteVerdict(orig_cost, new_cost, speedup, accepted, equivalent, equiv_note, reason)
+    return RewriteVerdict(orig_cost, new_cost, speedup, accepted, equivalent, equiv_note, reason,
+                          rewritediff.sql_diff(orig_sql, rewrite_sql), orig_plan, new_plan)
 
 
 def _dedup(items: list[str]) -> list[str]:
@@ -196,6 +206,7 @@ def verify_combined(db, orig_sql: str, rewrite_sql: str, explicit_indexes: list[
     orig_cost = explain_cost(db, orig_sql)
     if orig_cost <= 0:
         raise ValueError(f"verify combined: orig cost {orig_cost} <= 0, cannot compare")
+    orig_plan = rewritediff.explain_text(db, orig_sql)
 
     db.execute("SET enable_hypo_index = on")
     try:
@@ -234,6 +245,7 @@ def verify_combined(db, orig_sql: str, rewrite_sql: str, explicit_indexes: list[
         combo_cost = explain_cost(db, rewrite_sql)
         if combo_cost <= 0:
             raise ValueError(f"verify combined: combo cost {combo_cost} <= 0, cannot compare")
+        combo_plan = rewritediff.explain_text(db, rewrite_sql)     # 假设索引还在,计划里能看到用没用上
     finally:
         try:
             db.execute("SELECT hypopg_reset_index()")
@@ -259,7 +271,8 @@ def verify_combined(db, orig_sql: str, rewrite_sql: str, explicit_indexes: list[
         reason = "结果集不等价"
 
     return CombinedVerdict(orig_cost, combo_cost, speedup, accepted, equivalent,
-                           equiv_note, applied, failed, reason)
+                           equiv_note, applied, failed, reason,
+                           rewritediff.sql_diff(orig_sql, rewrite_sql), orig_plan, combo_plan)
 
 
 def verify_report(v: RewriteVerdict) -> str:
@@ -277,6 +290,7 @@ def verify_report(v: RewriteVerdict) -> str:
         sb.append("✅ ACCEPTED（cost 改善达标且未发现不等价）")
     else:
         sb.append(f"❌ REJECTED：{v.reason}")
+    sb.append("\n" + rewritediff.comparison_md(v.diff, v.orig_plan, v.new_plan))
     return "\n".join(sb) + "\n"
 
 
@@ -312,6 +326,7 @@ def combined_report(cv: CombinedVerdict) -> str:
     sb.append("\n> Costs are real EXPLAIN comparisons using hypothetical (virtual) indexes — "
               "no index was actually built. Apply the rewrite AND create these indexes together "
               "to realize the gain.")
+    sb.append("\n" + rewritediff.comparison_md(cv.diff, cv.orig_plan, cv.combo_plan, "改写后(含假设索引)"))
     return "\n".join(sb) + "\n"
 
 

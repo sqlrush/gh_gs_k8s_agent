@@ -19,6 +19,7 @@ class AnchoredFinding:
     root_cause: str
     verified: list = field(default_factory=list)
     unverified: list = field(default_factory=list)
+    interp: object = None        # 对应的 InterpFinding:两种视角、优先级、知识引用(回答模板 R7)从这里取
 
 
 @dataclass
@@ -67,7 +68,7 @@ def recheck(ev: Evidence, in_: Interp) -> Rechecked:
             r.unanchored.append(inf)
             continue
         covered.add(inf.code)
-        af = AnchoredFinding(ev=evf, root_cause=inf.root_cause)
+        af = AnchoredFinding(ev=evf, root_cause=inf.root_cause, interp=inf)
         for s in inf.suggestions:
             if suggestion_verified(s):
                 af.verified.append(s)

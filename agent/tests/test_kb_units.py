@@ -327,17 +327,24 @@ def test_every_contracted_skill_carries_the_current_block():
 KB_MARK = '<font color=#2f6fdb>'
 
 
+# 2026-10-26 回答模板化:官方文档集换青色,与客户知识分开;句后括号注明出处(引用自 xxx 库 编号)。
+OFFICIAL_MARK = '<font color=#0f7c86>'
+
+
 def test_contract_tells_the_model_to_mark_kb_content_blue():
     text = _template()
-    assert KB_MARK in text
-    assert "不标蓝" in text, "要写明哪些不标:诊断结果、通用经验、「本行无先例」"
+    assert KB_MARK in text and OFFICIAL_MARK in text
+    assert "不上色" in text, "要写明哪些不上色:诊断结果、你自己的分析、通用经验"
+    assert "(引用自" in text and "贵行规范库" in text and "GaussDB 官方文档库" in text, "句后括号写出处,库名按类型"
+    assert "知识库中未找到相关内容,以下为通用知识,仅供参考" in text, "兜底说法统一成这一种"
     assert "代码块里不放标签" in text, "代码块里的标签不变色,还会原样露出来"
     assert "不加引号" in text and "加粗" in text, "引号被写成中文引号、标签里加粗,都会让蓝色失效(测试环境实测)"
 
 
 def test_blue_tag_has_no_quotes_to_mangle():
     """2026-10-24 测试环境:模型把 style="…" 写成了 style=“…”,整段不变色。属性值不含空格与等号,可以不加引号。"""
-    assert '"' not in KB_MARK and "'" not in KB_MARK
+    for mark in (KB_MARK, OFFICIAL_MARK):
+        assert '"' not in mark and "'" not in mark
 
 
 @pytest.mark.parametrize("rel", ["skills/gaussdb-kb/SKILL.md", "AGENTS.md"])
