@@ -1,6 +1,6 @@
 ---
 name: gaussdb-kb-import
-version: 4.2.0
+version: 4.2.1
 description: "知识库导入(管理员用,原 kbimport;查询与引用核对在 gaussdb-kb):把 GaussDB 官方产品文档(CHM,导成标准知识库的官方文档集)、客户的 GaussDB/OpenGauss 规范文档(txt/md/docx/doc/pdf/pptx;扫描件 PDF 渲染成页面由你看图转录)与故障工单/问题分析报告(md/docx/csv/xlsx)导入知识库、需要登录的内网网页(Wiki / Confluence / 门户:管理员在浏览器里点书签「导入知识库」剪藏进来,第一次由你一步一步引导装书签)、手册 / Wiki / 产品文档 / 环境画像导入知识库——每条知识打上八类类型之一(规范、案例、画像、基线、缺陷、手册、产品文档、Wiki),规范条款化进 rules/errata,工单结构化成案例并抽成图谱关系,其余六类按模板写成类型化条目(index 同时生成 L0 总索引与 L1 专题导航),关键数据写入前一律生成编号选择列表交用户确认;向量进知识库目录里的 SQLite 索引(sqlite-vec,不用配)、关系写进图文件 graph/*.yaml(配了 Neo4j 再同步进图库,可选;没有图库时路径直接走图文件),各诊断 skill 按发现检索并优先引用客户先例。脚本负责转换、快照、校验、索引、检索、契约注入;你负责条款分类、案例抽取、呈现选择列表与收集确认。用户说「导入规范 / 导入工单 / 建知识库 / 把 xxx 加进知识库 / 导入这个网页 / 把这个链接加进知识库 / 剪藏 / 更新规范库 / 知识库里有没有类似案例 / 让 skill 按我们的经验来」即用。"
 allowed-tools: ["exec", "read", "write"]
 compatibility: opencode

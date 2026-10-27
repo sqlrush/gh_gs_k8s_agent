@@ -25,13 +25,21 @@ def _images_in_manifests() -> set:
     return {x for x in out if x}
 
 
-def test_packager_exports_every_agent_image():
-    """后端三个镜像都要进包(前端镜像由前端方自建,不在本包)。"""
+def _packaged() -> set:
     body = _PACKAGER.read_text(encoding="utf-8")
-    loop = re.search(r"for T in ([a-z\- ]+); do", body)
+    loop = re.search(r"for T in ([a-z\- ]+)( \$KBSTD)?; do", body)
     assert loop, "package-images.sh 里找不到镜像循环"
-    packaged = set(loop.group(1).split())
-    assert packaged == {"runtime", "kb-import", "gateway"}, \
+    out = set(loop.group(1).split())
+    if loop.group(2):
+        assert 'KBSTD="kbstd"' in body, "标准知识库镜像默认要进包(只有 --without-kbstd 才不进)"
+        out.add("kbstd")
+    return out
+
+
+def test_packager_exports_every_agent_image():
+    """后端三个镜像与标准知识库(2026-10-27 起)都要进包;前端由前端方自建,不在本包。"""
+    packaged = _packaged()
+    assert packaged == {"runtime", "kb-import", "gateway", "kbstd"}, \
         "打包的镜像与预期不符:%s —— 漏一个客户现场就装不起来" % sorted(packaged)
 
 
@@ -39,8 +47,9 @@ def test_builder_and_packager_agree():
     """构建的和打包的必须是同一组 —— 构建了没打包等于白构建。"""
     built = set(re.search(r"for T in ([a-z\- ]+); do", _BUILDER.read_text(encoding="utf-8")).group(1).split())
     built.add("gateway")          # 网关是独立 Dockerfile,不在那个循环里
-    loop = re.search(r"for T in ([a-z\- ]+); do", _PACKAGER.read_text(encoding="utf-8"))
-    assert built == set(loop.group(1).split())
+    if "Dockerfile.kbstd" in _BUILDER.read_text(encoding="utf-8"):
+        built.add("kbstd")        # 标准知识库:给 --kbstd 才构建(包不在代码仓库里)
+    assert built == _packaged()
 
 
 def test_the_retired_vector_db_is_gone_from_the_package_and_the_manifests():

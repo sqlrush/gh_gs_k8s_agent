@@ -222,3 +222,28 @@ def test_clip_settings_live_once_in_agent_config_and_reach_the_gateway():
     for env, key in (("GATEWAY_KB_CLIP_ORIGINS", "KB_CLIP_ORIGINS"), ("GATEWAY_KB_CLIP_MAX_MB", "KB_CLIP_MAX_MB")):
         assert re.search(r"\{name:\s*%s,\s*valueFrom:\s*\{configMapKeyRef:\s*\{name:\s*agent-config,\s*key:\s*%s,\s*optional:\s*true\}"
                          % (env, key), gw), "gateway.yaml 没从 agent-config 映射 %s" % key
+
+
+def test_standard_kb_install_job_matches_the_release_and_has_no_network_or_api():
+    """标准知识库(官方文档集)随部署自动装上(2026-10-27):Job 用的两个镜像与 USER_IMAGE_TAG 同一版本,
+    Job 名带同一个版本号(Pod 模板不可改,换版本必须是新对象,否则 apply -k 报 field is immutable);
+    它只读写 NAS 的 kb/,不调 k8s API、不要任何网络。"""
+    import re
+    base = _ROOT / "k8s" / "base"
+    user = re.search(r'USER_IMAGE_TAG:\s*"([^"]+)"', (base / "configmap-gateway.yaml").read_text(encoding="utf-8")).group(1)
+    job = (base / "kbstd-install.yaml").read_text(encoding="utf-8")
+    assert "kbstd-install.yaml" in (base / "kustomization.yaml").read_text(encoding="utf-8")
+    images = dict(re.findall(r"image:\s*(gaussdb-agent-[a-z-]+):(\S+)", job))
+    assert images == {"gaussdb-agent-kbstd": user, "gaussdb-agent-kb-import": user}, images
+    ver = re.match(r"agent-v(\d+)\.(\d+)\.(\d+)", user).groups()
+    assert re.search(r"^  name: kbstd-install-v%s-%s-%s$" % ver, job, re.M), "Job 名要带版本号 v%s-%s-%s" % ver
+    assert '"docset", "install", "/packs", "--kb", "/nas/kb"' in job
+    assert "automountServiceAccountToken: false" in job and "runAsNonRoot: true" in job
+    assert re.search(r"^\s*enableServiceLinks:\s*false\s*$", job, re.M)
+    assert "ttlSecondsAfterFinished" in job and "restartPolicy: Never" in job
+    for body in re.findall(r"emptyDir:\s*\{([^}]*)\}", job):
+        assert "sizeLimit" in body and "medium" not in body
+    assert re.search(r"\{name: nas, mountPath: /nas/kb, subPath: kb\}", job), "只挂知识库那一份 NAS"
+    np = (base / "networkpolicy.yaml").read_text(encoding="utf-8")
+    pol = np[np.index("name: kbstd-policy"):]
+    assert "app: gaussdb-kbstd" in pol and "ingress: []" in pol and "egress: []" in pol, "安装 Job 不该有任何网络"

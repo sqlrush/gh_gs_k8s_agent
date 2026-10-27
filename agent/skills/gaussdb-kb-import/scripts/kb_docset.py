@@ -437,6 +437,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         print(f"{src} 里没有标准知识库包(kb-std-*.tar.gz),不用装")
         return 0
     rc = 0
+    installed = 0
     with kblock.hold(kb):
         for p in packs:
             try:
@@ -445,8 +446,10 @@ def cmd_install(args: argparse.Namespace) -> int:
                 print(f"[error] {p.name}: {exc}")
                 rc = 1
                 continue
+            installed += result == "installed"
             print(f"[{result}] {note}")
-        if rc == 0:
+        # 全部同版本跳过时一个文件都不写(部署时的安装 Job 每次 apply 都会跑,不要每次都重写客户知识库的 L0 / L1)
+        if rc == 0 and installed:
             from common.kb import layers as kblayers
             version = (kb / "VERSION").read_text(encoding="utf-8").strip() if (kb / "VERSION").is_file() else ""
             kblayers.write_layers(kb, version)

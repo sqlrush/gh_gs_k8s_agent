@@ -2,15 +2,16 @@
 # 离线交付包:把后端**三个**镜像(两种架构)导出成 tar.gz + sha256,连同 k8s 清单与文档打成一个 dist/ 目录。
 #   gaussdb-agent-runtime / -kb-import   每用户一个的业务 Pod(固定池化的槽位也用 runtime)
 #   gaussdb-agent-gateway                接入网关(全体共用)
-# 网关漏了的话,客户拿到包也部署不起来 —— 而现场往往没有外网可以补拉。
+#   gaussdb-agent-kbstd                  标准知识库(GaussDB 官方文档集),部署时由 Job kbstd-install 装进 NAS(2026-10-27 起)
+# 漏了哪个,客户拿到包也部署不完整 —— 网关起不来、官方文档集装不上,而现场往往没有外网可以补拉。开发时没有标准知识库包可加 --without-kbstd。
 # 前端镜像不在本包里:由前端方自建,按 docs/前端对接接口说明.md 接入。
-# 用法: scripts/package-images.sh <TAG> [--arch amd64,arm64]
+# 用法: scripts/package-images.sh <TAG> [--arch amd64,arm64] [--without-kbstd]
 #   前提: 镜像已构建——本机架构用 <TAG>,另一架构用 <TAG>-<arch>(scripts/build-images.sh <TAG>-<arch> --platform linux/<arch>)。
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 TAG=${1:?tag}; shift || true
-ARCHS="amd64,arm64"
-while [ $# -gt 0 ]; do case "$1" in --arch) ARCHS=$2; shift 2 ;; *) echo "unknown $1" >&2; exit 2 ;; esac; done
+ARCHS="amd64,arm64"; KBSTD="kbstd"
+while [ $# -gt 0 ]; do case "$1" in --arch) ARCHS=$2; shift 2 ;; --without-kbstd) KBSTD=""; shift ;; *) echo "unknown $1" >&2; exit 2 ;; esac; done
 HOST_ARCH=$(docker info --format '{{.Architecture}}' 2>/dev/null | sed 's/aarch64/arm64/; s/x86_64/amd64/')
 # 包名:标签本身以 agent- 开头时不再重复(gaussdb-agent-v0.4-…),否则 gaussdb-agent-<TAG>
 case "$TAG" in agent-*) PKG="gaussdb-$TAG" ;; *) PKG="gaussdb-agent-$TAG" ;; esac
@@ -25,7 +26,7 @@ COMMIT=$(git -C "$HERE" rev-parse --short HEAD)
 for ARCH in ${ARCHS//,/ }; do
   SUFFIX=""; [ "$ARCH" != "$HOST_ARCH" ] && SUFFIX="-$ARCH"
   IMAGES=""
-  for T in runtime kb-import gateway; do
+  for T in runtime kb-import gateway $KBSTD; do
     IMG="gaussdb-agent-$T:$TAG$SUFFIX"
     docker image inspect "$IMG" >/dev/null 2>&1 || { echo "缺镜像 $IMG(先 build-images.sh)" >&2; exit 1; }
     IMAGES="$IMAGES $IMG"

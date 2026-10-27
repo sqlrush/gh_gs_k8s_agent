@@ -88,7 +88,7 @@ spec:
         - name: gateway
           # base 是直接 kubectl apply -k 的,**不做占位符渲染** —— 这里写具体标签,
           # 平台按实际版本改(和 configmap-agent.yaml 里的样例值一个道理)。
-          image: gaussdb-agent-gateway:agent-v1.4.1-oc1.18.27
+          image: gaussdb-agent-gateway:agent-v1.4.2-oc1.18.27
           imagePullPolicy: IfNotPresent
           securityContext:
             readOnlyRootFilesystem: true        # 网关不写任何东西

@@ -90,3 +90,16 @@ spec:
         - podSelector: {matchLabels: {app: agent-gateway}}
       ports: [{port: 8080, protocol: TCP}]
   egress: []
+---
+# 标准知识库安装 Job(kbstd-install.yaml):只读写 NAS,不需要任何网络 —— 入站、出站一条都不放(连 DNS 都不要)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kbstd-policy
+  namespace: gaussdb-agent
+spec:
+  podSelector:
+    matchLabels: {app: gaussdb-kbstd}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []

@@ -1,0 +1,16 @@
+# 标准知识库镜像(第 5 个镜像,2026-10-27):里面只有标准知识库包 kb-std-<代号>-<内容版本>.tar.gz(GaussDB 官方文档集)。
+# 部署时 Job kbstd-install(k8s/base/kbstd-install.yaml)把包取出来,由导入镜像里的 `kb.py docset install` 装进 NAS 的 kb/docsets/。
+#
+# **包不在代码仓库里**:官方文档的派生内容只进客户知识库与私有镜像仓。构建时用 --build-context 传入放包的目录:
+#   scripts/build-images.sh <TAG> --kbstd <放 kb-std-*.tar.gz 的目录>
+# 包由 `kb.py docset pack` 打出(测试开关关着、索引完整、校验零错误才出包),里面每个文件带 sha256,装的时候逐个核对。
+#
+# 基础镜像与 runtime / kb-import 同一个:节点上已有这几层,拉这个镜像只多下载包本身;取包用它自带的 sh 与 cp。
+FROM python:3.12-slim-bookworm
+# 目录先建好再拷:COPY --chmod 会把它顺手建出的目录也设成 0444,进不去(2026-10-27 第一次构建就撞上)
+RUN mkdir -m 0755 /kbstd
+COPY --from=kbstd --chmod=0444 kb-std-*.tar.gz /kbstd/
+USER 1000:1000
+LABEL org.opencontainers.image.title="gaussdb-agent-kbstd" \
+      org.opencontainers.image.source="https://github.com/sqlrush/gh_agent_k8s" \
+      org.opencontainers.image.description="standard knowledge base packs (kb-std-*.tar.gz, GaussDB official docsets); installed into kb/docsets by the kbstd-install Job"

@@ -281,6 +281,29 @@ def test_pack_refuses_test_switch_and_install_checks(kb, tmp_path):
     assert docset.get(fresh, "T25").catalog()[0]["id"].startswith("PD-T25")
 
 
+
+def test_install_command_writes_nothing_when_every_pack_is_already_there(kb, tmp_path, capsys):
+    """部署时的安装 Job 每次 apply 都会跑:同版本跳过时连 L0 / L1 也不该重写。"""
+    kd = _load("kb_docset")
+    _import(kb, tmp_path)
+    assert _index(kb) == 0
+    (kb / "kb.yaml").write_text("embeddings: {source: none}\n", encoding="utf-8")
+    out_dir = tmp_path / "packs"
+    assert kd.cmd_pack(argparse.Namespace(kb=str(kb), code="T25", out=str(out_dir))) == 0
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    assert kd.cmd_install(argparse.Namespace(kb=str(fresh), pack=str(out_dir))) == 0
+    out = capsys.readouterr().out
+    assert "[installed]" in out and "L0 / L1 已按装好的文档集重建" in out
+    l0 = fresh / "L0-总索引.md"
+    stamp = l0.stat().st_mtime_ns
+    assert kd.cmd_install(argparse.Namespace(kb=str(fresh), pack=str(out_dir))) == 0
+    out = capsys.readouterr().out
+    assert "[skipped]" in out and "L0 / L1" not in out and l0.stat().st_mtime_ns == stamp
+    (tmp_path / "empty").mkdir()
+    assert kd.cmd_install(argparse.Namespace(kb=str(fresh), pack=str(tmp_path / "empty"))) == 0
+    assert "没有标准知识库包" in capsys.readouterr().out
+
 def test_model_summary_must_come_from_the_page():
     kd = _load("kb_docset")
     page = "lockwait_timeout 默认 1200000,超时报错"

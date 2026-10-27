@@ -1,6 +1,6 @@
 # 从源码构建到 K8s 运行：完整手册
 
-从 GitHub 拉代码开始，自己构建后端全部 3 个镜像，推进镜像仓库，部署到 Kubernetes，
+从 GitHub 拉代码开始，自己构建后端 3 个镜像（另有一个标准知识库镜像由我方发布，从镜像仓或离线包取，见 3.5），推进镜像仓库，部署到 Kubernetes，
 最后经网关登录、让模型对数据库做一次健康检查。**每一步都给出命令和执行后应该看到的输出。**
 
 > **本手册的每条命令都实际跑过。** 2026-10-25 从本仓库 clone，构建 3 个镜像，部署到一个全新的 kind 集群
@@ -55,13 +55,14 @@ flowchart LR
 用户容器里有两个容器：`opencode`（模型与技能在这里跑）和 `credproxy`（凭据代理）。中间件令牌、签名私钥、模型 Key
 **只注入凭据代理**，由它在转发时加上；模型即使执行命令读环境变量，也读不到任何凭据。
 
-### 0.3 三个镜像
+### 0.3 三个镜像 + 标准知识库镜像
 
 | # | 镜像 | 从哪来 | 里面是什么 | 大小（arm64 实测） | 在集群里的形态 |
 |---|---|---|---|---|---|
 | 1 | `gaussdb-agent-runtime` | `docker/Dockerfile` 的 `runtime` 阶段 | opencode 1.18.27 + 18 个技能（17 个诊断 + 知识库只读查询）+ 凭据代理 | 666 MB | 每个工号一个，登录时由网关创建；固定池化时是池子 Pod 的槽位 |
 | 2 | `gaussdb-agent-kb-import` | `docker/Dockerfile` 的 `kb-import` 阶段 | opencode + 知识库查询 / 导入 / 入库前标准化 3 个技能（另装 7zip、poppler、pillow，用于 CHM / PDF / 照片） | 761 MB | 只给知识库管理员，每人一个 |
 | 3 | `gaussdb-agent-gateway` | `docker/Dockerfile.gateway` | 网关（Python 标准库 + PyYAML），带用户 Pod 模板 | 227 MB | 常驻 2 副本 |
+| 4 | `gaussdb-agent-kbstd` | 我方发布（镜像仓 / 离线包），**不从源码构建**：内容是 GaussDB 官方文档的派生，不进代码仓库 | 标准知识库包（官方文档集 G25132C：GaussDB 25.1.32 集中式，6023 条，含检索索引） | 约 370 MB（基础层与导入镜像共用，实际多下载约 250 MB） | 部署时一次性 Job `kbstd-install-*` 把它装进 NAS 的 `kb/docsets/`，装完退出 |
 
 ```mermaid
 flowchart TB
@@ -242,6 +243,18 @@ bash scripts/build-images.sh "$TAG" --registry <REG> --platform linux/amd64,linu
 
 用这种方式推了的，跳过第 4 章的 `docker tag` / `docker push`。
 
+### 3.5 取标准知识库镜像（不从源码构建）
+
+`gaussdb-agent-kbstd` 是标准知识库（GaussDB 官方文档集）。它的内容是官方文档的派生，**只发布在镜像仓与离线包里、不进代码仓库**，
+所以不能也不需要从源码构建。二选一取到本机，标签与其余镜像一致：
+
+```bash
+docker pull ghcr.io/sqlrush/gaussdb-agent-kbstd:$TAG && docker tag ghcr.io/sqlrush/gaussdb-agent-kbstd:$TAG gaussdb-agent-kbstd:$TAG
+# 或:从我方提供的离线包载入
+```
+
+> GHCR 上的镜像是私有的，由我方按人开通。`docker images | grep kbstd` 有一行。部署后由 Job 自动装进知识库（5.7）。
+
 ---
 
 ## 4. 推进镜像仓库
@@ -256,7 +269,7 @@ docker login ${REG%%/*}
 > `Login Succeeded`。
 
 ```bash
-for img in runtime kb-import gateway; do
+for img in runtime kb-import gateway kbstd; do
   docker tag gaussdb-agent-$img:$TAG $REG/gaussdb-agent-$img:$TAG
   docker push $REG/gaussdb-agent-$img:$TAG
 done
@@ -306,6 +319,8 @@ flowchart TD
 
 ```bash
 sed -i "s#image: gaussdb-agent-gateway:.*#image: $REG/gaussdb-agent-gateway:$TAG#" k8s/base/gateway.yaml
+sed -i "s#image: gaussdb-agent-kbstd:.*#image: $REG/gaussdb-agent-kbstd:$TAG#" k8s/base/kbstd-install.yaml
+sed -i "s#image: gaussdb-agent-kb-import:.*#image: $REG/gaussdb-agent-kb-import:$TAG#" k8s/base/kbstd-install.yaml
 sed -i "s#  USER_IMAGE_REGISTRY: .*#  USER_IMAGE_REGISTRY: \"$REG\"#; s#  USER_IMAGE_TAG: .*#  USER_IMAGE_TAG: \"$TAG\"#" k8s/base/configmap-gateway.yaml
 ```
 
@@ -315,12 +330,15 @@ sed -i "s#  USER_IMAGE_REGISTRY: .*#  USER_IMAGE_REGISTRY: \"$REG\"#; s#  USER_I
 grep -rn "image:\|USER_IMAGE_REGISTRY:\|USER_IMAGE_TAG:" k8s/base/ | grep -v ":\s*#" | grep -v example
 ```
 
-> 3 行，地址都以你的 `REG` 开头、版本都是你的 `TAG`：
+> 5 行，地址都以你的 `REG` 开头、版本都是你的 `TAG`：
 > ```
 > k8s/base/configmap-gateway.yaml:12:  USER_IMAGE_TAG: "<TAG>"
 > k8s/base/configmap-gateway.yaml:16:  USER_IMAGE_REGISTRY: "<REG>"
 > k8s/base/gateway.yaml:91:          image: <REG>/gaussdb-agent-gateway:<TAG>
+> k8s/base/kbstd-install.yaml:29:          image: <REG>/gaussdb-agent-kbstd:<TAG>
+> k8s/base/kbstd-install.yaml:41:          image: <REG>/gaussdb-agent-kb-import:<TAG>
 > ```
+> 后两行是标准知识库安装 Job（5.7）：部署后它把官方文档集装进 NAS，用到标准知识库镜像与导入镜像。
 
 > **`USER_IMAGE_REGISTRY` 必须填。** 用户容器（runtime、kb-import）不在任何清单文件里：
 > 网关在用户登录时按 `<USER_IMAGE_REGISTRY>/gaussdb-agent-runtime:<USER_IMAGE_TAG>` 现建。
@@ -370,9 +388,11 @@ kubectl apply -k k8s/base
 > service/gateway created
 > persistentvolumeclaim/nas created
 > deployment.apps/gateway created
+> job.batch/kbstd-install-v1-4-2 created
 > networkpolicy.networking.k8s.io/frontend-policy created
 > networkpolicy.networking.k8s.io/gateway-policy created
 > networkpolicy.networking.k8s.io/kb-import-policy created
+> networkpolicy.networking.k8s.io/kbstd-policy created
 > networkpolicy.networking.k8s.io/runtime-policy created
 > ```
 
@@ -382,7 +402,8 @@ kubectl -n gaussdb-agent get pods
 ```
 
 > PVC `nas` 是 `Bound`。两个 `gateway` Pod 是 `CrashLoopBackOff` 或 `Error`：**正常**。还没建信任凭据，网关按设计拒绝启动，5.8 之后就好；
-> 它能起来再退出，说明节点已经能从你的镜像仓库拉镜像。
+> 它能起来再退出，说明节点已经能从你的镜像仓库拉镜像。`kbstd-install-v1-4-2-…` 是 `Completed`：官方文档集已装进知识库（5.7）；
+> NAS 还没接好时它会失败重试，接好后自己就过。
 >
 > 卡在 `ImagePullBackOff` / `ErrImagePull`：节点拉不到镜像，检查 `REG` 与仓库权限（私有仓库要配 `imagePullSecrets` 或节点级凭据）。
 
@@ -549,7 +570,7 @@ done
 > - **带用户容器标签的那个访问网关必须是 `000`**。两行都是 `200`，说明集群没在执行 NetworkPolicy，找容器平台确认网络插件。
 > - `sleep 8` 不能省：新 Pod 的策略要过几秒才生效，抢在之前测会误以为没生效。
 
-### 5.7 知识库索引（不用初始化）
+### 5.7 知识库（不用初始化；官方文档集自动装上）
 
 **没有向量库要初始化。** 知识库的向量 + 词法索引是 NAS 上知识库目录里的一个文件 `kb/index/store.sqlite`
 （SQLite + sqlite-vec，runtime 与 kb-import 两个镜像里都已装好），由导入容器里的 `kb.py index` 建：
@@ -571,6 +592,23 @@ kubectl -n gaussdb-agent exec deploy/kb-import-<管理员工号> -c opencode -- 
 >
 > 导入容器要在运行（管理员登录进导入容器一次即可，5.11；首次实测 10 秒建好）。知识库管理员：SSO 传的角色含 `gateway-config` 的 `KB_ADMIN_ROLES`（默认 `kb-admin`），
 > 或把工号登记进 ConfigMap `agent-roles` 的 `kb-admins`。不配 embedding 时检索走词法 + 图，不影响使用。
+
+**官方文档集随部署自动装上。** 5.3 的 `apply -k` 建了一次性 Job `kbstd-install-v1-4-2`：它从标准知识库镜像里取出包，
+用导入镜像里的 `kb.py docset install` 装进 NAS 的 `kb/docsets/`（逐个文件核对 sha256，同版本跳过，不碰贵方自己的知识，不要任何网络），
+装完重建 L0 / L1。核对：
+
+```bash
+kubectl -n gaussdb-agent logs job/kbstd-install-v1-4-2
+```
+
+> ```
+> [installed] G25132C 已装上:云数据库 GaussDB 25.1.32 集中式版产品文档(for 华为云Stack 8.5.1) 01 · 6023 条 · 版本 ebd6bf6b5f294395-…
+> 分层        : L0 / L1 已按装好的文档集重建
+> ```
+> 再 apply 一次是 `[skipped] G25132C 已是这个版本…,不动`。`ImagePullBackOff` 是没推标准知识库镜像或 5.1 没改到 `kbstd-install.yaml`；
+> 日志是权限错误、Job 最终 `Failed`：NAS 的 `kb/` 不是 uid 1000 可写，改好后
+> `kubectl -n gaussdb-agent delete job kbstd-install-v1-4-2 && kubectl apply -f k8s/base/kbstd-install.yaml` 重跑。
+> 之后在对话里问一个参数的默认值，回答里能引用 `PD-G25132C-…` 并按产品文档上青色。
 
 ### 5.8 启动网关
 
@@ -878,8 +916,8 @@ for p in json.load(sys.stdin)["pods"]:
 ```bash
 git pull
 TAG=$(git describe --tags --always)-oc1.18.27
-bash scripts/build-images.sh "$TAG"          # 或 3.4 的多架构 --push 方式
-for img in runtime kb-import gateway; do
+bash scripts/build-images.sh "$TAG"          # 或 3.4 的多架构 --push 方式;标准知识库镜像按 3.5 取
+for img in runtime kb-import gateway kbstd; do
   docker tag gaussdb-agent-$img:$TAG $REG/gaussdb-agent-$img:$TAG && docker push $REG/gaussdb-agent-$img:$TAG
 done
 kubectl apply -k k8s/base                     # 清单有变化时(新的配置项、网络策略);已改过的值会被清单里的值覆盖,先核对

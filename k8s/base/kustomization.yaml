@@ -8,6 +8,7 @@ resources:
   - configmap-gateway.yaml
   - networkpolicy.yaml
   - gateway.yaml
+  - kbstd-install.yaml        # 标准知识库(官方文档集):apply 后一次性 Job 装进 NAS 的 kb/docsets/,同版本跳过
 # 六个 *.example.yaml 都是样例(frontend.example.yaml 是给前端方的部署样例);平台用 kubectl create secret 创建真实的
 # model-api / grmp-sm2 / gateway-auth;固定池化另要 sandbox-control(管家与网关共用的控制密钥)。
 # 原来的知识库向量库组件(openGauss StatefulSet 与它的 Secret)2026-10-23 下线:索引是 NAS 上知识库目录里的

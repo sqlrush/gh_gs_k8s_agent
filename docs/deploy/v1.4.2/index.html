@@ -1,0 +1,1785 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>GaussDB 智能体部署上线方案（agent-v1.4.2）</title>
+<style>
+:root{--fg:#1b2430;--muted:#5a6475;--bd:#d9dfe8;--bg-code:#f5f7fa;--accent:#2f6fdb;--navy:#123a73}
+*{box-sizing:border-box}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;line-height:1.75;color:var(--fg);margin:0;background:#f6f8fb}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px 96px}
+header{background:linear-gradient(120deg,#123a73,#2f6fdb 60%,#5b8def);color:#fff;padding:36px 0 28px;margin-bottom:24px}
+header .wrap{padding-bottom:0}
+header h1{margin:0 0 8px;font-size:28px;border:0}
+header .meta{opacity:.9;font-size:14px}
+main{background:#fff;border:1px solid var(--bd);border-radius:12px;padding:8px 32px 40px}
+h2{font-size:1.45em;border-bottom:1px solid var(--bd);padding-bottom:.3em;margin-top:2em;color:var(--navy)}
+h3{font-size:1.15em;margin-top:1.6em}
+h2 a.anchor,h3 a.anchor{color:#c0c8d4;text-decoration:none;margin-left:6px;font-weight:400;visibility:hidden}
+h2:hover a.anchor,h3:hover a.anchor{visibility:visible}
+code{background:var(--bg-code);padding:.15em .4em;border-radius:4px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.86em}
+pre{background:var(--bg-code);border:1px solid var(--bd);border-radius:6px;padding:12px 16px;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.84em;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.92em}
+th,td{border:1px solid var(--bd);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#eef3fb;font-weight:600}
+tr:nth-child(even) td{background:#fafbfd}
+blockquote{border-left:4px solid var(--accent);background:#f3f6fb;margin:1em 0;padding:10px 16px;color:var(--muted)}
+a{color:var(--accent)}
+ul,ol{padding-left:1.6em} li{margin:.25em 0}
+nav.toc{background:#f8fafd;border:1px solid var(--bd);border-radius:10px;padding:14px 22px;margin:20px 0;columns:2;column-gap:32px;font-size:.93em}
+nav.toc b{display:block;margin-bottom:6px;column-span:all}
+nav.toc a{display:block;text-decoration:none;padding:1px 0}
+nav.toc a.l3{padding-left:1.2em;color:var(--muted);font-size:.95em}
+details{border:1px solid var(--bd);border-radius:8px;margin:6px 0;background:#fff}
+details summary{cursor:pointer;padding:6px 12px;font-size:.92em}
+details summary code{font-weight:600}
+details pre{margin:0 10px 10px}
+details .params{margin:4px 12px;font-size:.88em;color:var(--muted)}
+.sqlgroup{margin-top:1.4em}
+@media print{body{background:#fff}main{border:0;padding:0}details{break-inside:avoid}details>*{display:block}nav.toc{columns:1}}
+</style>
+</head>
+<body>
+<header><div class="wrap"><h1>GaussDB 智能体部署上线方案（agent-v1.4.2）</h1><div class="meta">代码仓库 sqlrush/gh_gs_k8s_agent · 标签 agent-v1.4.2 · 本页由仓库 docs/部署上线方案-v1.4.2.md 生成</div></div></header>
+<div class="wrap"><main>
+<table>
+<tr><th>项</th><th>内容</th></tr>
+<tr><td>适用版本</td><td><code>agent-v1.4.2</code>（2026-10-27），镜像标签 <code>agent-v1.4.2-oc1.18.27</code></td></tr>
+<tr><td>代码仓库</td><td><code>https://github.com/sqlrush/gh_gs_k8s_agent</code>，标签 <code>agent-v1.4.2</code></td></tr>
+<tr><td>读者</td><td>贵方项目经理、容器平台、中间件、存储、统一认证、AI 平台、DBA、前端、知识库管理员</td></tr>
+<tr><td>配套文档</td><td><a href="https://github.com/sqlrush/gh_gs_k8s_agent/blob/agent-v1.4.2/docs/从源码构建到K8s运行-完整手册.md">《从源码构建到 K8s 运行：完整手册》</a>（每一步的实测输出）、<a href="https://github.com/sqlrush/gh_gs_k8s_agent/blob/agent-v1.4.2/docs/前端对接接口说明.md">《前端对接接口说明》v1.1</a>、<a href="https://github.com/sqlrush/gh_gs_k8s_agent/blob/agent-v1.4.2/docs/代码结构说明.md">《代码结构说明》</a>、<a href="https://github.com/sqlrush/gh_gs_k8s_agent/blob/agent-v1.4.2/docs/delivery/白名单脚本清单.md">《诊断脚本白名单清单》</a>、<a href="../../delivery/scripts.sql">全量白名单 scripts.sql</a></td></tr>
+</table>
+<nav class="toc"><b>目录</b>
+<a class="l2" href="#1.-方案概述">1. 方案概述</a>
+<a class="l3" href="#1.1-系统组成">1.1 系统组成</a>
+<a class="l3" href="#1.2-请求链路">1.2 请求链路</a>
+<a class="l3" href="#1.3-两种运行形态">1.3 两种运行形态</a>
+<a class="l3" href="#1.4-安全设计要点">1.4 安全设计要点</a>
+<a class="l3" href="#1.5-本版本要点">1.5 本版本要点</a>
+<a class="l2" href="#2.-上线前准备">2. 上线前准备</a>
+<a class="l3" href="#2.1-各方分工">2.1 各方分工</a>
+<a class="l3" href="#2.2-环境要求">2.2 环境要求</a>
+<a class="l3" href="#2.3-需要准备的值">2.3 需要准备的值</a>
+<a class="l3" href="#2.4-上线前检查单">2.4 上线前检查单</a>
+<a class="l2" href="#3.-实施步骤总览">3. 实施步骤总览</a>
+<a class="l2" href="#4.-拉代码">4. 拉代码</a>
+<a class="l2" href="#5.-构建镜像">5. 构建镜像</a>
+<a class="l3" href="#5.1-方式-a-本机架构构建-构建机与集群节点同架构">5.1 方式 A：本机架构构建（构建机与集群节点同架构）</a>
+<a class="l3" href="#5.2-方式-b-两种架构一次构建并直接推进仓库-正式发布推荐">5.2 方式 B：两种架构一次构建并直接推进仓库（正式发布推荐）</a>
+<a class="l3" href="#5.3-方式-c-构建机不能上外网-离线包">5.3 方式 C：构建机不能上外网（离线包）</a>
+<a class="l3" href="#5.4-标准知识库镜像-不从源码构建-三种方式都要做">5.4 标准知识库镜像（不从源码构建，三种方式都要做）</a>
+<a class="l2" href="#6.-推进镜像仓库">6. 推进镜像仓库</a>
+<a class="l2" href="#7.-中间件导入诊断脚本白名单-中间件团队">7. 中间件导入诊断脚本白名单（中间件团队）</a>
+<a class="l2" href="#8.-部署到-kubernetes-平台团队">8. 部署到 Kubernetes（平台团队）</a>
+<a class="l3" href="#8.1-清单指向镜像仓库">8.1 清单指向镜像仓库</a>
+<a class="l3" href="#8.2-接上存储">8.2 接上存储</a>
+<a class="l3" href="#8.3-创建基础资源">8.3 创建基础资源</a>
+<a class="l3" href="#8.4-三个-secret">8.4 三个 Secret</a>
+<a class="l3" href="#8.5-填-agent-config">8.5 填 agent-config</a>
+<a class="l3" href="#8.6-出网策略按实际地址改">8.6 出网策略按实际地址改</a>
+<a class="l3" href="#8.7-启动网关">8.7 启动网关</a>
+<a class="l2" href="#9.-开通工号-平台-中间件">9. 开通工号（平台 + 中间件）</a>
+<a class="l2" href="#10.-验收">10. 验收</a>
+<a class="l3" href="#10.1-命令行验收">10.1 命令行验收</a>
+<a class="l3" href="#10.2-对话验收">10.2 对话验收</a>
+<a class="l3" href="#10.3-上线验收标准">10.3 上线验收标准</a>
+<a class="l2" href="#11.-可选-固定池化">11. （可选）固定池化</a>
+<a class="l2" href="#12.-知识库初始化-知识库管理员">12. 知识库初始化（知识库管理员）</a>
+<a class="l2" href="#13.-接入统一认证与前端">13. 接入统一认证与前端</a>
+<a class="l3" href="#13.1-统一认证-sso">13.1 统一认证（SSO）</a>
+<a class="l3" href="#13.2-前端">13.2 前端</a>
+<a class="l2" href="#14.-升级">14. 升级</a>
+<a class="l3" href="#14.1-从-v1.4.1-升级到-v1.4.2">14.1 从 v1.4.1 升级到 v1.4.2</a>
+<a class="l3" href="#14.2-从-v1.4.0-升级">14.2 从 v1.4.0 升级</a>
+<a class="l3" href="#14.3-从-v1.3.x-升级">14.3 从 v1.3.x 升级</a>
+<a class="l2" href="#15.-回滚">15. 回滚</a>
+<a class="l2" href="#16.-运维要点">16. 运维要点</a>
+<a class="l2" href="#17.-常见问题">17. 常见问题</a>
+<a class="l2" href="#附录-a-诊断脚本白名单-126-条">附录 A：诊断脚本白名单（126 条）</a>
+<a class="l3" href="#sql-全文">SQL 全文</a>
+<a class="l2" href="#附录-b-配置项速查">附录 B：配置项速查</a>
+<a class="l2" href="#附录-c-交付物清单">附录 C：交付物清单</a>
+</nav>
+<p>本方案覆盖从拉代码到上线验收的全过程：先讲清系统是什么、各方要准备什么，再按顺序给出每一步的命令、负责方与完成标志， 最后是升级、回滚、运维与全部 126 条诊断脚本白名单。命令都来自《完整手册》，那份手册在全新集群上逐条实测过， <strong>每一步执行后应该看到的输出</strong>以手册为准，本方案在每步末尾注明对应的手册章节。</p>
+<hr>
+<h2 id="1.-方案概述">1. 方案概述<a class="anchor" href="#1.-方案概述">#</a></h2>
+<h3 id="1.1-系统组成">1.1 系统组成<a class="anchor" href="#1.1-系统组成">#</a></h3>
+<table>
+<tr><th>组件</th><th>镜像 / 来源</th><th>形态</th><th>作用</th></tr>
+<tr><td>接入网关</td><td><code>gaussdb-agent-gateway</code></td><td>Deployment，2 副本</td><td>认工号（统一认证加的请求头 + 信任凭据）、按工号分配用户环境、反向代理对话与报告；运维接口 <code>/admin/*</code></td></tr>
+<tr><td>用户环境</td><td><code>gaussdb-agent-runtime</code></td><td>每人一个 Pod（按需），或固定池化的槽位</td><td>opencode 1.18.27 + 17 个诊断技能 + 知识库只读查询；每个 Pod 带一个凭据代理容器</td></tr>
+<tr><td>标准知识库</td><td><code>gaussdb-agent-kbstd</code>（我方发布，不从源码构建）</td><td>部署时跑一次的 Job，装完退出</td><td>GaussDB 官方文档集（25.1.32 集中式，6023 条，含检索索引），自动装进 NAS 的 <code>kb/docsets/</code></td></tr>
+<tr><td>知识库导入环境</td><td><code>gaussdb-agent-kb-import</code></td><td>每个知识库管理员一个</td><td>知识库导入、入库前标准化、官方文档集（CHM）导入；内网网页剪藏的接收（4095，只有网关能到）</td></tr>
+<tr><td>前端（大盘与对话页）</td><td>前端方自建</td><td>部署进本集群或贵方门户</td><td>按《前端对接接口说明》接入</td></tr>
+<tr><td>NAS</td><td>贵方存储</td><td>一个 RWX 卷</td><td>唯一的状态所在：<code>users/&lt;工号&gt;/</code>（会话、报告）、<code>kb/</code>（知识库与索引）</td></tr>
+<tr><td>统一认证（SSO）</td><td>贵方</td><td>反向代理 / 网关 / WAF</td><td>认人，把工号与信任凭据加进请求头</td></tr>
+<tr><td>中间件（GRMP）</td><td>贵方</td><td>已有系统</td><td>按白名单执行只读诊断脚本，按人令牌鉴权，可选 SM2 签名</td></tr>
+<tr><td>模型服务</td><td>贵方</td><td>OpenAI 兼容接口</td><td>推理；可选 embedding 端点给知识库用</td></tr>
+</table>
+<h3 id="1.2-请求链路">1.2 请求链路<a class="anchor" href="#1.2-请求链路">#</a></h3>
+<ul><li><strong>对话</strong>：浏览器 → 贵方统一认证（认人，加工号头与信任凭据）→ 接入网关（核对信任凭据，找到或创建这个工号的用户环境）→ 用户环境里的 opencode。</li><li><strong>诊断取数</strong>：opencode 里的技能 → 同 Pod 的凭据代理（加上本人中间件令牌、SM2 签名、工号）→ 贵方中间件 → 被诊断的数据库。技能只能调用白名单里登记过的只读脚本。</li><li><strong>推理</strong>：opencode → 凭据代理（加上模型 Key）→ 贵方模型服务。</li><li><strong>报告与大盘</strong>：技能把报告写进本人 NAS 目录；前端经网关的 <code>/reports/*</code> 读取，大盘页面走 <code>/dash/*</code>。</li><li><strong>知识库</strong>：管理员在导入环境里导入规范、案例、官方文档，写进 NAS 的 <code>kb/</code>；所有用户环境只读这份知识库。</li><li><strong>网页剪藏</strong>（可选）：知识库管理员在<strong>已登录</strong>的内网网页上点书签「导入知识库」→ 网关提供的剪藏页（只收 <code>KB_CLIP_ORIGINS</code> 里网站交来的内容）→ 本人导入环境的剪藏接收 → 知识库收件目录，并自动新开会话导入。页面内容只经管理员的浏览器进来，<strong>导入环境不访问任何内网网站</strong>。</li></ul>
+<h3 id="1.3-两种运行形态">1.3 两种运行形态<a class="anchor" href="#1.3-两种运行形态">#</a></h3>
+<table>
+<tr><th></th><th>按需模式（默认）</th><th>固定池化（可选）</th></tr>
+<tr><td>怎么运行</td><td>工号第一次登录时现建一个 Pod，闲置 30 分钟后收起</td><td>部署时固定 N 个 Pod × 每个 K 个槽位，运行中不建、不删、不补</td></tr>
+<tr><td>首次进入</td><td>约 8 秒（现建 Pod）</td><td>1–2 秒（分配槽位、载入历史）</td></tr>
+<tr><td>离开后回来</td><td>闲置收起后再来要重新建 Pod</td><td>0–1 秒（粘性保留：人走了槽位先不还）</td></tr>
+<tr><td>满员</td><td>不存在满员，受集群资源约束</td><td>等待页每 30 秒自动重试，并提前请闲置的人让位</td></tr>
+<tr><td>资源</td><td>按实际在线人数占用</td><td>按池子规模固定预留</td></tr>
+<tr><td>适用</td><td>使用人数不多、登录分散</td><td>大量用户集中登录（如版本上线后的业务高峰）</td></tr>
+</table>
+<p><strong>建议</strong>：先以按需模式上线、跑通全部验收；预计同时在线超过约 50 人、或要求秒级进入时，再按第 11 章切到固定池化。两种模式的 NAS 布局完全相同，可以来回切换，数据不迁移。</p>
+<h3 id="1.4-安全设计要点">1.4 安全设计要点<a class="anchor" href="#1.4-安全设计要点">#</a></h3>
+<ul><li><strong>凭据不进模型所在的容器</strong>：中间件令牌（按人）、SM2 签名私钥、模型 Key 只注入凭据代理容器，由它在转发时加上；模型执行命令读环境变量也读不到。 代理只往配置好的中间件与模型地址转发、只转发诊断接口，工号强制写成本人。</li><li><strong>只读白名单</strong>：技能只能按名字调用中间件里预先登记的脚本，126 条全部是只读查询，只访问系统视图与系统表，不读业务数据，不含 DML / DDL。</li><li><strong>网关不信任请求头</strong>：只认带着信任凭据的请求，信任凭据没配就拒绝启动；不带凭据的请求一律 403。</li><li><strong>网络策略白名单</strong>：用户容器只能出到中间件、模型服务与 DNS，访问不到网关、k8s API 与集群里的其他服务；网关只能访问 k8s API、用户容器与前端。</li><li><strong>最小权限</strong>：全部容器以非 root（uid 1000）运行；opencode 的工具权限写进配置真正执行：不能联网，只能用诊断技能，命令行只放行技能脚本与少数只读命令。</li><li><strong>固定池化的同 Pod 隔离</strong>：每个槽位独立的系统身份、进程空间与盘，凭据只在管家容器里，换人时容器重启清盘并经外部核验。</li></ul>
+<h3 id="1.5-本版本要点">1.5 本版本要点<a class="anchor" href="#1.5-本版本要点">#</a></h3>
+<p><strong>v1.4.2（本版）</strong>：<strong>GaussDB 官方文档集随部署自动装上</strong>——作为标准知识库发布在镜像 <code>gaussdb-agent-kbstd</code> 里，<code>kubectl apply</code> 后一次性 Job 把它装进知识库（逐文件核对、同版本跳过、不碰贵方自己的知识、不要任何网络），不再需要管理员从 CHM 导一遍。白名单、中间件、Secret、agent-config 都不变。</p>
+<p><strong>v1.4.1</strong>：只改知识库导入，白名单、中间件、Secret 都不变。</p>
+<ul><li><strong>内网网页导入知识库（网页剪藏）</strong>：需要登录的 Wiki / Confluence / 门户页面，由知识库管理员在已登录的浏览器里点书签剪藏； 模型按现有流程整理（故障记录按六要素成案例、规范条款化、手册 / 缺陷 / 基线 / Wiki 按八类模板），筛掉导航、评论与无关段落， 写入前给管理员确认清单；原始网页挂成 L3 证据，出处追得到原网页。第一次用时由模型一步一步带着装书签； 书签用不了时浏览器另存为 .mhtml 拖进剪藏页。允许剪藏的网站在 <code>agent-config</code> 的 <code>KB_CLIP_ORIGINS</code> 里配，空 = 关闭。</li><li><strong>扫描件 PDF 看图转录</strong>：每页渲染成图片由模型逐页转录（看不清的标出来问管理员，不猜），以前直接拒绝。</li><li><strong>PPT（.pptx）导入</strong>：每页的标题、要点、表格、备注与幻灯片里的图片。</li></ul>
+<p><strong>v1.4.0 起已有</strong>：</p>
+<ul><li><strong>固定池化</strong>（可选部署形态）与<strong>凭据代理</strong>（凭据不进模型容器）。</li><li><strong>回答模板化</strong>：健康检查、故障排查、SQL 优化、知识问答、WDR 解读、Top SQL / 慢 SQL 各有固定版式，兼顾开发人员与数据库工程师两种读者； 出自知识库的句子上色并注明出处（贵方知识蓝色 <code>#2f6fdb</code>，产品文档青色 <code>#0f7c86</code>）。</li><li><strong>知识库</strong>：八类知识类型、L0–L3 渐进式披露、按环境画像判断适用性、官方文档集（CHM）导入。</li><li><strong>取数修正</strong>：用演练库造出 34 类典型故障、两轮逐项核对后修正的健康检查、锁回看、内存分析、Top SQL、SQL 调优等问题。</li><li><strong>中间件接口路径前缀改为部署配置</strong>：<code>agent-config</code> 的 <code>GRMP_PATH_PREFIX</code>，必填。</li><li>诊断脚本白名单共 <strong>126 条</strong>（相对 v1.3.x 的 123 条：更新 12 条、新增 3 条）。</li></ul>
+<hr>
+<h2 id="2.-上线前准备">2. 上线前准备<a class="anchor" href="#2.-上线前准备">#</a></h2>
+<h3 id="2.1-各方分工">2.1 各方分工<a class="anchor" href="#2.1-各方分工">#</a></h3>
+<table>
+<tr><th>团队</th><th>要做的事</th><th>产出</th><th>本方案章节</th></tr>
+<tr><td>项目经理</td><td>组织各方、确认上线窗口、汇总第 2.3 节的值</td><td>填好的 2.3 表</td><td>2、3</td></tr>
+<tr><td>容器平台团队</td><td>命名空间、镜像仓库、支持 NetworkPolicy 的网络插件；构建与部署</td><td>运行中的网关与用户环境</td><td>4–9、11</td></tr>
+<tr><td>中间件团队</td><td>导入 126 条白名单脚本；给出接口地址、<strong>接口路径前缀</strong>、Appkey / SM2 私钥（要求签名时）；按人签发令牌</td><td>白名单导入自检通过；令牌</td><td>7、9</td></tr>
+<tr><td>存储团队</td><td>一个 NFS 导出目录（或 RWX StorageClass），建好 <code>users/</code>、<code>admins/</code>、<code>kb/</code> 三个目录，属主 uid/gid 1000</td><td>可挂载的 RWX 卷</td><td>8.2</td></tr>
+<tr><td>统一认证团队</td><td>认人后把工号与信任凭据加进请求头，转发到网关</td><td>带头的转发规则</td><td>13.1</td></tr>
+<tr><td>AI 平台团队</td><td>模型服务地址、Key、模型名；能否看图；（可选）embedding 端点</td><td>可连通的模型服务</td><td>8.4、8.5</td></tr>
+<tr><td>前端方</td><td>按《前端对接接口说明》接入对话、报告、大盘</td><td>前端站点</td><td>13.2</td></tr>
+<tr><td>DBA</td><td>评估 WDR 快照、语句历史、活跃会话采样的保留期（决定事后能回看多久，不阻塞上线）</td><td>参数结论</td><td>2.4</td></tr>
+<tr><td>知识库管理员</td><td>导入贵方规范、案例、手册，（可选）官方文档集；登记环境画像</td><td>可检索的知识库</td><td>12</td></tr>
+</table>
+<h3 id="2.2-环境要求">2.2 环境要求<a class="anchor" href="#2.2-环境要求">#</a></h3>
+<p><strong>构建机</strong>（Linux x86_64 / ARM，或 macOS）：Docker 20.10 以上（带 buildx）、git、curl、磁盘剩余 20 GB 以上。构建时要访问 <code>github.com</code>（代码、opencode 二进制）、Docker Hub（基础镜像 <code>python:3.12-slim-bookworm</code>）、<code>deb.debian.org</code>、<code>pypi.org</code> / <code>files.pythonhosted.org</code>、<code>models.dev</code>。 构建机不能上外网时，见第 5.3 节离线方式。</p>
+<p><strong>Kubernetes 集群</strong>：</p>
+<table>
+<tr><th>要求</th><th>说明</th></tr>
+<tr><td>Kubernetes 1.24 以上</td><td>实测过 1.36</td></tr>
+<tr><td>网络插件支持 NetworkPolicy</td><td>Calico / Cilium 等。不支持时策略不报错但不生效，第 8.6 节有验证方法</td></tr>
+<tr><td>一个 RWX 存储</td><td>NFS，或已有的 RWX StorageClass</td></tr>
+<tr><td>节点能拉镜像仓库</td><td>私有仓库配 <code>imagePullSecrets</code> 或节点级凭据；节点架构与镜像架构一致（可同时构建两种架构）</td></tr>
+<tr><td>跳板机</td><td>装 <code>kubectl</code>，有 <code>gaussdb-agent</code> 命名空间的管理权限；固定池化渲染要 Python 3.8+</td></tr>
+</table>
+<p><strong>资源估算</strong>：</p>
+<table>
+<tr><th>部分</th><th>预留（request）</th><th>上限（limit）</th></tr>
+<tr><td>网关 ×2</td><td>每个 0.1 核 / 128 MiB</td><td>每个 1 核 / 512 MiB</td></tr>
+<tr><td>按需模式：每个在线用户</td><td>约 0.27 核 / 560 MiB（opencode 0.25 核 / 512 MiB + 凭据代理）</td><td>opencode 2 核 / 2 GiB</td></tr>
+<tr><td>固定池化：每个槽位</td><td>0.1 核 / 768 MiB</td><td>2 核 / 2 GiB</td></tr>
+<tr><td>固定池化：每个 Pod 的管家</td><td>0.05 核 / 64 MiB</td><td>1 核 / 512 MiB</td></tr>
+</table>
+<p>单人实测：空闲 350–500 MiB；一次 WDR 分析峰值约 0.7 GiB、CPU 平均 0.3 核、峰值 0.9 核。按「同时在线人数 × 0.9 GiB、× 0.5 核，再留 30%」配节点； 固定池化默认规模 16 个 Pod × 8 个槽位（128 人）预留约 13.6 核 / 97 GiB。<strong>上线前在贵方环境装 metrics-server 复测。</strong> NAS 容量：每人的会话与报告一般在几十 MB 以内，知识库视导入量而定（官方文档集约数百 MB），建议起步 500 GiB。</p>
+<p><strong>出网</strong>（网络策略里要放行的地址）：</p>
+<table>
+<tr><th>从</th><th>到</th><th>端口</th></tr>
+<tr><td>网关</td><td>k8s apiserver 的真实地址（<code>kubectl -n default get endpoints kubernetes</code>）</td><td>443 / 6443</td></tr>
+<tr><td>用户环境、知识库导入环境</td><td>中间件</td><td>中间件端口</td></tr>
+<tr><td>用户环境、知识库导入环境</td><td>模型服务（公网时 <code>0.0.0.0/0</code>，或经 HTTPS 代理）</td><td>443 / 80</td></tr>
+<tr><td>全部</td><td>集群 DNS</td><td>53</td></tr>
+</table>
+<p>集群内的放行（网关 → 用户环境 4096 / 4097、网关 → 知识库导入环境 4095 / 4096）清单里已经写好，不用改。网页剪藏<strong>不需要</strong>给导入环境开任何内网出网。</p>
+<h3 id="2.3-需要准备的值">2.3 需要准备的值<a class="anchor" href="#2.3-需要准备的值">#</a></h3>
+<table>
+<tr><th>#</th><th>值</th><th>找谁要</th><th>用在</th></tr>
+<tr><td>1</td><td>镜像仓库地址 <code>REG</code> 与推送权限</td><td>容器平台</td><td>6、8.1</td></tr>
+<tr><td>2</td><td>NFS 服务器地址与导出路径（或 RWX StorageClass 名）</td><td>存储</td><td>8.2</td></tr>
+<tr><td>3</td><td>模型服务地址（以 <code>/v1</code> 结尾）、Key、模型名；能否看图</td><td>AI 平台</td><td>8.4、8.5</td></tr>
+<tr><td>4</td><td>中间件 IP 与端口</td><td>中间件</td><td>8.5、8.6</td></tr>
+<tr><td>5</td><td><strong>中间件接口路径前缀</strong>（形如 <code>/xxx/grmp/diagnostic/agent</code>）</td><td>中间件</td><td>8.5</td></tr>
+<tr><td>6</td><td>中间件要求签名时：Appkey 与 SM2 私钥；签名口径（userId、时间戳单位、格式、编码）</td><td>中间件</td><td>8.4、8.5</td></tr>
+<tr><td>7</td><td>第一个要开通的工号，及该工号的中间件令牌</td><td>中间件</td><td>9</td></tr>
+<tr><td>8</td><td>统一认证传工号用的请求头名（默认 <code>X-Agent-User</code>）、角色头名</td><td>统一认证</td><td>13.1</td></tr>
+<tr><td>9</td><td>知识库管理员的工号或角色名（默认角色 <code>kb-admin</code>）</td><td>项目经理</td><td>12</td></tr>
+<tr><td>10</td><td>前端部署位置（本集群 / 贵方门户）与站点前缀</td><td>前端方</td><td>13.2</td></tr>
+</table>
+<h3 id="2.4-上线前检查单">2.4 上线前检查单<a class="anchor" href="#2.4-上线前检查单">#</a></h3>
+<ul><li>☐ 2.3 表的值全部拿到</li><li>☐ 中间件已导入 126 条白名单脚本，自检 SQL 结果正确（第 7 章）</li><li>☐ NAS 三个目录已建、属主 1000:1000</li><li>☐ 集群网络插件执行 NetworkPolicy（第 8.6 节的实测为准）</li><li>☐ 镜像已推进贵方仓库，节点能拉到（两种架构的节点都要验）</li><li>☐ 跳板机能 <code>kubectl</code> 管理 <code>gaussdb-agent</code> 命名空间</li><li>☐ 统一认证的转发规则、信任凭据的保管人已确定</li><li>☐ DBA 对 WDR 快照保留期（<code>wdr_snapshot_retention_days</code>）、语句历史与活跃会话采样的保留期有结论（不阻塞上线；影响 SQL 优化趋势、时段锁回溯能看多远）</li><li>☐ 上线窗口、回滚负责人、验收人已确定</li></ul>
+<hr>
+<h2 id="3.-实施步骤总览">3. 实施步骤总览<a class="anchor" href="#3.-实施步骤总览">#</a></h2>
+<table>
+<tr><th>步</th><th>内容</th><th>负责方</th><th>大约用时</th><th>完成标志</th></tr>
+<tr><td>1</td><td>拉代码、切到发布标签</td><td>平台</td><td>1 分钟</td><td><code>git describe</code> 输出 <code>agent-v1.4.2</code></td></tr>
+<tr><td>2</td><td>构建 3 个镜像</td><td>平台</td><td>5–15 分钟</td><td>3 个镜像，镜像内容核对通过</td></tr>
+<tr><td>3</td><td>推进镜像仓库</td><td>平台</td><td>1–5 分钟</td><td>每个 push 返回 digest</td></tr>
+<tr><td>4</td><td>中间件导入白名单</td><td>中间件</td><td>30 分钟</td><td>自检：126 条，3 条新脚本在</td></tr>
+<tr><td>5</td><td>部署基础资源、Secret、配置、网络策略</td><td>平台</td><td>15–30 分钟</td><td>两个网关 <code>1/1 Running</code>，就绪日志正确</td></tr>
+<tr><td>6</td><td>开通第一个工号</td><td>平台 + 中间件</td><td>5 分钟</td><td><code>runtime-doctor</code> 全部正常</td></tr>
+<tr><td>7</td><td>命令行与对话验收</td><td>平台 + 验收人</td><td>15 分钟</td><td>第 10 章全部通过</td></tr>
+<tr><td>8</td><td>（可选）固定池化</td><td>平台</td><td>15 分钟</td><td>池子 Pod 全部 Running，<code>/admin/pool</code> 可达</td></tr>
+<tr><td>9</td><td>知识库初始化</td><td>知识库管理员</td><td>视导入量</td><td><code>kb.py health</code> 正常、检索能命中</td></tr>
+<tr><td>10</td><td>接入统一认证与前端</td><td>统一认证 + 前端方</td><td>视联调</td><td>经正式入口完成一次健康检查</td></tr>
+<tr><td>11</td><td>批量开通工号、正式上线</td><td>平台 + 中间件</td><td>视人数</td><td>首批用户可用</td></tr>
+</table>
+<hr>
+<h2 id="4.-拉代码">4. 拉代码<a class="anchor" href="#4.-拉代码">#</a></h2>
+<pre><code>git clone https://github.com/sqlrush/gh_gs_k8s_agent.git
+cd gh_gs_k8s_agent
+git checkout agent-v1.4.2
+git describe --tags          # 应输出 agent-v1.4.2
+TAG=agent-v1.4.2-oc1.18.27</code></pre>
+<p><strong>之后所有命令都在这个目录里执行。</strong> <code>oc1.18.27</code> 是镜像里的 opencode 版本。内网有代码托管时，可以把本仓库连同标签镜像到内网再拉。 各目录的作用见《代码结构说明》。对应《完整手册》第 2 章。</p>
+<hr>
+<h2 id="5.-构建镜像">5. 构建镜像<a class="anchor" href="#5.-构建镜像">#</a></h2>
+<p>三种方式任选其一。</p>
+<h3 id="5.1-方式-a-本机架构构建-构建机与集群节点同架构">5.1 方式 A：本机架构构建（构建机与集群节点同架构）<a class="anchor" href="#5.1-方式-a-本机架构构建-构建机与集群节点同架构">#</a></h3>
+<pre><code>bash scripts/build-images.sh "$TAG"
+docker images | grep "gaussdb-agent.*$TAG"     # 3 行:gateway、kb-import、runtime</code></pre>
+<p>核对镜像内容：</p>
+<pre><code>docker run --rm --entrypoint sh gaussdb-agent-runtime:$TAG -c 'opencode --version; ls -d /opt/agent/config/opencode/skills/gaussdb-* | wc -l; id'
+# 期望:1.18.27 / 18 / uid=1000(agent)
+docker run --rm --entrypoint sh gaussdb-agent-kb-import:$TAG -c 'ls /opt/agent/config/opencode/skills | grep gaussdb'
+# 期望:gaussdb-kb、gaussdb-kb-import、gaussdb-kb-init 三行
+docker run --rm gaussdb-agent-gateway:$TAG
+# 期望:「配置错误,网关拒绝启动:缺 GATEWAY_NAMESPACE……」——网关缺配置时刻意拒绝启动,说明镜像是好的</code></pre>
+<p>对应《完整手册》3.1–3.3。</p>
+<h3 id="5.2-方式-b-两种架构一次构建并直接推进仓库-正式发布推荐">5.2 方式 B：两种架构一次构建并直接推进仓库（正式发布推荐）<a class="anchor" href="#5.2-方式-b-两种架构一次构建并直接推进仓库-正式发布推荐">#</a></h3>
+<pre><code>bash scripts/build-images.sh "$TAG" --registry &lt;REG&gt; --platform linux/amd64,linux/arm64 --push
+docker buildx imagetools inspect &lt;REG&gt;/gaussdb-agent-runtime:$TAG     # 应看到 linux/amd64 与 linux/arm64 两行</code></pre>
+<p>Linux 构建机先装一次跨架构模拟：<code>docker run --privileged --rm tonistiigi/binfmt --install all</code>。用这种方式的跳过第 6 章。对应《完整手册》3.4。</p>
+<h3 id="5.3-方式-c-构建机不能上外网-离线包">5.3 方式 C：构建机不能上外网（离线包）<a class="anchor" href="#5.3-方式-c-构建机不能上外网-离线包">#</a></h3>
+<p>在一台能上网的机器上构建两种架构并打离线包，带进内网：</p>
+<pre><code>bash scripts/build-images.sh "$TAG"                                      # 本机架构
+bash scripts/build-images.sh "$TAG-amd64" --platform linux/amd64          # 另一种架构(本机是 arm64 时;反之换 arm64)
+bash scripts/package-images.sh "$TAG"                                    # → dist/gaussdb-agent-v1.4.2-oc1.18.27/</code></pre>
+<p>离线包里是两种架构的镜像 tar.gz（各带 sha256）、k8s 清单与文档。内网里：</p>
+<pre><code>sha256sum -c *.sha256
+gunzip -c gaussdb-agent-v1.4.2-oc1.18.27-&lt;架构&gt;.tar.gz | docker load</code></pre>
+<p>再按第 6 章推进内网仓库。</p>
+<h3 id="5.4-标准知识库镜像-不从源码构建-三种方式都要做">5.4 标准知识库镜像（不从源码构建，三种方式都要做）<a class="anchor" href="#5.4-标准知识库镜像-不从源码构建-三种方式都要做">#</a></h3>
+<p><code>gaussdb-agent-kbstd</code> 只装 GaussDB 官方文档集的标准知识库包。内容是官方文档的派生，<strong>只发布在我方镜像仓（GHCR 私有，按人开通）与离线包里、不进代码仓库</strong>：</p>
+<pre><code>docker pull ghcr.io/sqlrush/gaussdb-agent-kbstd:$TAG &amp;&amp; docker tag ghcr.io/sqlrush/gaussdb-agent-kbstd:$TAG gaussdb-agent-kbstd:$TAG
+# 或:从我方提供的离线包 docker load</code></pre>
+<p>对应《完整手册》3.5。</p>
+<hr>
+<h2 id="6.-推进镜像仓库">6. 推进镜像仓库<a class="anchor" href="#6.-推进镜像仓库">#</a></h2>
+<pre><code>REG=&lt;镜像仓库前缀&gt;            # 例如 registry.example.com/gaussdb-agent
+docker login ${REG%%/*}
+for img in runtime kb-import gateway kbstd; do
+  docker tag gaussdb-agent-$img:$TAG $REG/gaussdb-agent-$img:$TAG
+  docker push $REG/gaussdb-agent-$img:$TAG
+done</code></pre>
+<p>每个 push 最后一行是 <code>digest: sha256:...</code>；<code>denied</code> 是没有推送权限。对应《完整手册》第 4 章。</p>
+<hr>
+<h2 id="7.-中间件导入诊断脚本白名单-中间件团队">7. 中间件导入诊断脚本白名单（中间件团队）<a class="anchor" href="#7.-中间件导入诊断脚本白名单-中间件团队">#</a></h2>
+<p>用户环境里的技能只能按名字调用中间件里预先登记的脚本。<strong>白名单里没有的脚本，对应功能用不了</strong>（报「未注册脚本」或「脚本不存在」）。 全部 126 条都是只读查询，只访问系统视图与系统表，不读业务数据，不含 DML / DDL。文件都在本仓库 <code>docs/delivery/</code>：</p>
+<table>
+<tr><th>情况</th><th>导哪份</th><th>结果</th></tr>
+<tr><td><strong>第一次部署</strong></td><td><code>scripts.sql</code>（全量）</td><td>126 条</td></tr>
+<tr><td>已导入 123 条（v1.3.1 / v1.3.2）</td><td>先 <code>scripts-delta-20261024.sql</code>（更新 12 条），再 <code>scripts-delta-20261026.sql</code>（新增 3 条）</td><td>126 条</td></tr>
+<tr><td>已导入 118 条（v1.3.0）</td><td>先 <code>scripts-delta-20261022.sql</code>（新增 5 条），再上面两份</td><td>126 条</td></tr>
+<tr><td>已导入 105 条（v1.2.0 及更早）</td><td>依次 <code>scripts-delta-20261018.sql</code>（新增 13、更新 9）→ 20261022 → 20261024 → 20261026</td><td>126 条</td></tr>
+</table>
+<p>导入前确认两处与贵方规范对齐：<code>create_user</code> / <code>last_modify_user</code> 当前填 <code>'999999999'</code>，要求真实工号时统一替换； <code>id</code> 用 <code>grmp.script_config_seq.nextval</code>，不硬编码。</p>
+<p><strong>导入后自检</strong>：</p>
+<pre><code>SELECT count(*) FROM grmp.script_config WHERE scene = 'AGENT';                              -- 应为 126
+SELECT count(*) FROM grmp.script_config
+ WHERE script_name IN ('sqltune.stat_now', 'sqltune.stat_trend', 'sqltune.exec_history');    -- 应为 3</code></pre>
+<p>升级导了 <code>scripts-delta-20261024.sql</code> 的，再执行文件末尾「导入后自检」一节的 md5 核对语句，应返回 0 行。 每条脚本的用途、参数与 SQL 全文见附录 A 与《诊断脚本白名单清单》（<code>docs/delivery/白名单脚本清单.md</code>）。</p>
+<p>没导 20261026 那 3 条时其余功能不受影响，只是 SQL 优化回答的第一段写「现状数据暂不可得」。</p>
+<hr>
+<h2 id="8.-部署到-kubernetes-平台团队">8. 部署到 Kubernetes（平台团队）<a class="anchor" href="#8.-部署到-kubernetes-平台团队">#</a></h2>
+<p>在跳板机的仓库目录里执行，先定义与构建时相同的 <code>REG</code>、<code>TAG</code>。</p>
+<h3 id="8.1-清单指向镜像仓库">8.1 清单指向镜像仓库<a class="anchor" href="#8.1-清单指向镜像仓库">#</a></h3>
+<pre><code>sed -i "s#image: gaussdb-agent-gateway:.*#image: $REG/gaussdb-agent-gateway:$TAG#" k8s/base/gateway.yaml
+sed -i "s#image: gaussdb-agent-kbstd:.*#image: $REG/gaussdb-agent-kbstd:$TAG#" k8s/base/kbstd-install.yaml
+sed -i "s#image: gaussdb-agent-kb-import:.*#image: $REG/gaussdb-agent-kb-import:$TAG#" k8s/base/kbstd-install.yaml
+sed -i "s#  USER_IMAGE_REGISTRY: .*#  USER_IMAGE_REGISTRY: \"$REG\"#; s#  USER_IMAGE_TAG: .*#  USER_IMAGE_TAG: \"$TAG\"#" k8s/base/configmap-gateway.yaml
+grep -rn "image:\|USER_IMAGE_REGISTRY:\|USER_IMAGE_TAG:" k8s/base/ | grep -v ":\s*#" | grep -v example</code></pre>
+<p>应看到 5 行（含标准知识库安装 Job 的两处），地址都以 <code>REG</code> 开头、版本都是 <code>TAG</code>。<strong><code>USER_IMAGE_REGISTRY</code> 必须填</strong>：用户容器的镜像由网关按它现拼，留空时节点会去 Docker Hub 拉、用户一登录就卡住。 <strong>网关与用户镜像必须同一版本</strong>（用户 Pod 里的凭据代理跑的是用户镜像里的程序）。macOS 上 <code>sed -i</code> 写成 <code>sed -i ''</code>。对应《完整手册》5.1。</p>
+<h3 id="8.2-接上存储">8.2 接上存储<a class="anchor" href="#8.2-接上存储">#</a></h3>
+<p>集群已有 RWX StorageClass：把 <code>k8s/base/nas-pvc.yaml</code> 的 <code>storageClassName</code> 改成它。用 NFS：</p>
+<pre><code>cp k8s/base/nas-pv-nfs.example.yaml k8s/base/nas-pv-nfs.yaml
+vi k8s/base/nas-pv-nfs.yaml                  # 只改最后两行:server 与 path
+kubectl apply -f k8s/base/nas-pv-nfs.yaml</code></pre>
+<p>存储管理员在导出目录下先建好三个目录，属主 1000：</p>
+<pre><code>mkdir -p &lt;导出路径&gt;/users &lt;导出路径&gt;/admins &lt;导出路径&gt;/kb &amp;&amp; chown -R 1000:1000 &lt;导出路径&gt;</code></pre>
+<p>对应《完整手册》5.2。</p>
+<h3 id="8.3-创建基础资源">8.3 创建基础资源<a class="anchor" href="#8.3-创建基础资源">#</a></h3>
+<pre><code>kubectl apply -k k8s/base
+kubectl -n gaussdb-agent get pvc,pods</code></pre>
+<p>PVC <code>nas</code> 应为 <code>Bound</code>。两个 <code>gateway</code> Pod 此时 <code>CrashLoopBackOff</code> 属正常（还没建信任凭据，网关按设计拒绝启动）； <code>ImagePullBackOff</code> 是节点拉不到镜像。同时建了一次性 Job <code>kbstd-install-v1-4-2</code>，它的 Pod 变成 <code>Completed</code> 即官方文档集已装进知识库（第 12 章第 5 步）； NAS 还没接好时它会失败重试，接好后自己就过。对应《完整手册》5.3、5.7。</p>
+<h3 id="8.4-三个-secret">8.4 三个 Secret<a class="anchor" href="#8.4-三个-secret">#</a></h3>
+<pre><code>read -rs -p "模型服务 key: " V &amp;&amp; echo
+kubectl -n gaussdb-agent create secret generic model-api --from-literal=MODEL_API_KEY="$V"; unset V
+
+TRUST=$(openssl rand -hex 24); ADMIN=$(openssl rand -hex 24)
+kubectl -n gaussdb-agent create secret generic gateway-auth --from-literal=TRUST_SECRET="$TRUST" --from-literal=ADMIN_TOKEN="$ADMIN"
+printf '%s' "$TRUST" &gt; ~/.agent-trust &amp;&amp; printf '%s' "$ADMIN" &gt; ~/.agent-admin &amp;&amp; chmod 600 ~/.agent-trust ~/.agent-admin
+unset TRUST ADMIN
+
+# 中间件要求 SM2 签名时才需要:
+read -rs -p "SM2 私钥: " V &amp;&amp; echo
+kubectl -n gaussdb-agent create secret generic grmp-sm2 --from-literal=GRMP_SM2_PRIVATE_KEY="$V"; unset V</code></pre>
+<p><code>TRUST_SECRET</code> 要同时交给统一认证团队（转发时放进信任凭据头），<strong>两处保持一致，按贵方密钥管理规范保管</strong>； <code>ADMIN_TOKEN</code> 只给运维用。对应《完整手册》5.4。</p>
+<h3 id="8.5-填-agent-config">8.5 填 agent-config<a class="anchor" href="#8.5-填-agent-config">#</a></h3>
+<pre><code>kubectl -n gaussdb-agent patch configmap agent-config --type merge -p '{"data":{
+  "GRMP_API_HOST":"&lt;中间件IP&gt;","GRMP_API_PORT":"&lt;中间件端口&gt;","GRMP_PATH_PREFIX":"&lt;中间件接口路径前缀&gt;",
+  "MODEL_BASE_URL":"&lt;模型服务地址,以 /v1 结尾&gt;","MODEL_ID":"&lt;模型名&gt;","MODEL_PROVIDER_NAME":"&lt;显示名&gt;"}}'
+# 中间件要求签名时:
+kubectl -n gaussdb-agent patch configmap agent-config --type merge -p '{"data":{"GRMP_APPKEY":"&lt;中间件给的 Appkey&gt;"}}'</code></pre>
+<ul><li><strong><code>GRMP_PATH_PREFIX</code> 必填</strong>：技能调用中间件的两个接口是 <code>&lt;前缀&gt;/common-operations</code> 与 <code>&lt;前缀&gt;/common-operations/invoke</code>。以 <code>/</code> 开头、只写路径、末尾不带 <code>/</code>。 没填时登录数据库报「中间件接口路径前缀没有配置」；填错时中间件回 404。</li><li>中间件地址不能写 <code>localhost</code> / <code>127.0.0.1</code>（在容器里指容器自己）。</li><li>（可选）网页剪藏：<code>"KB_CLIP_ORIGINS":"https://wiki.&lt;内网域名&gt;,<a href="https://confluence.&lt;内网域名&gt;"">https://confluence.&lt;内网域名&gt;"</a></code>——允许剪藏的内网网站，每项只写「协议://主机[:端口]」， 不带路径；空 = 关闭。网关与导入环境读的是这同一份，改完重启网关。写错格式网关拒绝启动并在日志里指出是哪一项。</li><li>签名口径、实例别名、模型看图、大盘站点前缀等其余配置项见附录 B。改了配置之后，<strong>之后创建 / 重启的</strong>用户容器才读到新值。</li></ul>
+<p>对应《完整手册》5.5。</p>
+<h3 id="8.6-出网策略按实际地址改">8.6 出网策略按实际地址改<a class="anchor" href="#8.6-出网策略按实际地址改">#</a></h3>
+<p>清单里的出网地址段是占位值，要改 4 处：</p>
+<pre><code>kubectl -n default get endpoints kubernetes          # 查 apiserver 的真实地址
+APISERVER=&lt;上面查到的 IP&gt;
+GRMP_IP=&lt;中间件IP&gt;; GRMP_PORT=&lt;中间件端口&gt;
+MODEL_CIDR=0.0.0.0/0                                 # 模型服务在内网且地址固定时换成它的地址段
+kubectl -n gaussdb-agent patch networkpolicy gateway-policy --type json -p "[{\"op\":\"add\",\"path\":\"/spec/egress/3/to/-\",\"value\":{\"ipBlock\":{\"cidr\":\"$APISERVER/32\"}}}]"
+kubectl -n gaussdb-agent patch networkpolicy runtime-policy --type json -p "[{\"op\":\"replace\",\"path\":\"/spec/egress/1\",\"value\":{\"to\":[{\"ipBlock\":{\"cidr\":\"$GRMP_IP/32\"}}],\"ports\":[{\"port\":$GRMP_PORT,\"protocol\":\"TCP\"}]}},{\"op\":\"replace\",\"path\":\"/spec/egress/2/to\",\"value\":[{\"ipBlock\":{\"cidr\":\"$MODEL_CIDR\"}}]}]"
+kubectl -n gaussdb-agent patch networkpolicy kb-import-policy --type json -p "[{\"op\":\"replace\",\"path\":\"/spec/egress/1/to\",\"value\":[{\"ipBlock\":{\"cidr\":\"$MODEL_CIDR\"}}]}]"</code></pre>
+<p>多 master 的集群每个 apiserver 地址都要放行。出网要经 HTTPS 代理的，开通工号后用 <code>runtime-doctor.sh &lt;工号&gt; --fix --proxy &lt;代理IP:端口&gt;</code>。 <strong>一定要实测策略在生效</strong>（网络插件不支持时策略不报错、只是不生效）：按《完整手册》5.6 起两个临时 Pod，带用户容器标签的那个访问网关必须不通（<code>000</code>）。</p>
+<h3 id="8.7-启动网关">8.7 启动网关<a class="anchor" href="#8.7-启动网关">#</a></h3>
+<pre><code>kubectl -n gaussdb-agent rollout restart deploy/gateway
+kubectl -n gaussdb-agent rollout status deploy/gateway --timeout=180s
+kubectl -n gaussdb-agent logs -l app=agent-gateway --tail=2</code></pre>
+<p>最后一行形如：<code>网关就绪:0.0.0.0:8080 · 命名空间 gaussdb-agent · 用户镜像标签 agent-v1.4.2-oc1.18.27 · 诊断容器 按需建 · …· 信任来源 共享密钥 · 控制 API 已启用</code>。 两个 <code>gateway</code> 都是 <code>1/1 Running</code>。对应《完整手册》5.8。</p>
+<hr>
+<h2 id="9.-开通工号-平台-中间件">9. 开通工号（平台 + 中间件）<a class="anchor" href="#9.-开通工号-平台-中间件">#</a></h2>
+<p>开通一个工号 = 建这个工号的中间件令牌 + 用诊断脚本建好个人目录并做一遍检查：</p>
+<pre><code>STAFF=&lt;工号&gt;                       # 小写字母与数字
+read -rs -p "$STAFF 的中间件令牌: " V &amp;&amp; echo
+kubectl -n gaussdb-agent create secret generic grmp-token-$STAFF --from-literal=GRMP_AUTH_TOKEN="$V"; unset V
+bash k8s/tools/runtime-doctor.sh $STAFF --fix</code></pre>
+<p><code>runtime-doctor</code> 依次检查：① 配置与开通（模型、中间件地址与<strong>路径前缀</strong>、令牌）② NAS 个人目录 ③ 用户容器 ④ 从集群里实测连模型与中间件 ⑤ 出网策略 ⑥ 本机代理， 最后给出「诊断意见」；能自动修的（目录属主、代理）<code>--fix</code> 会修。期望结尾「全部正常」。对应《完整手册》5.9。</p>
+<p><strong>批量开通</strong>：对名单逐个执行上面三行（令牌由中间件团队按人签发后交平台）。<strong>停用工号</strong>：删掉 <code>grmp-token-&lt;工号&gt;</code> 与 <code>runtime-&lt;工号&gt;</code> 这个 Deployment； NAS 上的个人目录按贵方数据保留规定处理。</p>
+<hr>
+<h2 id="10.-验收">10. 验收<a class="anchor" href="#10.-验收">#</a></h2>
+<h3 id="10.1-命令行验收">10.1 命令行验收<a class="anchor" href="#10.1-命令行验收">#</a></h3>
+<pre><code>kubectl -n gaussdb-agent port-forward svc/gateway 18089:80           # 窗口保持打开
+# 另开一个终端:
+STAFF=&lt;工号&gt;; TRUST=$(cat ~/.agent-trust)
+curl -s http://127.0.0.1:18089/healthz; echo                                                         # {"ok": true, ...}
+curl -s -o /dev/null -w "%{http_code}\n" -H "X-Agent-User: $STAFF" http://127.0.0.1:18089/session    # 必须是 403
+curl -s -m 150 -o /dev/null -w "%{http_code}\n" -H "X-Agent-Trust: $TRUST" -H "X-Agent-User: $STAFF" http://127.0.0.1:18089/global/health   # 200
+kubectl -n gaussdb-agent get deploy runtime-$STAFF -o wide            # CONTAINERS 为 opencode,credproxy</code></pre>
+<p>对应《完整手册》5.10。</p>
+<h3 id="10.2-对话验收">10.2 对话验收<a class="anchor" href="#10.2-对话验收">#</a></h3>
+<p>统一认证还没接时，用仓库里的模拟 SSO 站在 SSO 的位置上（只用 Python 标准库）：</p>
+<pre><code>python3 k8s/tools/sso-sim.py 18090 18089 &lt;工号&gt; ~/.agent-trust</code></pre>
+<p>浏览器（同一台机器）打开 <code>http://127.0.0.1:18090/L2RhdGEvc3RhdGUvd29ya3NwYWNl</code>，新建会话，按下表逐项提问并核对：</p>
+<table>
+<tr><th>#</th><th>提问</th><th>通过标准</th></tr>
+<tr><td>1</td><td>登录 <code>&lt;数据库IP&gt;</code> 的 <code>&lt;库名&gt;</code> 库，然后做一次健康检查</td><td>开头有总体状态与短结论；四段：现象 → 根因和证据链 → 解决方案（P0/P1/P2）→ 总结和结论；每段有「应用视角」「数据库机制」；结尾是「需要就 … 吗？」；末尾有「打开报告」链接</td></tr>
+<tr><td>2</td><td>看一下最近 1 小时的 Top SQL</td><td>短结论 → 榜单 → 为什么排上来 → 建议下一步；榜下写明「已排除 N 条内核系统 SQL」（实例上跑过诊断时）</td></tr>
+<tr><td>3</td><td>对 sql_id <code>&lt;某条&gt;</code> 做调优</td><td>第一段有执行次数、平均 / 最大耗时与按小时的趋势；有执行计划解读与改写建议</td></tr>
+<tr><td>4</td><td>解读 <code>&lt;时间段&gt;</code> 的 WDR 报告</td><td>负载画像 → 问题与元凶 → 解决方案 → 总结和结论 → 附录</td></tr>
+<tr><td>5</td><td>问一个参数的默认值和本单位的要求（导入了知识库之后）</td><td>第一行「解答来源：…」；出自知识库的句子上色并注明出处，产品文档为青色</td></tr>
+<tr><td>6</td><td>让模型执行 <code>env</code> 或读取 <code>/proc</code></td><td>被拒绝，或看不到任何令牌、私钥、模型 Key</td></tr>
+</table>
+<p>报告接口核对：<code>curl -s <a href="http://127.0.0.1:18090/reports/health/targets.json">http://127.0.0.1:18090/reports/health/targets.json</a></code> 能看到刚才那次健康检查。测完删掉 <code>~/.agent-trust</code>。对应《完整手册》5.11。</p>
+<h3 id="10.3-上线验收标准">10.3 上线验收标准<a class="anchor" href="#10.3-上线验收标准">#</a></h3>
+<ul><li>☐ 第 10.1 节四条全部符合（尤其不带信任凭据必须 403）</li><li>☐ 第 8.6 节策略实测：用户容器访问网关不通</li><li>☐ 第 10.2 节 6 项全部通过</li><li>☐ 经贵方正式入口（统一认证 + 前端）完成一次健康检查，大盘能打开报告</li><li>☐ 知识库管理员能进入导入环境，<code>kb.py health</code> 正常（第 12 章）</li><li>☐ 官方文档集已自动装上：<code>kubectl -n gaussdb-agent logs job/kbstd-install-v1-4-2</code> 是 <code>[installed]</code> 或 <code>[skipped]</code>、6023 条；对话里问参数默认值能引用 <code>PD-G25132C-…</code></li><li>☐ （固定池化）<code>/admin/pool</code> 每个 Pod <code>reachable</code>，用户进入 1–2 秒，离开再回来 1 秒内</li></ul>
+<hr>
+<h2 id="11.-可选-固定池化">11. （可选）固定池化<a class="anchor" href="#11.-可选-固定池化">#</a></h2>
+<p>前提：按需模式已跑通第 10 章。</p>
+<pre><code># ① 控制密钥(网关与各 Pod 的管家共用)
+kubectl -n gaussdb-agent create secret generic sandbox-control --from-literal=KEY="$(openssl rand -hex 32)"
+# ② 渲染并部署池子(默认 16 个 Pod × 8 个槽位)
+python3 k8s/tools/render-pool.py --image $REG/gaussdb-agent-runtime:$TAG \
+    --pool-size 16 --slots-per-pod 8 \
+    --grmp-cidr $GRMP_IP/32 --grmp-port $GRMP_PORT --model-cidr $MODEL_CIDR --model-ports 443 &gt; pool.yaml
+kubectl apply -f pool.yaml
+kubectl -n gaussdb-agent get pods -l app=gaussdb-agent,role=pool          # 每个 9/9 Running
+# ③ 网关切到固定池化
+kubectl -n gaussdb-agent patch configmap gateway-config --type merge -p '{"data":{"RUNTIME_MODE":"pool"}}'
+kubectl -n gaussdb-agent rollout restart deploy/gateway
+# ④ 从按需模式切过来时,把按需的用户容器缩到 0(容器退出前把数据写回 NAS)
+kubectl -n gaussdb-agent scale deploy -l role=runtime --replicas=0</code></pre>
+<ul><li>规模：<code>--pool-size</code> 1–64、<code>--slots-per-pod</code> 1–16，单池最多 1024 个槽位；资源按第 2.2 节估。</li><li>池化参数（闲置转保留 30 分钟、保留 7 天、每 Pod 留 1 个空槽位、满员时提前转保留闲置 10 分钟以上的人等）在 <code>gateway-config</code>，见附录 B。</li><li>验证：<code>curl -s -H "X-Admin-Token: $(cat ~/.agent-admin)" <a href="http://127.0.0.1:18089/admin/pool">http://127.0.0.1:18089/admin/pool</a></code> 看每个 Pod 与槽位的状态。</li><li>切回按需：<code>kubectl delete -f pool.yaml</code>，<code>RUNTIME_MODE</code> 改回 <code>ondemand</code>，重启网关。数据都在 NAS，不丢。</li><li>集群有 gVisor / Kata 时，渲染加 <code>--runtime-class &lt;名字&gt;</code> 整池启用沙箱运行时。</li></ul>
+<p>对应《完整手册》5.12（含渲染参数全表）。</p>
+<hr>
+<h2 id="12.-知识库初始化-知识库管理员">12. 知识库初始化（知识库管理员）<a class="anchor" href="#12.-知识库初始化-知识库管理员">#</a></h2>
+<ol><li><strong>开通管理员</strong>：统一认证传的角色含 <code>kb-admin</code>（<code>gateway-config</code> 的 <code>KB_ADMIN_ROLES</code> 可改），或把工号登记进 ConfigMap <code>agent-roles</code> 的 <code>kb-admins</code>。 管理员访问 <code>/kb-import</code> 即进入自己的导入环境（模拟 SSO 下在命令末尾加参数 <code>kb-admin</code>）。</li><li><strong>建索引</strong>：没有向量库要初始化，索引是 NAS 上的 <code>kb/index/store.sqlite</code>，导入流程会自动建；要手工建一次： <code>kubectl -n gaussdb-agent exec deploy/kb-import-&lt;管理员工号&gt; -c opencode -- sh -c '. /data/env.sh &amp;&amp; python3 /opt/agent/config/opencode/skills/gaussdb-kb-import/scripts/kb.py index'</code></li><li><strong>导入贵方知识</strong>：在导入环境里把规范、案例（工单）、手册交给模型，按提示确认类型（八类：规范、案例、环境画像、指标基线、已知缺陷、处置手册、产品文档、Wiki）； 文件放进 NAS 的 <code>kb/inbox/uploads/</code>（或 <code>kubectl cp</code> 进导入容器的 <code>/nas/kb/inbox/uploads/</code>）。 扫描件 PDF 由模型逐页看图转录、PPT（.pptx）按页抽取，都要模型服务支持图片输入（<code>MODEL_INPUT_MODALITIES</code> 含 <code>image</code>）；老格式 <code>.ppt</code> / <code>.xls</code> / <code>.rtf</code> 先另存为新格式。</li><li><strong>登记环境画像</strong>（建议）：<code>kb.py profile --system &lt;系统代号&gt; --alias &lt;连接别名&gt; --version-string "&lt;登录输出里的版本串&gt;"</code>，补全后 <code>kb.py add</code>。 画像只写连接别名，不写 IP、主机名与口令。诊断时据此判断知识条目适不适用本实例。</li><li><strong>官方文档集（部署时已自动装上）</strong>：GaussDB 官方文档集（G25132C，25.1.32 集中式，6023 条）由第 8.3 节 <code>apply -k</code> 建的一次性 Job <code>kbstd-install-v1-4-2</code> 装进 <code>kb/docsets/</code>，不用再从 CHM 导入。核对：<code>kubectl -n gaussdb-agent logs job/kbstd-install-v1-4-2</code> 是 <code>[installed] G25132C 已装上 … 6023 条</code>；<code>ImagePullBackOff</code> 是没推标准知识库镜像或 8.1 没改到 <code>kbstd-install.yaml</code>；权限错误是 NAS 的 <code>kb/</code> 不是 uid 1000 可写，改好后 <code>kubectl -n gaussdb-agent delete job kbstd-install-v1-4-2 &amp;&amp; kubectl apply -f k8s/base/kbstd-install.yaml</code>。换别的版本的官方文档仍可让模型按「官方文档集」流程导入。</li><li><strong>从旧版本升级的知识库</strong>：跑一次 <code>kb.py migrate</code> → 确认清单 → <code>kb.py migrate --apply</code> → <code>kb.py validate &amp;&amp; kb.py index</code>。不迁移也能用，没类型的条目显示「未分类」。</li><li><strong>（可选）embedding</strong>：知识库配置里接上 embedding 端点后再跑一次 <code>kb.py index</code> 就补齐向量；不配时检索走词法 + 图，不影响使用。 embedding 服务在集群外时，网络策略要放行（固定池化渲染用 <code>--egress &lt;地址&gt;/32:&lt;端口&gt;</code>）。</li><li><strong>（可选）内网网页导入</strong>：<code>agent-config</code> 配好 <code>KB_CLIP_ORIGINS</code>（第 8.5 节）后，管理员在导入环境里说「导入这个网页 &lt;链接&gt;」， 模型会先核对剪藏开没开、网站在不在名单，再一步一步带着装书签（安装页 <code>/kb-import/clip/install</code>）；之后在已登录的页面上点书签「导入知识库」， 核对标题与字数后点「导入」，剪藏页自动在导入环境里新开会话整理。书签用不了时：浏览器「另存为 → 网页，单个文件（.mhtml）」，拖进剪藏页 <code>/kb-import/clip</code>。 不要把内网系统的 cookie、口令发给模型。</li></ol>
+<p>完成标志：<code>kb.py health</code> 状态行正常、八类知识有计数；对话里问一条已导入的规范能引用到，并上色注明出处。对应《完整手册》5.7、5.11。</p>
+<hr>
+<h2 id="13.-接入统一认证与前端">13. 接入统一认证与前端<a class="anchor" href="#13.-接入统一认证与前端">#</a></h2>
+<h3 id="13.1-统一认证-sso">13.1 统一认证（SSO）<a class="anchor" href="#13.1-统一认证-sso">#</a></h3>
+<ul><li>认完人之后，转发到网关时加两个请求头：工号头（默认 <code>X-Agent-User</code>，值为小写工号）与信任凭据头 <code>X-Agent-Trust</code>（值为第 8.4 节的 <code>TRUST_SECRET</code>）； 知识库管理员再带角色头（默认 <code>X-Agent-Roles</code>，值含 <code>kb-admin</code>）。头名可在 <code>gateway-config</code> 的 <code>USER_HEADER</code> / <code>ROLES_HEADER</code> 里改；也可以改为按来源网段信任（<code>TRUST_CIDRS</code>）。<strong>必须先剥掉客户端自带的同名头</strong>，否则用户能冒充别人。</li><li>反向代理只放行《前端对接接口说明》2.2 列出的 v1 接口范围。</li><li>详见《前端对接接口说明》第 1–2 章。</li></ul>
+<h3 id="13.2-前端">13.2 前端<a class="anchor" href="#13.2-前端">#</a></h3>
+<ul><li>前端部署进本集群：按 <code>k8s/base/frontend.example.yaml</code> 填上前端镜像后 <code>kubectl apply -f</code>，网关把 <code>/dash/*</code> 转给 Service <code>frontend</code>。</li><li>前端在贵方门户：<code>agent-config</code> 的 <code>GSDB_DASH_BASE_URL</code> 填门户上大盘的站点前缀，回答里的「打开报告」就指向那里。</li><li>回答里出自知识库的句子用 <code>&lt;font color=#2f6fdb&gt;…&lt;/font&gt;</code>、<code>&lt;font color=#0f7c86&gt;…&lt;/font&gt;</code> 上色，前端渲染时放行 <code>font</code> 的 <code>color</code> 属性（接口说明 3.5）。</li><li>后端不提供的三样（跨源访问、网关层的接口白名单、知识库文档上传接口）及处理方式见接口说明第 9 章。</li></ul>
+<hr>
+<h2 id="14.-升级">14. 升级<a class="anchor" href="#14.-升级">#</a></h2>
+<h3 id="14.1-从-v1.4.1-升级到-v1.4.2">14.1 从 v1.4.1 升级到 v1.4.2<a class="anchor" href="#14.1-从-v1.4.1-升级到-v1.4.2">#</a></h3>
+<p>只加了「GaussDB 官方文档集随部署自动装上」，<strong>白名单、Secret、中间件、agent-config 都不用动</strong>。</p>
+<table>
+<tr><th>步</th><th>动作</th><th>负责方</th></tr>
+<tr><td>1</td><td>按第 4–6 章拉 <code>agent-v1.4.2</code>、构建 3 个镜像，取标准知识库镜像（第 5.4 节），四个都推进内网仓库</td><td>平台</td></tr>
+<tr><td>2</td><td>换网关镜像与用户镜像标签（同一版本），重启网关（同 14.2 第 3 步）</td><td>平台</td></tr>
+<tr><td>3</td><td>第 8.1 节改好 <code>k8s/base/kbstd-install.yaml</code> 的两处镜像地址后：<code>kubectl apply -f k8s/base/kbstd-install.yaml</code>，并把 <code>networkpolicy.yaml</code> 里新增的 <code>kbstd-policy</code> 也 apply 上（只 apply 这两样即可，整个 <code>apply -k</code> 会把 ConfigMap 恢复成清单里的值）</td><td>平台</td></tr>
+<tr><td>4</td><td>核对：<code>kubectl -n gaussdb-agent logs job/kbstd-install-v1-4-2</code> 是 <code>[installed] G25132C 已装上 … 6023 条</code>（第 12 章）</td><td>平台 + 知识库管理员</td></tr>
+</table>
+<h3 id="14.2-从-v1.4.0-升级">14.2 从 v1.4.0 升级<a class="anchor" href="#14.2-从-v1.4.0-升级">#</a></h3>
+<p>只改知识库导入（网页剪藏、扫描件 PDF、PPT），<strong>白名单、Secret、中间件都不用动</strong>。按顺序执行；正在使用的人不受影响，之后登录的人用新版本。</p>
+<table>
+<tr><th>步</th><th>动作</th><th>负责方</th></tr>
+<tr><td>0</td><td>备份：<code>kubectl -n gaussdb-agent get configmap agent-config gateway-config agent-roles -o yaml &gt; backup-cm.yaml</code>；记下当前 <code>USER_IMAGE_TAG</code> 与网关镜像</td><td>平台</td></tr>
+<tr><td>1</td><td>按第 4–6 章拉 <code>agent-v1.4.2</code>、构建并推送 3 个镜像</td><td>平台</td></tr>
+<tr><td>2</td><td>把第 0 步备份里改过的配置值写进 <code>k8s/base/configmap-*.yaml</code>，再 <code>kubectl apply -k k8s/base</code>：网关多了两个读 <code>agent-config</code> 的环境变量（网页剪藏，都是可选），<code>kb-import-policy</code> 入站与 <code>gateway-policy</code> 出站多放行 4095（剪藏接收，只有网关能到）。第 8.6 节改过的出网地址要重新改一遍（<code>apply -k</code> 会恢复成清单里的占位值）</td><td>平台</td></tr>
+<tr><td>3</td><td>换网关镜像与用户镜像标签（<strong>两者必须同一版本</strong>），重启网关：<code>kubectl -n gaussdb-agent set image deploy/gateway gateway=$REG/gaussdb-agent-gateway:$TAG</code>；<code>kubectl -n gaussdb-agent patch configmap gateway-config --type merge -p "{\"data\":{\"USER_IMAGE_TAG\":\"$TAG\"}}"</code>；<code>kubectl -n gaussdb-agent rollout restart deploy/gateway</code></td><td>平台</td></tr>
+<tr><td>4</td><td><strong>删掉已有的知识库导入环境</strong>，让它下次按新模板建：<code>kubectl -n gaussdb-agent delete deploy,svc -l role=kb-import</code>（NAS 上的数据不动；网关只在导入环境不在时按模板新建，留着旧的就没有剪藏接收）</td><td>平台</td></tr>
+<tr><td>5</td><td>（按需）启用网页剪藏：第 8.5 节填 <code>KB_CLIP_ORIGINS</code>，重启网关</td><td>平台 + 知识库管理员</td></tr>
+<tr><td>6</td><td>按第 10 章验收；启用了剪藏的，再按第 12 章第 8 步剪藏一页内网网页</td><td>平台 + 知识库管理员</td></tr>
+</table>
+<p>固定池化：重新渲染 <code>pool.yaml</code>（换 <code>--image</code>），<code>kubectl apply -f pool.yaml</code>，再<strong>逐个</strong>删池子的 Pod 让它按新镜像重建（<code>OnDelete</code>，删 Pod 时在用的人先完整写回）。 本版诊断技能没有变化，池子不换镜像也能用，只是与网关、<code>USER_IMAGE_TAG</code> 的版本号不一致。</p>
+<h3 id="14.3-从-v1.3.x-升级">14.3 从 v1.3.x 升级<a class="anchor" href="#14.3-从-v1.3.x-升级">#</a></h3>
+<p>先按下表升到 v1.4.x 的形态（下表直接用 <code>agent-v1.4.2</code> 的镜像即可），再做 14.2 的第 4、5 步与 14.1 的第 3 步。</p>
+<table>
+<tr><th>步</th><th>动作</th><th>负责方</th></tr>
+<tr><td>0</td><td>备份：<code>kubectl -n gaussdb-agent get configmap agent-config gateway-config agent-roles -o yaml &gt; backup-cm.yaml</code>；记下当前 <code>USER_IMAGE_TAG</code> 与网关镜像</td><td>平台</td></tr>
+<tr><td>1</td><td>中间件导入两份白名单增量：<code>scripts-delta-20261024.sql</code> → <code>scripts-delta-20261026.sql</code>，自检 126 条（第 7 章）</td><td>中间件</td></tr>
+<tr><td>2</td><td><strong><code>agent-config</code> 加必填项 <code>GRMP_PATH_PREFIX</code></strong>（中间件接口路径前缀，与 v1.3.x 时一致，向中间件团队确认）：<code>kubectl -n gaussdb-agent patch configmap agent-config --type merge -p '{"data":{"GRMP_PATH_PREFIX":"&lt;前缀&gt;"}}'</code></td><td>平台</td></tr>
+<tr><td>3</td><td>按第 4–6 章拉 <code>agent-v1.4.2</code>、构建并推送 3 个镜像</td><td>平台</td></tr>
+<tr><td>4</td><td>把第 0 步备份里改过的配置值写进 <code>k8s/base/configmap-*.yaml</code>，再 <code>kubectl apply -k k8s/base</code>（<code>apply -k</code> 会把 ConfigMap 恢复成清单里的值）</td><td>平台</td></tr>
+<tr><td>5</td><td>换网关镜像与用户镜像标签（<strong>两者必须同一版本</strong>），重启网关：<code>kubectl -n gaussdb-agent set image deploy/gateway gateway=$REG/gaussdb-agent-gateway:$TAG</code>；<code>kubectl -n gaussdb-agent patch configmap gateway-config --type merge -p "{\"data\":{\"USER_IMAGE_TAG\":\"$TAG\"}}"</code>；<code>kubectl -n gaussdb-agent rollout restart deploy/gateway</code></td><td>平台</td></tr>
+<tr><td>6</td><td>知识库管理员在导入环境跑一次 <code>kb.py migrate</code> → 确认 → <code>kb.py migrate --apply</code> → <code>kb.py index</code></td><td>知识库管理员</td></tr>
+<tr><td>7</td><td>用过 v1.2.0「池化沙箱」的：手工删沙箱的 Pod、<code>sandbox-policy</code> 网络策略与共用令牌 Secret</td><td>平台</td></tr>
+<tr><td>8</td><td>按第 10 章验收</td><td>平台 + 验收人</td></tr>
+</table>
+<p>固定池化：重新渲染 <code>pool.yaml</code>（换 <code>--image</code>），<code>kubectl apply -f pool.yaml</code>，再<strong>逐个</strong>删池子的 Pod 让它按新镜像重建（<code>OnDelete</code>，删 Pod 时在用的人先完整写回）。 Secret 不用动：<code>model-api</code>、<code>grmp-sm2</code>、<code>grmp-token-&lt;工号&gt;</code> 照旧，只是注入凭据代理容器。</p>
+<hr>
+<h2 id="15.-回滚">15. 回滚<a class="anchor" href="#15.-回滚">#</a></h2>
+<table>
+<tr><th>部分</th><th>怎么回</th></tr>
+<tr><td>镜像</td><td>网关镜像与 <code>USER_IMAGE_TAG</code> 换回旧值、重启网关；之后登录的人用旧版本。NAS 上的数据在版本间兼容</td></tr>
+<tr><td>配置</td><td>用第 14 章第 0 步的备份 <code>kubectl apply -f backup-cm.yaml</code>；<code>GRMP_PATH_PREFIX</code> 留着无妨（旧版不读）</td></tr>
+<tr><td>白名单</td><td>一般不用回：新增的 3 条旧版不调用，更新的 12 条只修取数口径、输出列只增不减。唯一例外：<code>health.stale_stats</code> 新增了参数 <code>min_pages</code>，回到旧版后健康检查的「统计新鲜度」一项取不到；要恢复这一项，把这一条的正文与参数定义换回旧版 <code>scripts.sql</code> 的写法</td></tr>
+<tr><td>知识库</td><td>迁移只改条目的类型与专题字段，旧版照常读得懂；回滚后再跑一次 <code>kb.py index</code></td></tr>
+<tr><td>固定池化</td><td><code>kubectl delete -f pool.yaml</code>，<code>RUNTIME_MODE</code> 改回 <code>ondemand</code>，重启网关，即回到按需模式</td></tr>
+<tr><td>官方文档集（从 v1.4.2 回到 v1.4.1）</td><td>不用动：装好的文档集旧版照常能读。确实要卸掉整套：知识库管理员在导入环境 <code>kb.py docset retire G25132C</code> 再 <code>kb.py index</code></td></tr>
+<tr><td>网页剪藏（从 v1.4.1 回到 v1.4.0）</td><td>镜像换回即可；<code>KB_CLIP_ORIGINS</code> 留着无妨（旧版不读），网络策略多放行的 4095 也无害。知识库收件目录里没处理完的剪藏批次（<code>kb/inbox/clips/</code>）旧版不读，可以删掉</td></tr>
+</table>
+<hr>
+<h2 id="16.-运维要点">16. 运维要点<a class="anchor" href="#16.-运维要点">#</a></h2>
+<table>
+<tr><th>事项</th><th>做法</th></tr>
+<tr><td>某个人用不了</td><td><code>bash k8s/tools/runtime-doctor.sh &lt;工号&gt;</code>，按「诊断意见」执行；<code>--fix</code> 修目录属主与代理</td></tr>
+<tr><td>看网关日志</td><td><code>kubectl -n gaussdb-agent logs -l app=agent-gateway --tail=200</code></td></tr>
+<tr><td>看某人的容器</td><td><code>kubectl -n gaussdb-agent logs deploy/runtime-&lt;工号&gt; -c opencode</code>（凭据代理是 <code>-c credproxy</code>）</td></tr>
+<tr><td>用户容器的回收</td><td>按需模式闲置 30 分钟收起（<code>gateway-config</code> 的 <code>IDLE_SECONDS</code>），数据都在 NAS，下次登录约 8 秒重建</td></tr>
+<tr><td>改配置</td><td><code>kubectl patch configmap ...</code> 后，之后创建 / 重启的用户容器才生效；网关配置改完重启网关</td></tr>
+<tr><td>轮换密钥</td><td>模型 Key、SM2 私钥：更新对应 Secret 后重启用户容器；信任凭据：与统一认证同时更换 <code>gateway-auth</code> 并重启网关</td></tr>
+<tr><td>备份</td><td>NAS 按贵方规范做定期快照：<code>users/</code>（会话与报告）、<code>kb/</code>（知识库，索引可由 <code>kb.py index</code> 重建）</td></tr>
+<tr><td>扩容</td><td>按需模式随集群扩节点；固定池化改 <code>--pool-size</code> 重新渲染、<code>kubectl apply -f pool.yaml</code></td></tr>
+<tr><td>整体卸载</td><td><code>kubectl delete -f pool.yaml --ignore-not-found; kubectl delete namespace gaussdb-agent</code>（NAS 数据保留；PV 为 Retain，重新部署前解除旧绑定，见《完整手册》附录 B）</td></tr>
+</table>
+<hr>
+<h2 id="17.-常见问题">17. 常见问题<a class="anchor" href="#17.-常见问题">#</a></h2>
+<table>
+<tr><th>现象</th><th>原因</th><th>处理</th></tr>
+<tr><td>用户容器反复重启，日志 <code>mkdir: cannot create directory '/nas/me/...': Permission denied</code></td><td>个人目录被建成 root 属主</td><td><code>runtime-doctor.sh &lt;工号&gt; --fix</code></td></tr>
+<tr><td>登录后等 2 分钟 504；用户容器 <code>ImagePullBackOff</code>，镜像名不带仓库前缀</td><td><code>USER_IMAGE_REGISTRY</code> 没填</td><td>填上（8.1），重启网关，删掉那个用户的 deploy 后重新登录</td></tr>
+<tr><td>用户容器 <code>credproxy</code> 起不来，或连不上中间件 / 模型</td><td>网关与用户镜像版本不一致</td><td>两者用同一个 <code>TAG</code></td></tr>
+<tr><td>网关 <code>CrashLoopBackOff</code>，日志「配置错误,网关拒绝启动」</td><td>缺配置或 Secret</td><td>按日志补；8.4 之前出现属正常</td></tr>
+<tr><td>网关日志「连不上 k8s API」</td><td><code>gateway-policy</code> 没放行 apiserver 的真实地址</td><td>8.6 第一条</td></tr>
+<tr><td>登录数据库报「中间件接口路径前缀没有配置」</td><td><code>GRMP_PATH_PREFIX</code> 没填</td><td>8.5 填上，重启用户容器（固定池化重启池子的 Pod）</td></tr>
+<tr><td>登录数据库报「请求 …/common-operations 失败：HTTP 404」</td><td>路径前缀填错</td><td>向中间件团队核对</td></tr>
+<tr><td>技能报「未注册脚本」或「脚本不存在」</td><td>白名单没导或不全</td><td>第 7 章导入并自检</td></tr>
+<tr><td>SQL 优化第一段写「现状数据暂不可得」</td><td>20261026 增量没导</td><td>导 <code>scripts-delta-20261026.sql</code></td></tr>
+<tr><td><code>/dash/*</code> 回 502</td><td>前端没部署或 Service 名不对</td><td>13.2</td></tr>
+<tr><td>固定池化下请求回 <code>503 {"reason": "not_active"}</code></td><td>这个人的槽位已转保留，而这个请求是探活 / 事件流</td><td>正常；任一交互请求即恢复</td></tr>
+</table>
+<p>更多见《完整手册》第 7 章。</p>
+<hr>
+<h2 id="附录-a-诊断脚本白名单-126-条">附录 A：诊断脚本白名单（126 条）<a class="anchor" href="#附录-a-诊断脚本白名单-126-条">#</a></h2>
+<p>文件都在本仓库 <code>docs/delivery/</code>：全量 <code>scripts.sql</code>；升级增量 <code>scripts-delta-20261018.sql</code>、<code>20261022</code>、<code>20261024</code>、<code>20261026</code>； 逐条的用途、参数与 SQL 全文见《诊断脚本白名单清单》（<code>docs/delivery/白名单脚本清单.md</code>）。</p>
+<table>
+<tr><th>#</th><th>脚本</th><th>所属技能</th><th>用途</th><th>参数</th></tr>
+<tr><td>1</td><td><code>config.settings</code></td><td>参数体检</td><td>全量运行参数（含单位、默认值、生效方式），供参数体检比对基线</td><td>无</td></tr>
+<tr><td>2</td><td><code>explain.active_pid</code></td><td>执行计划</td><td>按 unique_sql_id 定位正在执行该 SQL 的会话(pid / query / query_start)</td><td><code>sql_id</code></td></tr>
+<tr><td>3</td><td><code>explain.from_history</code></td><td>执行计划</td><td>按 unique_query_id 从 SQL 历史里取最近一条完整语句</td><td><code>sid</code></td></tr>
+<tr><td>4</td><td><code>explain.from_statement</code></td><td>执行计划</td><td>按 unique_sql_id 从 SQL 统计视图里取语句正文</td><td><code>sid</code></td></tr>
+<tr><td>5</td><td><code>explain.kernel_funcs</code></td><td>执行计划</td><td>探测 GaussDB 私有内核函数(gs_get_explain / gs_get_kernel_info)是否存在,并带回 version()</td><td>无</td></tr>
+<tr><td>6</td><td><code>explain.multi_stmt_probe</code></td><td>执行计划</td><td>探测中间件能否在一条脚本里执行两条语句(SET 后 SELECT 1)</td><td>无</td></tr>
+<tr><td>7</td><td><code>explain.plan_from_history</code></td><td>执行计划</td><td>按 unique_query_id 从 SQL 历史里取最近一次真实执行计划(含执行时间、耗时、返回行数)</td><td><code>sid</code></td></tr>
+<tr><td>8</td><td><code>explain.plan_text</code></td><td>执行计划</td><td>取一条只读 SQL 的执行计划（TEXT 格式，不执行该 SQL）</td><td><code>sql</code></td></tr>
+<tr><td>9</td><td><code>explain.plan_text_analyze</code></td><td>执行计划</td><td>取一条只读 SQL 的执行计划（TEXT 格式；现场按客户只读要求把 ANALYZE 固定关闭，不执行该 SQL，结果与 plan_text 相同，是估算计划；保留此名只为兼容）</td><td><code>sql</code></td></tr>
+<tr><td>10</td><td><code>explain.plan_text_analyze_schema</code></td><td>执行计划</td><td>先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(TEXT格式;现场按客户只读要求 ANALYZE 固定关闭,估算计划)</td><td><code>schema</code>、<code>sql</code></td></tr>
+<tr><td>11</td><td><code>explain.plan_text_schema</code></td><td>执行计划</td><td>先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(TEXT格式,不执行该 SQL)</td><td><code>schema</code>、<code>sql</code></td></tr>
+<tr><td>12</td><td><code>explain.relation_schemas</code></td><td>执行计划</td><td>按表名查它们所在的 schema(贴文本没带 --schema 时推断 schema 用)</td><td><code>names</code></td></tr>
+<tr><td>13</td><td><code>explain.runtime_plan</code></td><td>执行计划</td><td>按后台线程 pid 取运行态执行计划(gs_get_explain(bigint),GaussDB 私有,505.2.1 实测签名;不执行 SQL)</td><td><code>pid</code></td></tr>
+<tr><td>14</td><td><code>explain.runtime_plan_int4</code></td><td>执行计划</td><td>按后台线程 pid 取运行态执行计划(gs_get_explain(integer),文档签名的内核用;不执行 SQL)</td><td><code>pid</code></td></tr>
+<tr><td>15</td><td><code>explain.session_by_pid</code></td><td>执行计划</td><td>按 pid 取会话当前语句(pid / query / query_start / state)</td><td><code>pid</code></td></tr>
+<tr><td>16</td><td><code>health.archive_mode</code></td><td>健康检查</td><td>归档模式是否开启</td><td>无</td></tr>
+<tr><td>17</td><td><code>health.bgwriter</code></td><td>健康检查</td><td>检查点计数（定时/请求触发）</td><td>无</td></tr>
+<tr><td>18</td><td><code>health.conn_concentration</code></td><td>健康检查</td><td>活跃连接是否集中在同一条语句上</td><td>无</td></tr>
+<tr><td>19</td><td><code>health.conn_states</code></td><td>健康检查</td><td>连接状态分布</td><td>无</td></tr>
+<tr><td>20</td><td><code>health.db_concurrency</code></td><td>健康检查</td><td>当前库的死锁与事务提交/回滚计数</td><td>无</td></tr>
+<tr><td>21</td><td><code>health.invalid_index</code></td><td>健康检查</td><td>失效索引数量</td><td>无</td></tr>
+<tr><td>22</td><td><code>health.live_counters</code></td><td>健康检查</td><td>此刻的库级累计计数（与 snap_counters 对应）及实例启动 / 统计重置时刻</td><td>无</td></tr>
+<tr><td>23</td><td><code>health.live_waits</code></td><td>健康检查</td><td>此刻的等待事件累计值（按等待类与事件）</td><td>无</td></tr>
+<tr><td>24</td><td><code>health.long_xact</code></td><td>健康检查</td><td>长事务与长时间未变状态的会话</td><td><code>limit</code></td></tr>
+<tr><td>25</td><td><code>health.overview</code></td><td>健康检查</td><td>实例概览（缓存命中率/连接数/恢复态/最老事务）</td><td>无</td></tr>
+<tr><td>26</td><td><code>health.partitions</code></td><td>健康检查</td><td>分区表的分区数量与分区策略</td><td>无</td></tr>
+<tr><td>27</td><td><code>health.prepared_xacts</code></td><td>健康检查</td><td>悬挂的两阶段事务数量</td><td>无</td></tr>
+<tr><td>28</td><td><code>health.replication</code></td><td>健康检查</td><td>主备复制状态与延迟</td><td>无</td></tr>
+<tr><td>29</td><td><code>health.slow_sql</code></td><td>健康检查</td><td>平均耗时超阈值的语句</td><td><code>threshold_ms</code>、<code>limit</code></td></tr>
+<tr><td>30</td><td><code>health.snap_counters</code></td><td>健康检查</td><td>指定快照时刻的库级累计计数（DB time / 事务 / 死锁 / 溢出 / 命中 / 检查点）</td><td><code>snap</code></td></tr>
+<tr><td>31</td><td><code>health.snap_waits</code></td><td>健康检查</td><td>指定快照时刻的等待事件累计值（按等待类与事件）</td><td><code>snap</code></td></tr>
+<tr><td>32</td><td><code>health.stale_stats</code></td><td>健康检查</td><td>表的统计信息新鲜度证据（页数漂移 + 统计列数 + 上次 ANALYZE）</td><td><code>min_rows</code>、<code>min_pages</code>、<code>schema_filter</code>、<code>limit</code></td></tr>
+<tr><td>33</td><td><code>health.stats_window</code></td><td>健康检查</td><td>统计计数器上次重置的时间与至今时长（解释一切累计值的前提）</td><td>无</td></tr>
+<tr><td>34</td><td><code>health.storage</code></td><td>健康检查</td><td>库与表空间的占用量（取不到剩余空间，见脚本注释）</td><td>无</td></tr>
+<tr><td>35</td><td><code>health.sync_commit</code></td><td>健康检查</td><td>同步提交配置与部署形态（判断主库会不会因等同步备而卡住）</td><td>无</td></tr>
+<tr><td>36</td><td><code>health.thread_pool</code></td><td>健康检查</td><td>线程池是否开启、池大小与真实会话数</td><td>无</td></tr>
+<tr><td>37</td><td><code>health.unused_index</code></td><td>健康检查</td><td>索引用量全局视图（含扫描次数、大小、是否约束背书、所属表的扫描分布）</td><td><code>min_bytes</code>、<code>schema_filter</code>、<code>limit</code></td></tr>
+<tr><td>38</td><td><code>health.wal_slots</code></td><td>健康检查</td><td>复制槽落后的 WAL 字节数与是否活跃</td><td>无</td></tr>
+<tr><td>39</td><td><code>lockwait.asp_pairs</code></td><td>锁等待</td><td>时段内的锁阻塞对(活跃会话采样:落表的 gs_asp + 内存里的 local_active_session):等待者、阻塞者、锁、锁对象、采到次数、首末次时间</td><td><code>begin_time</code>、<code>end_time</code>、<code>limit</code></td></tr>
+<tr><td>40</td><td><code>lockwait.asp_sessions</code></td><td>锁等待</td><td>时段内锁阻塞涉及的会话(活跃会话采样:落表的 gs_asp + 内存里的 local_active_session):最后状态、语句、应用、客户端、事务开始时间</td><td><code>begin_time</code>、<code>end_time</code>、<code>limit</code></td></tr>
+<tr><td>41</td><td><code>lockwait.asp_status</code></td><td>锁等待</td><td>活跃会话采样(ASP)的开关、采样/落表参数、保留天数,时段内落表与内存里各有多少样本、各覆盖到哪</td><td><code>begin_time</code>、<code>end_time</code></td></tr>
+<tr><td>42</td><td><code>lockwait.chain</code></td><td>锁等待</td><td>阻塞关系的边（会话 → 阻塞它的会话）</td><td>无</td></tr>
+<tr><td>43</td><td><code>lockwait.pairs</code></td><td>锁等待</td><td>锁堵塞的持有者/等待者成对明细（含双方锁模式、锁对象、等待时长、双方 SQL）</td><td><code>limit</code></td></tr>
+<tr><td>44</td><td><code>memanalyze.activity</code></td><td>内存分析</td><td>会话在跑什么（用于关联）</td><td>无</td></tr>
+<tr><td>45</td><td><code>memanalyze.cols_bare</code></td><td>内存分析</td><td>在候选模式里找某个表/视图的列清单</td><td><code>relname</code>、<code>schemas</code></td></tr>
+<tr><td>46</td><td><code>memanalyze.cols_qualified</code></td><td>内存分析</td><td>取某个 schema.table 的列清单</td><td><code>schema</code>、<code>relname</code></td></tr>
+<tr><td>47</td><td><code>memanalyze.context</code></td><td>内存分析</td><td>内存上下文占用 Top N</td><td><code>limit</code></td></tr>
+<tr><td>48</td><td><code>memanalyze.gucs</code></td><td>内存分析</td><td>与内存相关的 GUC 参数</td><td>无</td></tr>
+<tr><td>49</td><td><code>memanalyze.instance</code></td><td>内存分析</td><td>实例级内存分布</td><td>无</td></tr>
+<tr><td>50</td><td><code>memanalyze.session</code></td><td>内存分析</td><td>会话级内存 Top N</td><td><code>limit</code></td></tr>
+<tr><td>51</td><td><code>memanalyze.wlm_operator</code></td><td>内存分析</td><td>算子级资源跟踪（实时）</td><td><code>limit</code></td></tr>
+<tr><td>52</td><td><code>memanalyze.wlm_operator_hist</code></td><td>内存分析</td><td>算子级资源跟踪（历史）</td><td><code>limit</code></td></tr>
+<tr><td>53</td><td><code>memanalyze.wlm_sql</code></td><td>内存分析</td><td>SQL 级资源跟踪（实时）</td><td><code>limit</code></td></tr>
+<tr><td>54</td><td><code>memanalyze.wlm_sql_hist</code></td><td>内存分析</td><td>SQL 级资源跟踪（历史）</td><td><code>limit</code></td></tr>
+<tr><td>55</td><td><code>procinfo.key_gucs</code></td><td>存储过程信息</td><td>与执行计划相关的关键 GUC 参数</td><td>无</td></tr>
+<tr><td>56</td><td><code>procinfo.locate_context</code></td><td>存储过程信息</td><td>过程找不到时的排查:当前库、当前账号与实例上的库清单</td><td>无</td></tr>
+<tr><td>57</td><td><code>procinfo.locate_schema</code></td><td>存储过程信息</td><td>过程找不到时的排查:目标 schema 在不在本库、执行账号有没有 USAGE 权限</td><td><code>schema</code></td></tr>
+<tr><td>58</td><td><code>procinfo.locate_search</code></td><td>存储过程信息</td><td>过程找不到时的排查:按名字模糊搜过程(schema 不可见时 nspname 为空)与包</td><td><code>name</code>、<code>package</code></td></tr>
+<tr><td>59</td><td><code>procinfo.proc_def</code></td><td>存储过程信息</td><td>按名字取存储过程/函数的定义(源码 + 语言 + 形参 + 所属包);支持包内过程与按包名过滤</td><td><code>name</code>、<code>schema</code>、<code>package</code></td></tr>
+<tr><td>60</td><td><code>proctune.column_stats</code></td><td>存储过程调优</td><td>游标 SQL 涉及的表的列级统计信息（证据包</td><td><code>names</code></td></tr>
+<tr><td>61</td><td><code>proctune.db_version</code></td><td>存储过程调优</td><td>数据库版本串（证据包的 Environment 一节）</td><td>无</td></tr>
+<tr><td>62</td><td><code>proctune.indexes</code></td><td>存储过程调优</td><td>游标 SQL 涉及的表上的索引定义（证据包</td><td><code>names</code></td></tr>
+<tr><td>63</td><td><code>proctune.key_gucs</code></td><td>存储过程调优</td><td>与执行计划相关的关键 GUC 参数</td><td>无</td></tr>
+<tr><td>64</td><td><code>proctune.locate_context</code></td><td>存储过程调优</td><td>过程找不到时的排查:当前库、当前账号与实例上的库清单</td><td>无</td></tr>
+<tr><td>65</td><td><code>proctune.locate_schema</code></td><td>存储过程调优</td><td>过程找不到时的排查:目标 schema 在不在本库、执行账号有没有 USAGE 权限</td><td><code>schema</code></td></tr>
+<tr><td>66</td><td><code>proctune.locate_search</code></td><td>存储过程调优</td><td>过程找不到时的排查:按名字模糊搜过程(schema 不可见时 nspname 为空)与包</td><td><code>name</code>、<code>package</code></td></tr>
+<tr><td>67</td><td><code>proctune.plan_text</code></td><td>存储过程调优</td><td>取一条只读 SQL 的执行计划（TEXT 格式，不执行该 SQL）</td><td><code>sql</code></td></tr>
+<tr><td>68</td><td><code>proctune.plan_text_analyze</code></td><td>存储过程调优</td><td>取一条只读 SQL 的执行计划（TEXT 格式；现场按客户只读要求把 ANALYZE 固定关闭，不执行该 SQL，结果与 plan_text 相同，是估算计划；保留此名只为兼容）</td><td><code>sql</code></td></tr>
+<tr><td>69</td><td><code>proctune.plan_text_analyze_schema</code></td><td>存储过程调优</td><td>先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(TEXT格式;现场按客户只读要求 ANALYZE 固定关闭,估算计划)</td><td><code>schema</code>、<code>sql</code></td></tr>
+<tr><td>70</td><td><code>proctune.plan_text_schema</code></td><td>存储过程调优</td><td>先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(TEXT格式,不执行该 SQL)</td><td><code>schema</code>、<code>sql</code></td></tr>
+<tr><td>71</td><td><code>proctune.proc_def</code></td><td>存储过程调优</td><td>按名字取存储过程/函数的定义(源码 + 语言 + 形参 + 所属包);支持包内过程与按包名过滤</td><td><code>name</code>、<code>schema</code>、<code>package</code></td></tr>
+<tr><td>72</td><td><code>proctune.sql_from_history</code></td><td>存储过程调优</td><td>按 unique_query_id 从 SQL 历史里取最近一条完整语句</td><td><code>sid</code></td></tr>
+<tr><td>73</td><td><code>proctune.sql_from_statement</code></td><td>存储过程调优</td><td>按 unique_sql_id 从 SQL 统计视图里取语句正文</td><td><code>sid</code></td></tr>
+<tr><td>74</td><td><code>proctune.tables</code></td><td>存储过程调优</td><td>游标 SQL 涉及的表的页数/行数/大小（证据包</td><td><code>names</code></td></tr>
+<tr><td>75</td><td><code>slowsql.slow_sql</code></td><td>慢 SQL</td><td>查询平均耗时超阈值的 SQL（dbe_perf.statement）</td><td><code>threshold_ms</code>、<code>begin_time</code>、<code>limit</code></td></tr>
+<tr><td>76</td><td><code>sqlfetch.from_history</code></td><td>SQL 全文</td><td>按 unique_query_id 从 SQL 历史里取最近一条完整语句</td><td><code>sid</code></td></tr>
+<tr><td>77</td><td><code>sqlfetch.from_statement</code></td><td>SQL 全文</td><td>按 unique_sql_id 从 SQL 统计视图里取语句正文</td><td><code>sid</code></td></tr>
+<tr><td>78</td><td><code>sqlreview.from_history</code></td><td>SQL 审核</td><td>按 unique_query_id 从 SQL 历史里取最近一条完整语句</td><td><code>sid</code></td></tr>
+<tr><td>79</td><td><code>sqlreview.from_statement</code></td><td>SQL 审核</td><td>按 unique_sql_id 从 SQL 统计视图里取语句正文</td><td><code>sid</code></td></tr>
+<tr><td>80</td><td><code>sqlreview.indexes</code></td><td>SQL 审核</td><td>某模式下的索引清单（列顺序/唯一性/扫描次数）</td><td><code>schema</code></td></tr>
+<tr><td>81</td><td><code>sqlreview.tables</code></td><td>SQL 审核</td><td>某模式下的表清单（主键/外键/列名）</td><td><code>schema</code></td></tr>
+<tr><td>82</td><td><code>sqlreview.top_sql</code></td><td>SQL 审核</td><td>按总耗时排序的 Top N 线上语句（供静态审查用）</td><td><code>limit</code></td></tr>
+<tr><td>83</td><td><code>sqltune.column_stats</code></td><td>SQL 调优</td><td>SQL 涉及的表的列统计信息（证据包</td><td><code>names</code></td></tr>
+<tr><td>84</td><td><code>sqltune.column_types</code></td><td>SQL 调优</td><td>占位符比较列的真实类型（替换前探测，让合成值类型正确）</td><td><code>tables</code>、<code>columns</code></td></tr>
+<tr><td>85</td><td><code>sqltune.exec_history</code></td><td>SQL 调优</td><td>按 unique_query_id 取近 N 天每小时的执行次数、平均 / 最大耗时与执行计划指纹(计划只在变化时给出)</td><td><code>sid</code>、<code>days</code></td></tr>
+<tr><td>86</td><td><code>sqltune.from_history</code></td><td>SQL 调优</td><td>按 unique_query_id 从 SQL 历史里取最近一条完整语句</td><td><code>sid</code></td></tr>
+<tr><td>87</td><td><code>sqltune.from_statement</code></td><td>SQL 调优</td><td>按 unique_sql_id 从 SQL 统计视图里取语句正文</td><td><code>sid</code></td></tr>
+<tr><td>88</td><td><code>sqltune.indexes</code></td><td>SQL 调优</td><td>SQL 涉及的表上已有的索引（证据包</td><td><code>names</code></td></tr>
+<tr><td>89</td><td><code>sqltune.key_gucs</code></td><td>SQL 调优</td><td>与执行计划相关的关键 GUC 参数（证据包</td><td>无</td></tr>
+<tr><td>90</td><td><code>sqltune.plan_json</code></td><td>SQL 调优</td><td>取一条只读 SQL 的执行计划（JSON 格式，不执行该 SQL；代价推演用）</td><td><code>sql</code></td></tr>
+<tr><td>91</td><td><code>sqltune.plan_json_schema</code></td><td>SQL 调优</td><td>先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(JSON格式,不执行该 SQL;代价推演用)</td><td><code>schema</code>、<code>sql</code></td></tr>
+<tr><td>92</td><td><code>sqltune.plan_text</code></td><td>SQL 调优</td><td>取一条只读 SQL 的执行计划（TEXT 格式，不执行该 SQL）</td><td><code>sql</code></td></tr>
+<tr><td>93</td><td><code>sqltune.plan_text_analyze</code></td><td>SQL 调优</td><td>取一条只读 SQL 的执行计划（TEXT 格式；现场按客户只读要求把 ANALYZE 固定关闭，不执行该 SQL，结果与 plan_text 相同，是估算计划；保留此名只为兼容）</td><td><code>sql</code></td></tr>
+<tr><td>94</td><td><code>sqltune.plan_text_analyze_schema</code></td><td>SQL 调优</td><td>先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(TEXT格式;现场按客户只读要求 ANALYZE 固定关闭,估算计划)</td><td><code>schema</code>、<code>sql</code></td></tr>
+<tr><td>95</td><td><code>sqltune.plan_text_schema</code></td><td>SQL 调优</td><td>先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(TEXT格式,不执行该 SQL)</td><td><code>schema</code>、<code>sql</code></td></tr>
+<tr><td>96</td><td><code>sqltune.stat_now</code></td><td>SQL 调优</td><td>按 unique_sql_id 取这条语句自统计清零以来的执行次数、平均 / 最大 / 最小耗时与 CPU、数据 IO 时间</td><td><code>sid</code></td></tr>
+<tr><td>97</td><td><code>sqltune.stat_trend</code></td><td>SQL 调优</td><td>按 unique_sql_id 取近 N 天每个 WDR 快照时刻这条语句的累计执行次数与总耗时(用于按小时的趋势)</td><td><code>sid</code>、<code>days</code></td></tr>
+<tr><td>98</td><td><code>sqltune.stats_freshness</code></td><td>SQL 调优</td><td>SQL 涉及的表的统计信息新鲜度（推演前置门，不新鲜则不出代价结论）</td><td><code>names</code></td></tr>
+<tr><td>99</td><td><code>sqltune.tables</code></td><td>SQL 调优</td><td>SQL 涉及的表的页数/行数/大小（证据包</td><td><code>names</code></td></tr>
+<tr><td>100</td><td><code>sqltune.version</code></td><td>SQL 调优</td><td>数据库版本（证据包的环境行）</td><td>无</td></tr>
+<tr><td>101</td><td><code>topproc.top_procs</code></td><td>Top 存储过程</td><td>资源消耗最高的存储过程/函数（pg_stat_user_functions）</td><td><code>order</code>、<code>limit</code></td></tr>
+<tr><td>102</td><td><code>topsql.snap_statement</code></td><td>Top SQL</td><td>指定快照时刻的语句累计值（按 sql_id 聚合），用于时间段 Top SQL</td><td><code>snap</code>、<code>limit</code></td></tr>
+<tr><td>103</td><td><code>topsql.top_sql</code></td><td>Top SQL</td><td>资源消耗最高的语句（dbe_perf.statement）</td><td><code>order</code>、<code>limit</code></td></tr>
+<tr><td>104</td><td><code>vacuum.autovac_settings</code></td><td>vacuum</td><td>autovacuum / vacuum_cost 相关 GUC 现值</td><td>无</td></tr>
+<tr><td>105</td><td><code>vacuum.autovac_workers</code></td><td>vacuum</td><td>当前正在执行的 autovacuum worker</td><td>无</td></tr>
+<tr><td>106</td><td><code>vacuum.bloat_estimate</code></td><td>vacuum</td><td>表膨胀估算的输入（页数、行数、平均行宽、真实大小）</td><td><code>limit</code></td></tr>
+<tr><td>107</td><td><code>vacuum.dead_tuples</code></td><td>vacuum</td><td>用户表死元组清单（含存活/死元组数、表大小、autovacuum 服务历史）</td><td><code>limit</code></td></tr>
+<tr><td>108</td><td><code>vacuum.freeze_age</code></td><td>vacuum</td><td>每个库的事务号回卷水位（frozenxid 落后当前快照多少）</td><td>无</td></tr>
+<tr><td>109</td><td><code>vacuum.kernel_info</code></td><td>vacuum</td><td>内核事务水位(gs_get_kernel_info,GaussDB 私有):XACT / STANDBY / UNDO 各模块内存态指标</td><td>无</td></tr>
+<tr><td>110</td><td><code>vacuum.oldest_xmin</code></td><td>vacuum</td><td>卡住死元组回收的三类根因（长事务 / 两阶段事务 / 复制槽）</td><td>无</td></tr>
+<tr><td>111</td><td><code>waitevent.events</code></td><td>等待事件</td><td>窗口内等待事件下钻明细（snap_global_wait_events，按具体 event 聚合，非仅 wait_class）</td><td><code>b</code>、<code>e</code>、<code>top</code></td></tr>
+<tr><td>112</td><td><code>waitevent.instance_time</code></td><td>等待事件</td><td>窗口内 DB time 各项的增量（snap_global_instance_time 后减前）</td><td><code>b</code>、<code>e</code></td></tr>
+<tr><td>113</td><td><code>wdr.cache</code></td><td>WDR 报告</td><td>窗口内物理读最多的表（snap_summary_statio_all_tables）</td><td><code>b</code>、<code>e</code>、<code>top</code></td></tr>
+<tr><td>114</td><td><code>wdr.checkpoint</code></td><td>WDR 报告</td><td>窗口内检查点次数增量（定时触发 / 请求触发）</td><td><code>b</code>、<code>e</code></td></tr>
+<tr><td>115</td><td><code>wdr.db_stat</code></td><td>WDR 报告</td><td>窗口内库级统计增量（提交/回滚/死锁/临时文件/缓存）</td><td><code>b</code>、<code>e</code></td></tr>
+<tr><td>116</td><td><code>wdr.db_summary</code></td><td>WDR 报告</td><td>窗口内库级提交数与缓存读写增量</td><td><code>b</code>、<code>e</code></td></tr>
+<tr><td>117</td><td><code>wdr.file_io</code></td><td>WDR 报告</td><td>窗口内物理读写最多的文件（snap_summary_file_iostat）</td><td><code>b</code>、<code>e</code>、<code>top</code></td></tr>
+<tr><td>118</td><td><code>wdr.load_profile</code></td><td>WDR 报告</td><td>【已弃用,勿用】窗口内 DB time 与 CPU time 增量(snap_summary_statement,内连接会漏语句)</td><td><code>b</code>、<code>e</code></td></tr>
+<tr><td>119</td><td><code>wdr.native_report</code></td><td>WDR 报告</td><td>调用原生 WDR 报告生成（留底/审计用，失败不影响主流程）</td><td><code>begin</code>、<code>end</code>、<code>scope</code>、<code>node</code></td></tr>
+<tr><td>120</td><td><code>wdr.node_name</code></td><td>WDR 报告</td><td>当前节点名</td><td>无</td></tr>
+<tr><td>121</td><td><code>wdr.plan_in_window</code></td><td>WDR 报告</td><td>按 unique_query_id 取 WDR 窗口内最近一次真实执行计划(含执行时间、耗时、返回行数)</td><td><code>sid</code>、<code>begin_time</code>、<code>end_time</code></td></tr>
+<tr><td>122</td><td><code>wdr.snapshots</code></td><td>WDR 报告</td><td>最近的快照列表</td><td><code>limit</code></td></tr>
+<tr><td>123</td><td><code>wdr.top_sql</code></td><td>WDR 报告</td><td>窗口内耗时增量最大的语句</td><td><code>b</code>、<code>e</code>、<code>top</code></td></tr>
+<tr><td>124</td><td><code>wdr.waits</code></td><td>WDR 报告</td><td>窗口内等待类聚合（snap_global_wait_events）</td><td><code>b</code>、<code>e</code>、<code>top</code></td></tr>
+<tr><td>125</td><td><code>wdr.wdr_enabled</code></td><td>WDR 报告</td><td>WDR 快照功能是否开启</td><td>无</td></tr>
+<tr><td>126</td><td><code>wdr.window</code></td><td>WDR 报告</td><td>快照窗口的起止时间与时长</td><td><code>begin</code>、<code>end</code></td></tr>
+</table>
+<h3 id="sql-全文">SQL 全文<a class="anchor" href="#sql-全文">#</a></h3>
+<p>逐条 SQL 全文见《诊断脚本白名单清单》；在线版本在下面按技能分组列出，点开查看。</p>
+<p>下面是 <code>scripts.sql</code> 里 126 条脚本的 SQL 正文（导什么就列什么），点开查看。下载：<a href="../../delivery/scripts.sql">scripts.sql（全量）</a>、<a href="../../delivery/scripts-delta-20261024.sql">scripts-delta-20261024.sql</a>、<a href="../../delivery/scripts-delta-20261026.sql">scripts-delta-20261026.sql</a>、<a href="../../delivery/scripts-delta-20261022.sql">scripts-delta-20261022.sql</a>、<a href="../../delivery/scripts-delta-20261018.sql">scripts-delta-20261018.sql</a>。</p>
+<div class="sqlgroup"><h4>参数体检（<code>config</code>，1 条）</h4>
+<details><summary>1. <code>config.settings</code> — 全量运行参数（含单位、默认值、生效方式），供参数体检比对基线</summary><div class="params">参数：无</div><pre><code>SELECT name,
+       COALESCE(setting,'')    AS setting,
+       COALESCE(unit,'')       AS unit,
+       COALESCE(vartype,'')    AS vartype,
+       COALESCE(boot_val,'')   AS boot_val,
+       COALESCE(reset_val,'')  AS reset_val,
+       COALESCE(context,'')    AS context,
+       COALESCE(source,'')     AS source,
+       COALESCE(min_val,'')    AS min_val,
+       COALESCE(max_val,'')    AS max_val,
+       COALESCE(enumvals::text,'') AS enumvals,
+       COALESCE(category,'')   AS category,
+       COALESCE(short_desc,'') AS short_desc
+  FROM pg_settings
+ ORDER BY name;</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>执行计划（<code>explain</code>，14 条）</h4>
+<details><summary>2. <code>explain.active_pid</code> — 按 unique_sql_id 定位正在执行该 SQL 的会话(pid / query / query_start)</summary><div class="params">参数：<code>sql_id</code>（INTEGER）：unique_sql_id(整数,可为负)</div><pre><code>SELECT pid, unique_sql_id, query, query_start
+  FROM pg_stat_activity
+ WHERE unique_sql_id = {{sql_id}}
+   AND state = 'active'
+   AND pid &lt;&gt; pg_backend_pid()
+ ORDER BY query_start
+ LIMIT 1;</code></pre></details>
+<details><summary>3. <code>explain.from_history</code> — 按 unique_query_id 从 SQL 历史里取最近一条完整语句</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_query_id（整数，可能为负）</div><pre><code>SELECT schema_name, query
+FROM dbe_perf.statement_history
+WHERE unique_query_id = {{sid}}
+  AND query NOT LIKE '/* missing SQL statement%'
+ORDER BY start_time DESC
+LIMIT 1;</code></pre></details>
+<details><summary>4. <code>explain.from_statement</code> — 按 unique_sql_id 从 SQL 统计视图里取语句正文</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_sql_id（整数，可能为负）</div><pre><code>SELECT query, user_name FROM dbe_perf.statement
+WHERE unique_sql_id = {{sid}}
+  AND query IS NOT NULL
+  AND LENGTH(TRIM(query)) &gt; 0
+LIMIT 1;</code></pre></details>
+<details><summary>5. <code>explain.kernel_funcs</code> — 探测 GaussDB 私有内核函数(gs_get_explain / gs_get_kernel_info)是否存在,并带回 version()</summary><div class="params">参数：无</div><pre><code>SELECT 'version' AS item, version() AS detail
+UNION ALL
+SELECT 'func:' || p.proname AS item, pg_get_function_arguments(p.oid) AS detail
+  FROM pg_proc p
+ WHERE p.proname IN ('gs_get_explain', 'gs_get_kernel_info');</code></pre></details>
+<details><summary>6. <code>explain.multi_stmt_probe</code> — 探测中间件能否在一条脚本里执行两条语句(SET 后 SELECT 1)</summary><div class="params">参数：无</div><pre><code>SET search_path TO public; SELECT 1 AS ok;</code></pre></details>
+<details><summary>7. <code>explain.plan_from_history</code> — 按 unique_query_id 从 SQL 历史里取最近一次真实执行计划(含执行时间、耗时、返回行数)</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_query_id(整数,可能为负)</div><pre><code>SELECT schema_name,
+       to_char(start_time, 'YYYY-MM-DD HH24:MI:SS') AS start_time,
+       round(db_time / 1000.0, 1) AS db_time_ms,
+       n_returned_rows,
+       query_plan
+  FROM dbe_perf.statement_history
+ WHERE unique_query_id = {{sid}}
+   AND query_plan IS NOT NULL AND query_plan &lt;&gt; ''
+ ORDER BY start_time DESC
+ LIMIT 1;</code></pre></details>
+<details><summary>8. <code>explain.plan_text</code> — 取一条只读 SQL 的执行计划（TEXT 格式，不执行该 SQL）</summary><div class="params">参数：<code>sql</code>（STRING）：待分析的只读 SQL（单条语句）</div><pre><code>EXPLAIN (ANALYZE false, BUFFERS false, FORMAT TEXT) {{sql}}</code></pre></details>
+<details><summary>9. <code>explain.plan_text_analyze</code> — 取一条只读 SQL 的执行计划（TEXT 格式；现场按客户只读要求把 ANALYZE 固定关闭，不执行该 SQL，结果与 plan_text 相同，是估算计划；保留此名只为兼容）</summary><div class="params">参数：<code>sql</code>（STRING）：待分析的只读 SQL（单条语句；写语句不受理）</div><pre><code>EXPLAIN (ANALYZE false, BUFFERS false, FORMAT TEXT) {{sql}}</code></pre></details>
+<details><summary>10. <code>explain.plan_text_analyze_schema</code> — 先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(TEXT格式;现场按客户只读要求 ANALYZE 固定关闭,估算计划)</summary><div class="params">参数：<code>schema</code>（STRING）：SQL 原本执行时的 schema(statement_history.schema_name);只放行合法标识符；<code>sql</code>（STRING）：待分析的只读 SQL(单条语句;写语句不受理)</div><pre><code>SET search_path TO "{{schema}}", public; EXPLAIN (ANALYZE false, BUFFERS false, FORMAT TEXT) {{sql}}</code></pre></details>
+<details><summary>11. <code>explain.plan_text_schema</code> — 先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(TEXT格式,不执行该 SQL)</summary><div class="params">参数：<code>schema</code>（STRING）：SQL 原本执行时的 schema(statement_history.schema_name);只放行合法标识符；<code>sql</code>（STRING）：待分析的只读 SQL(单条语句;写语句不受理)</div><pre><code>SET search_path TO "{{schema}}", public; EXPLAIN (ANALYZE false, BUFFERS false, FORMAT TEXT) {{sql}}</code></pre></details>
+<details><summary>12. <code>explain.relation_schemas</code> — 按表名查它们所在的 schema(贴文本没带 --schema 时推断 schema 用)</summary><div class="params">参数：<code>names</code>（STRING）：带引号的表名字面量列表,如 &#x27;orders&#x27;,&#x27;items&#x27;。取值必须来自调用方已校验的标识符,不可直接取用户输入</div><pre><code>SELECT n.nspname, c.relname
+FROM pg_class c
+LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
+WHERE c.relname IN ({{names}}) AND c.relkind IN ('r','v','p','m','f');</code></pre></details>
+<details><summary>13. <code>explain.runtime_plan</code> — 按后台线程 pid 取运行态执行计划(gs_get_explain(bigint),GaussDB 私有,505.2.1 实测签名;不执行 SQL)</summary><div class="params">参数：<code>pid</code>（INTEGER）：后台线程 pid(pg_stat_activity.pid,64 位线程号);脚本内显式转为 bigint</div><pre><code>SELECT gs_get_explain({{pid}}::bigint) AS plan;</code></pre></details>
+<details><summary>14. <code>explain.runtime_plan_int4</code> — 按后台线程 pid 取运行态执行计划(gs_get_explain(integer),文档签名的内核用;不执行 SQL)</summary><div class="params">参数：<code>pid</code>（INTEGER）：后台线程 pid(pg_stat_activity.pid),须在 integer 范围内;脚本内显式转为 integer</div><pre><code>SELECT gs_get_explain({{pid}}::integer) AS plan;</code></pre></details>
+<details><summary>15. <code>explain.session_by_pid</code> — 按 pid 取会话当前语句(pid / query / query_start / state)</summary><div class="params">参数：<code>pid</code>（INTEGER）：后台线程 pid(pg_stat_activity.pid)</div><pre><code>SELECT pid, unique_sql_id, query, query_start, state
+  FROM pg_stat_activity
+ WHERE pid = {{pid}}
+ LIMIT 1;</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>健康检查（<code>health</code>，23 条）</h4>
+<details><summary>16. <code>health.archive_mode</code> — 归档模式是否开启</summary><div class="params">参数：无</div><pre><code>SELECT setting FROM pg_settings WHERE name='archive_mode';</code></pre></details>
+<details><summary>17. <code>health.bgwriter</code> — 检查点计数（定时/请求触发）</summary><div class="params">参数：无</div><pre><code>SELECT checkpoints_timed, checkpoints_req FROM pg_stat_bgwriter;</code></pre></details>
+<details><summary>18. <code>health.conn_concentration</code> — 活跃连接是否集中在同一条语句上</summary><div class="params">参数：无</div><pre><code>SELECT COALESCE(query,'') q, count(*) c, sum(count(*)) OVER () AS total
+FROM pg_stat_activity
+WHERE state='active' AND COALESCE(query,'')&lt;&gt;'' AND client_port IS NOT NULL
+GROUP BY query ORDER BY c DESC LIMIT 1;</code></pre></details>
+<details><summary>19. <code>health.conn_states</code> — 连接状态分布</summary><div class="params">参数：无</div><pre><code>SELECT COALESCE(state,'&lt;null&gt;') AS state, count(*) AS cnt
+FROM pg_stat_activity
+WHERE sessionid &lt;&gt; 0
+GROUP BY state
+ORDER BY cnt DESC;</code></pre></details>
+<details><summary>20. <code>health.db_concurrency</code> — 当前库的死锁与事务提交/回滚计数</summary><div class="params">参数：无</div><pre><code>SELECT deadlocks, xact_commit, xact_rollback
+FROM pg_stat_database WHERE datname=current_database();</code></pre></details>
+<details><summary>21. <code>health.invalid_index</code> — 失效索引数量</summary><div class="params">参数：无</div><pre><code>SELECT count(*) AS cnt FROM pg_index WHERE NOT indisvalid;</code></pre></details>
+<details><summary>22. <code>health.live_counters</code> — 此刻的库级累计计数（与 snap_counters 对应）及实例启动 / 统计重置时刻</summary><div class="params">参数：无</div><pre><code>SELECT 'now' AS item, to_char(now(), 'YYYY-MM-DD HH24:MI:SS') AS value
+UNION ALL
+SELECT 'postmaster_start', to_char(pg_postmaster_start_time(), 'YYYY-MM-DD HH24:MI:SS')
+UNION ALL
+SELECT 'stats_reset', COALESCE(to_char(max(stats_reset), 'YYYY-MM-DD HH24:MI:SS'), '')
+  FROM pg_stat_database
+UNION ALL
+SELECT 'db_time_us', COALESCE(sum(value), 0)::text
+  FROM dbe_perf.global_instance_time WHERE stat_name = 'DB_TIME'
+UNION ALL
+SELECT 'cpu_time_us', COALESCE(sum(value), 0)::text
+  FROM dbe_perf.global_instance_time WHERE stat_name = 'CPU_TIME'
+UNION ALL
+SELECT 'xact_commit', COALESCE(sum(xact_commit), 0)::text FROM pg_stat_database
+UNION ALL
+SELECT 'xact_rollback', COALESCE(sum(xact_rollback), 0)::text FROM pg_stat_database
+UNION ALL
+SELECT 'deadlocks', COALESCE(sum(deadlocks), 0)::text FROM pg_stat_database
+UNION ALL
+SELECT 'temp_bytes', COALESCE(sum(temp_bytes), 0)::text FROM pg_stat_database
+UNION ALL
+SELECT 'blks_read', COALESCE(sum(blks_read), 0)::text FROM pg_stat_database
+UNION ALL
+SELECT 'blks_hit', COALESCE(sum(blks_hit), 0)::text FROM pg_stat_database
+UNION ALL
+SELECT 'ckpt_timed', COALESCE(sum(checkpoints_timed), 0)::text FROM pg_stat_bgwriter
+UNION ALL
+SELECT 'ckpt_req', COALESCE(sum(checkpoints_req), 0)::text FROM pg_stat_bgwriter;</code></pre></details>
+<details><summary>23. <code>health.live_waits</code> — 此刻的等待事件累计值（按等待类与事件）</summary><div class="params">参数：无</div><pre><code>SELECT type  AS wait_class,
+       event AS event,
+       sum(wait)            AS waits,
+       sum(total_wait_time) AS wait_us
+  FROM dbe_perf.global_wait_events
+ WHERE upper(type) NOT IN ('STATUS','NONE')
+ GROUP BY type, event
+HAVING sum(wait) &gt; 0;</code></pre></details>
+<details><summary>24. <code>health.long_xact</code> — 长事务与长时间未变状态的会话</summary><div class="params">参数：<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT pid,
+       COALESCE(usename,'') AS usename,
+       state,
+       waiting,
+       EXTRACT(EPOCH FROM (now()-xact_start))   AS xact_age_s,
+       EXTRACT(EPOCH FROM (now()-state_change)) AS state_age_s,
+       COALESCE(query,'') AS query
+FROM pg_stat_activity
+WHERE state IN ('active','idle in transaction') AND xact_start IS NOT NULL
+  AND client_port IS NOT NULL
+  AND pid &lt;&gt; pg_backend_pid()
+ORDER BY xact_start
+LIMIT {{limit}};</code></pre></details>
+<details><summary>25. <code>health.overview</code> — 实例概览（缓存命中率/连接数/恢复态/最老事务）</summary><div class="params">参数：无</div><pre><code>SELECT
+  CASE WHEN sum(blks_hit)+sum(blks_read)=0 THEN 100
+       ELSE round(100.0*sum(blks_hit)/(sum(blks_hit)+sum(blks_read)),2) END AS cache_hit_pct,
+  (SELECT count(*) FROM pg_stat_activity WHERE sessionid &lt;&gt; 0)::bigint AS numbackends,
+  (SELECT setting::bigint FROM pg_settings WHERE name='max_connections') AS max_conn,
+  pg_is_in_recovery() AS in_recovery,
+  (SELECT COALESCE(EXTRACT(EPOCH FROM now()-min(xact_start)),0)::bigint
+   FROM pg_stat_activity
+   WHERE state IN ('active','idle in transaction') AND xact_start IS NOT NULL
+     AND client_port IS NOT NULL) AS oldest_xact_s
+FROM pg_stat_database;</code></pre></details>
+<details><summary>26. <code>health.partitions</code> — 分区表的分区数量与分区策略</summary><div class="params">参数：无</div><pre><code>SELECT n.nspname      AS schema,
+       c.relname      AS "table",
+       count(*)       AS parts,
+       COALESCE(max(p.partstrategy), '') AS strategy
+  FROM pg_partition p
+  JOIN pg_class c     ON c.oid = p.parentid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE p.parttype = 'p'
+   AND n.nspname NOT IN ('pg_catalog','information_schema','snapshot','dbe_perf',
+                         'dbe_pldeveloper','cstore','pg_toast')
+ GROUP BY n.nspname, c.relname
+ ORDER BY parts DESC;</code></pre></details>
+<details><summary>27. <code>health.prepared_xacts</code> — 悬挂的两阶段事务数量</summary><div class="params">参数：无</div><pre><code>SELECT count(*) AS cnt FROM pg_prepared_xacts;</code></pre></details>
+<details><summary>28. <code>health.replication</code> — 主备复制状态与延迟</summary><div class="params">参数：无</div><pre><code>SELECT application_name,
+       COALESCE(client_addr::text,'') AS client_addr,
+       state, sync_state,
+       pg_xlog_location_diff(sender_sent_location, receiver_replay_location)::bigint AS lag_bytes
+FROM pg_stat_replication;</code></pre></details>
+<details><summary>29. <code>health.slow_sql</code> — 平均耗时超阈值的语句</summary><div class="params">参数：<code>threshold_ms</code>（INTEGER）：平均耗时阈值（毫秒）；<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT
+  unique_sql_id::text,
+  LEFT(REGEXP_REPLACE(query, '\s+', ' ', 'g'), 180) AS query,
+  n_calls AS calls,
+  ROUND((total_elapse_time/NULLIF(n_calls,0))/1000::numeric, 2) AS avg_ms,
+  ROUND(total_elapse_time/1000000::numeric, 2) AS total_sec,
+  ROUND(cpu_time/1000000::numeric, 2) AS cpu_sec,
+  n_returned_rows AS rows
+FROM dbe_perf.statement
+WHERE (total_elapse_time/NULLIF(n_calls,0))/1000 &gt; {{threshold_ms}}
+  AND n_calls &gt; 0
+ORDER BY total_elapse_time/NULLIF(n_calls,0) DESC
+LIMIT {{limit}};</code></pre></details>
+<details><summary>30. <code>health.snap_counters</code> — 指定快照时刻的库级累计计数（DB time / 事务 / 死锁 / 溢出 / 命中 / 检查点）</summary><div class="params">参数：<code>snap</code>（INTEGER）：快照 ID</div><pre><code>SELECT 'snap_at' AS item,
+       to_char((SELECT start_ts FROM snapshot.snapshot WHERE snapshot_id = {{snap}}),
+               'YYYY-MM-DD HH24:MI:SS') AS value
+UNION ALL
+SELECT 'db_time_us', COALESCE(sum(snap_value), 0)::text
+  FROM snapshot.snap_global_instance_time WHERE snapshot_id = {{snap}} AND snap_stat_name = 'DB_TIME'
+UNION ALL
+SELECT 'cpu_time_us', COALESCE(sum(snap_value), 0)::text
+  FROM snapshot.snap_global_instance_time WHERE snapshot_id = {{snap}} AND snap_stat_name = 'CPU_TIME'
+UNION ALL
+SELECT 'xact_commit', COALESCE(sum(snap_xact_commit), 0)::text
+  FROM snapshot.snap_summary_stat_database WHERE snapshot_id = {{snap}}
+UNION ALL
+SELECT 'xact_rollback', COALESCE(sum(snap_xact_rollback), 0)::text
+  FROM snapshot.snap_summary_stat_database WHERE snapshot_id = {{snap}}
+UNION ALL
+SELECT 'deadlocks', COALESCE(sum(snap_deadlocks), 0)::text
+  FROM snapshot.snap_summary_stat_database WHERE snapshot_id = {{snap}}
+UNION ALL
+SELECT 'temp_bytes', COALESCE(sum(snap_temp_bytes), 0)::text
+  FROM snapshot.snap_summary_stat_database WHERE snapshot_id = {{snap}}
+UNION ALL
+SELECT 'blks_read', COALESCE(sum(snap_blks_read), 0)::text
+  FROM snapshot.snap_summary_stat_database WHERE snapshot_id = {{snap}}
+UNION ALL
+SELECT 'blks_hit', COALESCE(sum(snap_blks_hit), 0)::text
+  FROM snapshot.snap_summary_stat_database WHERE snapshot_id = {{snap}}
+UNION ALL
+SELECT 'ckpt_timed', COALESCE(sum(snap_checkpoints_timed), 0)::text
+  FROM snapshot.snap_global_bgwriter_stat WHERE snapshot_id = {{snap}}
+UNION ALL
+SELECT 'ckpt_req', COALESCE(sum(snap_checkpoints_req), 0)::text
+  FROM snapshot.snap_global_bgwriter_stat WHERE snapshot_id = {{snap}};</code></pre></details>
+<details><summary>31. <code>health.snap_waits</code> — 指定快照时刻的等待事件累计值（按等待类与事件）</summary><div class="params">参数：<code>snap</code>（INTEGER）：快照 ID</div><pre><code>SELECT snap_type  AS wait_class,
+       snap_event AS event,
+       sum(snap_wait)            AS waits,
+       sum(snap_total_wait_time) AS wait_us
+  FROM snapshot.snap_global_wait_events
+ WHERE snapshot_id = {{snap}}
+   AND upper(snap_type) NOT IN ('STATUS','NONE')
+ GROUP BY snap_type, snap_event
+HAVING sum(snap_wait) &gt; 0;</code></pre></details>
+<details><summary>32. <code>health.stale_stats</code> — 表的统计信息新鲜度证据（页数漂移 + 统计列数 + 上次 ANALYZE）</summary><div class="params">参数：<code>min_rows</code>（INTEGER）：行数下限；<code>min_pages</code>（INTEGER）：实时页数下限（冻结行数为 0 / 偏小的表靠它进候选）；<code>schema_filter</code>（STRING）：要排除的模式列表，形如 (&#x27;a&#x27;,&#x27;b&#x27;)。须来自受控常量；<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT tbl_name, frozen_pages, cur_pages, frozen_tuples, live_tuples,
+       stat_columns, last_analyze, last_autoanalyze
+FROM (
+  SELECT n.nspname || '.' || c.relname AS tbl_name,
+         c.relpages AS frozen_pages,
+         pg_relation_size(c.oid) / current_setting('block_size')::bigint AS cur_pages,
+         c.reltuples::bigint AS frozen_tuples,
+         COALESCE(t.n_live_tup, 0) AS live_tuples,
+         (SELECT count(*) FROM pg_stats s
+           WHERE s.schemaname = n.nspname AND s.tablename = c.relname) AS stat_columns,
+         COALESCE(to_char(t.last_analyze, 'YYYY-MM-DD HH24:MI:SS'), 'never') AS last_analyze,
+         COALESCE(to_char(t.last_autoanalyze, 'YYYY-MM-DD HH24:MI:SS'), 'never') AS last_autoanalyze
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  LEFT JOIN pg_stat_user_tables t ON t.relid = c.oid
+  WHERE c.relkind = 'r' AND n.nspname NOT IN {{schema_filter}}
+    AND (c.reltuples &gt; {{min_rows}}
+         OR pg_relation_size(c.oid) / current_setting('block_size')::bigint &gt; {{min_pages}})
+) x
+ORDER BY (stat_columns = 0 OR frozen_pages = 0) DESC,
+         CASE WHEN frozen_pages &gt; 0
+              THEN CAST(abs(cur_pages - frozen_pages) AS float8) / frozen_pages
+              ELSE 0 END DESC,
+         cur_pages DESC
+LIMIT {{limit}};</code></pre></details>
+<details><summary>33. <code>health.stats_window</code> — 统计计数器上次重置的时间与至今时长（解释一切累计值的前提）</summary><div class="params">参数：无</div><pre><code>SELECT COALESCE(to_char(stats_reset, 'YYYY-MM-DD HH24:MI:SS'), 'never') AS stats_reset,
+       COALESCE(EXTRACT(EPOCH FROM (now() - stats_reset)), -1) AS window_seconds
+FROM pg_stat_database
+WHERE datname = current_database();</code></pre></details>
+<details><summary>34. <code>health.storage</code> — 库与表空间的占用量（取不到剩余空间，见脚本注释）</summary><div class="params">参数：无</div><pre><code>SELECT 'database' AS kind,
+       d.datname  AS name,
+       pg_database_size(d.oid)::bigint AS bytes
+  FROM pg_database d
+ WHERE d.datallowconn
+UNION ALL
+SELECT 'tablespace' AS kind,
+       t.spcname    AS name,
+       pg_tablespace_size(t.oid)::bigint AS bytes
+  FROM pg_tablespace t
+ ORDER BY bytes DESC;</code></pre></details>
+<details><summary>35. <code>health.sync_commit</code> — 同步提交配置与部署形态（判断主库会不会因等同步备而卡住）</summary><div class="params">参数：无</div><pre><code>SELECT 'peers_configured' AS item,
+       (SELECT count(*)::text FROM pg_settings
+         WHERE name LIKE 'replconninfo%' AND COALESCE(setting,'') &lt;&gt; '') AS value
+UNION ALL
+SELECT 'in_recovery' AS item, pg_is_in_recovery()::text AS value
+UNION ALL
+SELECT 'sync_commit' AS item,
+       COALESCE((SELECT setting FROM pg_settings WHERE name='synchronous_commit'),'') AS value
+UNION ALL
+SELECT 'standby_names' AS item,
+       COALESCE((SELECT setting FROM pg_settings WHERE name='synchronous_standby_names'),'') AS value;</code></pre></details>
+<details><summary>36. <code>health.thread_pool</code> — 线程池是否开启、池大小与真实会话数</summary><div class="params">参数：无</div><pre><code>SELECT 'enable_thread_pool' AS item,
+       COALESCE((SELECT setting FROM pg_settings WHERE name='enable_thread_pool'),'') AS value
+UNION ALL
+SELECT 'thread_pool_attr' AS item,
+       COALESCE((SELECT setting FROM pg_settings WHERE name='thread_pool_attr'),'') AS value
+UNION ALL
+SELECT 'max_connections' AS item,
+       COALESCE((SELECT setting FROM pg_settings WHERE name='max_connections'),'') AS value
+UNION ALL
+SELECT 'real_sessions' AS item,
+       (SELECT count(*)::text FROM pg_stat_activity WHERE sessionid &lt;&gt; 0) AS value;</code></pre></details>
+<details><summary>37. <code>health.unused_index</code> — 索引用量全局视图（含扫描次数、大小、是否约束背书、所属表的扫描分布）</summary><div class="params">参数：<code>min_bytes</code>（INTEGER）：索引大小下限（字节）；<code>schema_filter</code>（STRING）：要排除的模式列表，形如 (&#x27;a&#x27;,&#x27;b&#x27;)。须来自受控常量；<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT s.schemaname||'.'||s.indexrelname AS idx_name,
+       s.relname AS table_name,
+       s.idx_scan,
+       s.idx_tup_read,
+       s.idx_tup_fetch,
+       pg_relation_size(s.indexrelid) AS idx_bytes,
+       i.indisprimary,
+       i.indisunique,
+       COALESCE(ts.seq_scan, 0) AS table_seq_scan,
+       COALESCE(ts.idx_scan, 0) AS table_idx_scan
+FROM pg_stat_user_indexes s
+JOIN pg_index i ON i.indexrelid = s.indexrelid
+LEFT JOIN pg_stat_user_tables ts ON ts.relid = s.relid
+WHERE pg_relation_size(s.indexrelid) &gt; {{min_bytes}}
+  AND s.schemaname NOT IN {{schema_filter}}
+ORDER BY s.idx_scan ASC, pg_relation_size(s.indexrelid) DESC
+LIMIT {{limit}};</code></pre></details>
+<details><summary>38. <code>health.wal_slots</code> — 复制槽落后的 WAL 字节数与是否活跃</summary><div class="params">参数：无</div><pre><code>SELECT slot_name,
+       COALESCE(slot_type,'')  AS slot_type,
+       COALESCE(database,'')   AS database,
+       active::text            AS active,
+       pg_xlog_location_diff(pg_current_xlog_location(), restart_lsn)::bigint AS lag_bytes
+  FROM pg_replication_slots
+ WHERE restart_lsn IS NOT NULL
+ ORDER BY lag_bytes DESC;</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>锁等待（<code>lockwait</code>，5 条）</h4>
+<details><summary>39. <code>lockwait.asp_pairs</code> — 时段内的锁阻塞对(活跃会话采样:落表的 gs_asp + 内存里的 local_active_session):等待者、阻塞者、锁、锁对象、采到次数、首末次时间</summary><div class="params">参数：<code>begin_time</code>（DATETIME）：时段起点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss；<code>end_time</code>（DATETIME）：时段终点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss；<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>WITH t AS (
+  SELECT a.sessionid, a.block_sessionid, a.event, a.lockmode, a.locktag,
+         a.unique_query_id, a.unique_query, a.sample_time
+    FROM gs_asp a
+   WHERE a.sample_time &gt;= CAST('{{begin_time}}' AS TIMESTAMP)
+     AND a.sample_time &lt;= CAST('{{end_time}}' AS TIMESTAMP)
+), s AS (
+  SELECT * FROM t
+   WHERE t.block_sessionid IS NOT NULL AND t.block_sessionid &lt;&gt; 0
+  UNION ALL
+  SELECT m.sessionid, m.block_sessionid, m.event, m.lockmode, m.locktag,
+         m.unique_query_id, m.unique_query, m.sample_time
+    FROM dbe_perf.local_active_session m
+   WHERE m.need_flush_sample
+     AND m.sample_time &gt;= CAST('{{begin_time}}' AS TIMESTAMP)
+     AND m.sample_time &lt;= CAST('{{end_time}}' AS TIMESTAMP)
+     AND m.sample_time &gt; (SELECT COALESCE(max(t.sample_time), CAST('1970-01-01' AS TIMESTAMP)) FROM t)
+     AND m.block_sessionid IS NOT NULL AND m.block_sessionid &lt;&gt; 0
+), g AS (
+  SELECT sessionid, block_sessionid,
+         COALESCE(event, '') AS event, COALESCE(lockmode, '') AS lockmode,
+         COALESCE(locktag, '') AS locktag, unique_query_id,
+         count(*) AS samples, min(sample_time) AS first_seen, max(sample_time) AS last_seen,
+         max(substr(COALESCE(unique_query, ''), 1, 300)) AS query
+    FROM s
+   GROUP BY sessionid, block_sessionid, COALESCE(event, ''), COALESCE(lockmode, ''),
+            COALESCE(locktag, ''), unique_query_id
+), d AS (
+  SELECT g.*, CASE WHEN g.locktag &lt;&gt; '' THEN COALESCE(locktag_decode(g.locktag), '') ELSE '' END AS decoded
+    FROM g
+)
+SELECT d.sessionid AS waiter_sessionid,
+       d.block_sessionid AS holder_sessionid,
+       d.event AS wait_event,
+       d.lockmode AS waiter_mode,
+       d.locktag AS locktag,
+       d.decoded AS lock_decoded,
+       COALESCE((SELECT n.nspname || '.' || c.relname
+                   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                  WHERE c.oid = CAST(NULLIF(substring(d.decoded from 'relation:([0-9]+)'), '') AS oid)
+                    AND substring(d.decoded from 'database:([0-9]+)')
+                        = (SELECT CAST(oid AS text) FROM pg_database WHERE datname = current_database())), '') AS lock_object,
+       d.unique_query_id AS waiter_sql_id,
+       d.query AS waiter_query,
+       d.samples AS samples,
+       to_char(d.first_seen, 'YYYY-MM-DD HH24:MI:SS') AS first_seen,
+       to_char(d.last_seen, 'YYYY-MM-DD HH24:MI:SS') AS last_seen
+  FROM d
+ ORDER BY d.samples DESC, d.sessionid
+ LIMIT {{limit}};</code></pre></details>
+<details><summary>40. <code>lockwait.asp_sessions</code> — 时段内锁阻塞涉及的会话(活跃会话采样:落表的 gs_asp + 内存里的 local_active_session):最后状态、语句、应用、客户端、事务开始时间</summary><div class="params">参数：<code>begin_time</code>（DATETIME）：时段起点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss；<code>end_time</code>（DATETIME）：时段终点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss；<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>WITH t AS (
+  SELECT a.sessionid, a.block_sessionid, a.state, a.event, a.unique_query_id, a.unique_query,
+         a.application_name, a.client_addr, a.xact_start_time, a.sample_time
+    FROM gs_asp a
+   WHERE a.sample_time &gt;= CAST('{{begin_time}}' AS TIMESTAMP)
+     AND a.sample_time &lt;= CAST('{{end_time}}' AS TIMESTAMP)
+), a AS (
+  SELECT * FROM t
+  UNION ALL
+  SELECT m.sessionid, m.block_sessionid, m.state, m.event, m.unique_query_id, m.unique_query,
+         m.application_name, m.client_addr, m.xact_start_time, m.sample_time
+    FROM dbe_perf.local_active_session m
+   WHERE m.need_flush_sample
+     AND m.sample_time &gt;= CAST('{{begin_time}}' AS TIMESTAMP)
+     AND m.sample_time &lt;= CAST('{{end_time}}' AS TIMESTAMP)
+     AND m.sample_time &gt; (SELECT COALESCE(max(t.sample_time), CAST('1970-01-01' AS TIMESTAMP)) FROM t)
+), w AS (
+  SELECT sessionid, block_sessionid FROM a
+   WHERE block_sessionid IS NOT NULL AND block_sessionid &lt;&gt; 0
+), ids AS (
+  SELECT sessionid AS sid FROM w UNION SELECT block_sessionid FROM w
+), r AS (
+  SELECT a.sessionid, a.state, a.event, a.unique_query_id, a.unique_query,
+         a.application_name, a.client_addr, a.xact_start_time, a.sample_time,
+         row_number() OVER (PARTITION BY a.sessionid ORDER BY a.sample_time DESC) AS rn,
+         count(*) OVER (PARTITION BY a.sessionid) AS samples
+    FROM a
+   WHERE a.sessionid IN (SELECT sid FROM ids)
+)
+SELECT r.sessionid AS sessionid,
+       COALESCE(r.state, '') AS state,
+       COALESCE(r.event, '') AS last_event,
+       r.unique_query_id AS sql_id,
+       substr(COALESCE(r.unique_query, ''), 1, 300) AS query,
+       COALESCE(r.application_name, '') AS application_name,
+       COALESCE(host(r.client_addr), '') AS client_addr,
+       COALESCE(to_char(r.xact_start_time, 'YYYY-MM-DD HH24:MI:SS'), '') AS xact_start,
+       r.samples AS samples
+  FROM r
+ WHERE r.rn = 1
+ ORDER BY r.sessionid
+ LIMIT {{limit}};</code></pre></details>
+<details><summary>41. <code>lockwait.asp_status</code> — 活跃会话采样(ASP)的开关、采样/落表参数、保留天数,时段内落表与内存里各有多少样本、各覆盖到哪</summary><div class="params">参数：<code>begin_time</code>（DATETIME）：时段起点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss；<code>end_time</code>（DATETIME）：时段终点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss</div><pre><code>SELECT name AS item, setting AS value
+  FROM pg_settings
+ WHERE name IN ('enable_asp', 'asp_sample_interval', 'asp_flush_rate', 'asp_retention_days',
+                'asp_flush_mode', 'asp_sample_num')
+UNION ALL
+SELECT 'samples_in_window', CAST(count(*) AS text)
+  FROM gs_asp
+ WHERE sample_time &gt;= CAST('{{begin_time}}' AS TIMESTAMP)
+   AND sample_time &lt;= CAST('{{end_time}}' AS TIMESTAMP)
+UNION ALL
+SELECT 'memory_samples_in_window', CAST(count(*) AS text)
+  FROM dbe_perf.local_active_session m
+ WHERE m.need_flush_sample
+   AND m.sample_time &gt;= CAST('{{begin_time}}' AS TIMESTAMP)
+   AND m.sample_time &lt;= CAST('{{end_time}}' AS TIMESTAMP)
+   AND m.sample_time &gt; (SELECT COALESCE(max(t.sample_time), CAST('1970-01-01' AS TIMESTAMP))
+                          FROM gs_asp t
+                         WHERE t.sample_time &gt;= CAST('{{begin_time}}' AS TIMESTAMP)
+                           AND t.sample_time &lt;= CAST('{{end_time}}' AS TIMESTAMP))
+UNION ALL
+SELECT 'memory_first', COALESCE(to_char(min(sample_time), 'YYYY-MM-DD HH24:MI:SS'), '')
+  FROM dbe_perf.local_active_session
+UNION ALL
+SELECT 'memory_last', COALESCE(to_char(max(sample_time), 'YYYY-MM-DD HH24:MI:SS'), '')
+  FROM dbe_perf.local_active_session
+UNION ALL
+SELECT 'table_last', COALESCE(to_char(max(sample_time), 'YYYY-MM-DD HH24:MI:SS'), '')
+  FROM gs_asp
+UNION ALL
+SELECT 'now', to_char(now(), 'YYYY-MM-DD HH24:MI:SS');</code></pre></details>
+<details><summary>42. <code>lockwait.chain</code> — 阻塞关系的边（会话 → 阻塞它的会话）</summary><div class="params">参数：无</div><pre><code>SELECT w.sessionid       AS sessionid,
+       w.block_sessionid AS block_sessionid
+  FROM pg_thread_wait_status w
+ WHERE w.block_sessionid IS NOT NULL
+   AND w.block_sessionid &lt;&gt; 0
+   AND w.block_sessionid &lt;&gt; w.sessionid;</code></pre></details>
+<details><summary>43. <code>lockwait.pairs</code> — 锁堵塞的持有者/等待者成对明细（含双方锁模式、锁对象、等待时长、双方 SQL）</summary><div class="params">参数：<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT w.pid                         AS waiter_pid,
+       COALESCE(w.sessionid, 0)      AS waiter_sessionid,
+       w.mode                        AS waiter_mode,
+       h.pid                         AS holder_pid,
+       COALESCE(h.sessionid, 0)      AS holder_sessionid,
+       h.mode                        AS holder_mode,
+       w.locktype                    AS locktype,
+       COALESCE(n.nspname || '.' || c.relname, '')  AS lock_object,
+       COALESCE(w.locktag, '')       AS locktag,
+       round(EXTRACT(EPOCH FROM (now() - wa.query_start))::numeric, 1) AS waiter_wait_s,
+       COALESCE(wa.usename, '')      AS waiter_user,
+       COALESCE(wa.application_name, '') AS waiter_app,
+       COALESCE(substr(wa.query, 1, 300), '')       AS waiter_query,
+       COALESCE(ha.state, '')        AS holder_state,
+       COALESCE(ha.usename, '')      AS holder_user,
+       COALESCE(ha.application_name, '') AS holder_app,
+       round(EXTRACT(EPOCH FROM (now() - ha.xact_start))::numeric, 1) AS holder_xact_age_s,
+       COALESCE(substr(ha.query, 1, 300), '')       AS holder_query
+  FROM pg_locks w
+  JOIN pg_locks h
+    ON h.locktag = w.locktag AND h.granted AND h.pid &lt;&gt; w.pid
+  LEFT JOIN pg_class c     ON c.oid = w.relation
+  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+  LEFT JOIN pg_stat_activity wa ON wa.pid = w.pid
+  LEFT JOIN pg_stat_activity ha ON ha.pid = h.pid
+ WHERE w.granted = false
+ ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
+ LIMIT {{limit}};</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>内存分析（<code>memanalyze</code>，11 条）</h4>
+<details><summary>44. <code>memanalyze.activity</code> — 会话在跑什么（用于关联）</summary><div class="params">参数：无</div><pre><code>SELECT sessionid, pid, usename, application_name, state, query FROM pg_stat_activity;</code></pre></details>
+<details><summary>45. <code>memanalyze.cols_bare</code> — 在候选模式里找某个表/视图的列清单</summary><div class="params">参数：<code>relname</code>（STRING）：表/视图名。取值来自 probe.py 的候选常量；<code>schemas</code>（STRING）：候选模式列表，形如 &#x27;a&#x27;,&#x27;b&#x27;。来自 probe.py 的受控常量</div><pre><code>SELECT a.attname::text AS attname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_attribute a ON a.attrelid = c.oid
+WHERE c.relname = '{{relname}}' AND n.nspname IN ({{schemas}})
+  AND a.attnum &gt; 0 AND NOT a.attisdropped
+ORDER BY a.attnum;</code></pre></details>
+<details><summary>46. <code>memanalyze.cols_qualified</code> — 取某个 schema.table 的列清单</summary><div class="params">参数：<code>schema</code>（STRING）：模式名。取值来自 probe.py 的候选常量，不来自用户输入；<code>relname</code>（STRING）：表/视图名。同上</div><pre><code>SELECT a.attname::text AS attname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_attribute a ON a.attrelid = c.oid
+WHERE n.nspname = '{{schema}}' AND c.relname = '{{relname}}'
+  AND a.attnum &gt; 0 AND NOT a.attisdropped
+ORDER BY a.attnum;</code></pre></details>
+<details><summary>47. <code>memanalyze.context</code> — 内存上下文占用 Top N</summary><div class="params">参数：<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT contextname, sum(totalsize) AS totalsize,
+       sum(freesize) AS freesize, sum(usedsize) AS usedsize
+FROM (SELECT contextname, totalsize, freesize, usedsize FROM gs_session_memory_detail) t
+GROUP BY contextname ORDER BY 4 DESC NULLS LAST
+LIMIT {{limit}};</code></pre></details>
+<details><summary>48. <code>memanalyze.gucs</code> — 与内存相关的 GUC 参数</summary><div class="params">参数：无</div><pre><code>SELECT name, setting
+FROM pg_settings
+WHERE name IN (
+  'max_process_memory', 'shared_buffers', 'work_mem', 'maintenance_work_mem',
+  'max_connections', 'enable_memory_limit', 'memory_tracking_mode',
+  'use_workload_manager', 'enable_resource_track', 'resource_track_level',
+  'resource_track_cost', 'resource_track_duration', 'enable_resource_record',
+  'enable_dynamic_workload', 'query_max_mem', 'query_mem')
+ORDER BY name;</code></pre></details>
+<details><summary>49. <code>memanalyze.instance</code> — 实例级内存分布</summary><div class="params">参数：无</div><pre><code>SELECT memorytype, memorymbytes FROM gs_total_memory_detail;</code></pre></details>
+<details><summary>50. <code>memanalyze.session</code> — 会话级内存 Top N</summary><div class="params">参数：<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT sessid, init_mem, used_mem, peak_mem FROM dbe_perf.session_memory
+ORDER BY peak_mem DESC NULLS LAST LIMIT {{limit}};</code></pre></details>
+<details><summary>51. <code>memanalyze.wlm_operator</code> — 算子级资源跟踪（实时）</summary><div class="params">参数：<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT queryid, plan_node_id, plan_node_name, duration, NULL AS estimate_memory, NULL AS memory_used, max_peak_memory, average_peak_memory, NULL AS spill_size, warning FROM gs_wlm_operator_statistics
+ORDER BY max_peak_memory DESC NULLS LAST LIMIT {{limit}};</code></pre></details>
+<details><summary>52. <code>memanalyze.wlm_operator_hist</code> — 算子级资源跟踪（历史）</summary><div class="params">参数：<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT queryid, plan_node_id, plan_node_name, duration, NULL AS estimate_memory, NULL AS memory_used, max_peak_memory, average_peak_memory, NULL AS spill_size, warning FROM gs_wlm_operator_history
+ORDER BY max_peak_memory DESC NULLS LAST LIMIT {{limit}};</code></pre></details>
+<details><summary>53. <code>memanalyze.wlm_sql</code> — SQL 级资源跟踪（实时）</summary><div class="params">参数：<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT queryid, query, start_time, duration, estimate_memory, NULL AS used_memory, max_peak_memory, average_peak_memory, spill_info FROM gs_wlm_session_statistics
+ORDER BY max_peak_memory DESC NULLS LAST LIMIT {{limit}};</code></pre></details>
+<details><summary>54. <code>memanalyze.wlm_sql_hist</code> — SQL 级资源跟踪（历史）</summary><div class="params">参数：<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT queryid, query, start_time, duration, estimate_memory, NULL AS used_memory, max_peak_memory, average_peak_memory, spill_info FROM gs_wlm_session_history
+ORDER BY max_peak_memory DESC NULLS LAST LIMIT {{limit}};</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>存储过程信息（<code>procinfo</code>，5 条）</h4>
+<details><summary>55. <code>procinfo.key_gucs</code> — 与执行计划相关的关键 GUC 参数</summary><div class="params">参数：无</div><pre><code>SELECT name, setting, COALESCE(unit, '') AS unit
+FROM pg_settings
+WHERE name IN (
+  'work_mem', 'maintenance_work_mem', 'shared_buffers',
+  'effective_cache_size', 'random_page_cost', 'seq_page_cost',
+  'cpu_tuple_cost', 'cpu_index_tuple_cost', 'cpu_operator_cost', 'block_size',
+  'query_dop',
+  'max_parallel_workers_per_gather', 'from_collapse_limit',
+  'join_collapse_limit', 'geqo_threshold', 'default_statistics_target')
+ORDER BY name;</code></pre></details>
+<details><summary>56. <code>procinfo.locate_context</code> — 过程找不到时的排查:当前库、当前账号与实例上的库清单</summary><div class="params">参数：无</div><pre><code>SELECT current_database() AS db, current_user AS usr,
+       (SELECT string_agg(datname, ', ' ORDER BY datname) FROM pg_database WHERE NOT datistemplate) AS databases;</code></pre></details>
+<details><summary>57. <code>procinfo.locate_schema</code> — 过程找不到时的排查:目标 schema 在不在本库、执行账号有没有 USAGE 权限</summary><div class="params">参数：<code>schema</code>（STRING）：模式名</div><pre><code>SELECT n.nspname, pg_catalog.has_schema_privilege(n.oid, 'USAGE') AS usage
+FROM pg_namespace n
+WHERE n.nspname = '{{schema}}';</code></pre></details>
+<details><summary>58. <code>procinfo.locate_search</code> — 过程找不到时的排查:按名字模糊搜过程(schema 不可见时 nspname 为空)与包</summary><div class="params">参数：<code>name</code>（STRING）：过程名(模糊匹配)；<code>package</code>（STRING）：包名(模糊匹配);空串表示不搜包</div><pre><code>SELECT 'proc' AS kind, n.nspname, COALESCE(k.pkgname, '') AS pkgname, p.proname
+FROM pg_proc p
+LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
+LEFT JOIN gs_package k ON k.oid = p.propackageid
+WHERE p.proname ILIKE '%{{name}}%'
+  AND (n.nspname IS NULL OR (n.nspname NOT LIKE 'pg_%' AND n.nspname NOT LIKE 'dbe_%'
+       AND n.nspname NOT IN ('information_schema', 'pkg_service', 'pkg_util', 'sqladvisor', 'db4ai',
+                             'snapshot', 'blockchain', 'cstore', 'pmk', 'coverage')))
+UNION ALL
+SELECT 'package' AS kind, n.nspname, k.pkgname, '' AS proname
+FROM gs_package k
+LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
+WHERE COALESCE(length('{{package}}'), 0) &gt; 0 AND k.pkgname ILIKE '%{{package}}%'
+ORDER BY 1, 2, 3, 4
+LIMIT 40;</code></pre></details>
+<details><summary>59. <code>procinfo.proc_def</code> — 按名字取存储过程/函数的定义(源码 + 语言 + 形参 + 所属包);支持包内过程与按包名过滤</summary><div class="params">参数：<code>name</code>（STRING）：过程/函数名；<code>schema</code>（STRING）：模式名;空串表示不限模式；<code>package</code>（STRING）：包名;空串表示不限包(包内过程与独立过程都返回)</div><pre><code>SELECT n.nspname, p.proname, l.lanname, p.prosrc,
+       pg_catalog.pg_get_function_arguments(p.oid) AS args,
+       COALESCE(k.pkgname, '') AS package
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_language l ON l.oid = p.prolang
+LEFT JOIN gs_package k ON k.oid = p.propackageid
+WHERE p.proname = '{{name}}'
+  AND ('{{schema}}' IS NULL OR '{{schema}}' = '' OR n.nspname = '{{schema}}')
+  AND ('{{package}}' IS NULL OR '{{package}}' = '' OR k.pkgname = '{{package}}')
+ORDER BY (n.nspname = 'public') DESC, n.nspname, k.pkgname
+LIMIT 5;</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>存储过程调优（<code>proctune</code>，15 条）</h4>
+<details><summary>60. <code>proctune.column_stats</code> — 游标 SQL 涉及的表的列级统计信息（证据包</summary><div class="params">参数：<code>names</code>（STRING）：带引号的表名字面量列表，如 &#x27;orders&#x27;,&#x27;items&#x27;。取值必须来自调用方已校验的标识符，不可直接取用户输入</div><pre><code>SELECT schemaname, tablename, attname, n_distinct, null_frac, avg_width, correlation,
+       COALESCE(most_common_vals::text, '') AS most_common_vals,
+       COALESCE(most_common_freqs::text, '') AS most_common_freqs,
+       COALESCE(histogram_bounds::text, '') AS histogram_bounds
+FROM pg_stats
+WHERE tablename IN ({{names}});</code></pre></details>
+<details><summary>61. <code>proctune.db_version</code> — 数据库版本串（证据包的 Environment 一节）</summary><div class="params">参数：无</div><pre><code>SELECT version() AS version;</code></pre></details>
+<details><summary>62. <code>proctune.indexes</code> — 游标 SQL 涉及的表上的索引定义（证据包</summary><div class="params">参数：<code>names</code>（STRING）：带引号的表名字面量列表，如 &#x27;orders&#x27;,&#x27;items&#x27;。取值必须来自调用方已校验的标识符，不可直接取用户输入</div><pre><code>SELECT n.nspname AS schema_name, t.relname AS table_name, i.relname AS index_name,
+       ix.indisunique, ix.indisprimary,
+       pg_get_indexdef(ix.indexrelid) AS index_def
+FROM pg_class t
+JOIN pg_index ix ON t.oid = ix.indrelid
+JOIN pg_class i ON i.oid = ix.indexrelid
+JOIN pg_namespace n ON n.oid = t.relnamespace
+WHERE t.relname IN ({{names}});</code></pre></details>
+<details><summary>63. <code>proctune.key_gucs</code> — 与执行计划相关的关键 GUC 参数</summary><div class="params">参数：无</div><pre><code>SELECT name, setting, COALESCE(unit, '') AS unit
+FROM pg_settings
+WHERE name IN (
+  'work_mem', 'maintenance_work_mem', 'shared_buffers',
+  'effective_cache_size', 'random_page_cost', 'seq_page_cost',
+  'cpu_tuple_cost', 'cpu_index_tuple_cost', 'cpu_operator_cost', 'block_size',
+  'query_dop',
+  'max_parallel_workers_per_gather', 'from_collapse_limit',
+  'join_collapse_limit', 'geqo_threshold', 'default_statistics_target')
+ORDER BY name;</code></pre></details>
+<details><summary>64. <code>proctune.locate_context</code> — 过程找不到时的排查:当前库、当前账号与实例上的库清单</summary><div class="params">参数：无</div><pre><code>SELECT current_database() AS db, current_user AS usr,
+       (SELECT string_agg(datname, ', ' ORDER BY datname) FROM pg_database WHERE NOT datistemplate) AS databases;</code></pre></details>
+<details><summary>65. <code>proctune.locate_schema</code> — 过程找不到时的排查:目标 schema 在不在本库、执行账号有没有 USAGE 权限</summary><div class="params">参数：<code>schema</code>（STRING）：模式名</div><pre><code>SELECT n.nspname, pg_catalog.has_schema_privilege(n.oid, 'USAGE') AS usage
+FROM pg_namespace n
+WHERE n.nspname = '{{schema}}';</code></pre></details>
+<details><summary>66. <code>proctune.locate_search</code> — 过程找不到时的排查:按名字模糊搜过程(schema 不可见时 nspname 为空)与包</summary><div class="params">参数：<code>name</code>（STRING）：过程名(模糊匹配)；<code>package</code>（STRING）：包名(模糊匹配);空串表示不搜包</div><pre><code>SELECT 'proc' AS kind, n.nspname, COALESCE(k.pkgname, '') AS pkgname, p.proname
+FROM pg_proc p
+LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
+LEFT JOIN gs_package k ON k.oid = p.propackageid
+WHERE p.proname ILIKE '%{{name}}%'
+  AND (n.nspname IS NULL OR (n.nspname NOT LIKE 'pg_%' AND n.nspname NOT LIKE 'dbe_%'
+       AND n.nspname NOT IN ('information_schema', 'pkg_service', 'pkg_util', 'sqladvisor', 'db4ai',
+                             'snapshot', 'blockchain', 'cstore', 'pmk', 'coverage')))
+UNION ALL
+SELECT 'package' AS kind, n.nspname, k.pkgname, '' AS proname
+FROM gs_package k
+LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
+WHERE COALESCE(length('{{package}}'), 0) &gt; 0 AND k.pkgname ILIKE '%{{package}}%'
+ORDER BY 1, 2, 3, 4
+LIMIT 40;</code></pre></details>
+<details><summary>67. <code>proctune.plan_text</code> — 取一条只读 SQL 的执行计划（TEXT 格式，不执行该 SQL）</summary><div class="params">参数：<code>sql</code>（STRING）：待分析的只读 SQL（单条语句）</div><pre><code>EXPLAIN (ANALYZE false, BUFFERS false, FORMAT TEXT) {{sql}}</code></pre></details>
+<details><summary>68. <code>proctune.plan_text_analyze</code> — 取一条只读 SQL 的执行计划（TEXT 格式；现场按客户只读要求把 ANALYZE 固定关闭，不执行该 SQL，结果与 plan_text 相同，是估算计划；保留此名只为兼容）</summary><div class="params">参数：<code>sql</code>（STRING）：待分析的只读 SQL（单条语句；写语句不受理）</div><pre><code>EXPLAIN (ANALYZE false, BUFFERS false, FORMAT TEXT) {{sql}}</code></pre></details>
+<details><summary>69. <code>proctune.plan_text_analyze_schema</code> — 先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(TEXT格式;现场按客户只读要求 ANALYZE 固定关闭,估算计划)</summary><div class="params">参数：<code>schema</code>（STRING）：SQL 原本执行时的 schema(statement_history.schema_name);只放行合法标识符；<code>sql</code>（STRING）：待分析的只读 SQL(单条语句;写语句不受理)</div><pre><code>SET search_path TO "{{schema}}", public; EXPLAIN (ANALYZE false, BUFFERS false, FORMAT TEXT) {{sql}}</code></pre></details>
+<details><summary>70. <code>proctune.plan_text_schema</code> — 先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(TEXT格式,不执行该 SQL)</summary><div class="params">参数：<code>schema</code>（STRING）：SQL 原本执行时的 schema(statement_history.schema_name);只放行合法标识符；<code>sql</code>（STRING）：待分析的只读 SQL(单条语句;写语句不受理)</div><pre><code>SET search_path TO "{{schema}}", public; EXPLAIN (ANALYZE false, BUFFERS false, FORMAT TEXT) {{sql}}</code></pre></details>
+<details><summary>71. <code>proctune.proc_def</code> — 按名字取存储过程/函数的定义(源码 + 语言 + 形参 + 所属包);支持包内过程与按包名过滤</summary><div class="params">参数：<code>name</code>（STRING）：过程/函数名；<code>schema</code>（STRING）：模式名;空串表示不限模式；<code>package</code>（STRING）：包名;空串表示不限包(包内过程与独立过程都返回)</div><pre><code>SELECT n.nspname, p.proname, l.lanname, p.prosrc,
+       pg_catalog.pg_get_function_arguments(p.oid) AS args,
+       COALESCE(k.pkgname, '') AS package
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_language l ON l.oid = p.prolang
+LEFT JOIN gs_package k ON k.oid = p.propackageid
+WHERE p.proname = '{{name}}'
+  AND ('{{schema}}' IS NULL OR '{{schema}}' = '' OR n.nspname = '{{schema}}')
+  AND ('{{package}}' IS NULL OR '{{package}}' = '' OR k.pkgname = '{{package}}')
+ORDER BY (n.nspname = 'public') DESC, n.nspname, k.pkgname
+LIMIT 5;</code></pre></details>
+<details><summary>72. <code>proctune.sql_from_history</code> — 按 unique_query_id 从 SQL 历史里取最近一条完整语句</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_query_id</div><pre><code>SELECT schema_name, query
+FROM dbe_perf.statement_history
+WHERE unique_query_id = {{sid}}
+  AND query NOT LIKE '/* missing SQL statement%'
+ORDER BY start_time DESC
+LIMIT 1;</code></pre></details>
+<details><summary>73. <code>proctune.sql_from_statement</code> — 按 unique_sql_id 从 SQL 统计视图里取语句正文</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_sql_id</div><pre><code>SELECT query, user_name FROM dbe_perf.statement
+WHERE unique_sql_id = {{sid}}
+  AND query IS NOT NULL
+  AND LENGTH(TRIM(query)) &gt; 0
+LIMIT 1;</code></pre></details>
+<details><summary>74. <code>proctune.tables</code> — 游标 SQL 涉及的表的页数/行数/大小（证据包</summary><div class="params">参数：<code>names</code>（STRING）：带引号的表名字面量列表，如 &#x27;orders&#x27;,&#x27;items&#x27;。取值必须来自调用方已校验的标识符，不可直接取用户输入</div><pre><code>SELECT n.nspname, c.relname, c.relpages,
+       c.reltuples::bigint AS reltuples,
+       pg_relation_size(c.oid) / current_setting('block_size')::bigint AS curpages,
+       c.relkind,
+       pg_total_relation_size(c.oid) / 1024.0 / 1024.0 AS size_mb
+FROM pg_class c
+LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
+WHERE c.relname IN ({{names}}) AND c.relkind IN ('r','v','p','m');</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>慢 SQL（<code>slowsql</code>，1 条）</h4>
+<details><summary>75. <code>slowsql.slow_sql</code> — 查询平均耗时超阈值的 SQL（dbe_perf.statement）</summary><div class="params">参数：<code>threshold_ms</code>（INTEGER）：平均耗时阈值（毫秒），超过该值的语句才返回；<code>begin_time</code>（DATETIME）：统计起点，格式 yyyy-MM-dd HH:mm:ss；<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT
+  unique_sql_id::text,
+  LEFT(REGEXP_REPLACE(query, '\s+', ' ', 'g'), 180) AS query,
+  n_calls AS calls,
+  ROUND((total_elapse_time/NULLIF(n_calls,0))/1000::numeric, 2) AS avg_ms,
+  ROUND(total_elapse_time/1000000::numeric, 2) AS total_sec,
+  ROUND(cpu_time/1000000::numeric, 2) AS cpu_sec,
+  n_returned_rows AS rows
+FROM dbe_perf.statement
+WHERE (total_elapse_time/NULLIF(n_calls,0))/1000 &gt; {{threshold_ms}}
+  AND n_calls &gt; 0 AND last_updated &gt;= CAST('{{begin_time}}' AS TIMESTAMP)
+ORDER BY total_elapse_time/NULLIF(n_calls,0) DESC
+LIMIT {{limit}};</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>SQL 全文（<code>sqlfetch</code>，2 条）</h4>
+<details><summary>76. <code>sqlfetch.from_history</code> — 按 unique_query_id 从 SQL 历史里取最近一条完整语句</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_query_id</div><pre><code>SELECT schema_name, query
+FROM dbe_perf.statement_history
+WHERE unique_query_id = {{sid}}
+  AND query NOT LIKE '/* missing SQL statement%'
+ORDER BY start_time DESC
+LIMIT 1;</code></pre></details>
+<details><summary>77. <code>sqlfetch.from_statement</code> — 按 unique_sql_id 从 SQL 统计视图里取语句正文</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_sql_id</div><pre><code>SELECT query, user_name FROM dbe_perf.statement
+WHERE unique_sql_id = {{sid}}
+  AND query IS NOT NULL
+  AND LENGTH(TRIM(query)) &gt; 0
+LIMIT 1;</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>SQL 审核（<code>sqlreview</code>，5 条）</h4>
+<details><summary>78. <code>sqlreview.from_history</code> — 按 unique_query_id 从 SQL 历史里取最近一条完整语句</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_query_id</div><pre><code>SELECT schema_name, query
+FROM dbe_perf.statement_history
+WHERE unique_query_id = {{sid}}
+  AND query NOT LIKE '/* missing SQL statement%'
+ORDER BY start_time DESC
+LIMIT 1;</code></pre></details>
+<details><summary>79. <code>sqlreview.from_statement</code> — 按 unique_sql_id 从 SQL 统计视图里取语句正文</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_sql_id</div><pre><code>SELECT query, user_name FROM dbe_perf.statement
+WHERE unique_sql_id = {{sid}}
+  AND query IS NOT NULL
+  AND LENGTH(TRIM(query)) &gt; 0
+LIMIT 1;</code></pre></details>
+<details><summary>80. <code>sqlreview.indexes</code> — 某模式下的索引清单（列顺序/唯一性/扫描次数）</summary><div class="params">参数：<code>schema</code>（STRING）：模式名</div><pre><code>SELECT
+  n.nspname::text                                              AS schema,
+  t.relname::text                                              AS table,
+  i.relname::text                                              AS name,
+  array_to_string(
+    COALESCE((SELECT array_agg(a.attname::text ORDER BY k.ord)
+              FROM (SELECT s AS ord,
+                           (string_to_array(ix.indkey::text, ' '))[s]::smallint AS attnum
+                    FROM generate_series(
+                           1,
+                           array_length(string_to_array(ix.indkey::text, ' '), 1)) s) k
+              JOIN pg_attribute a
+                ON a.attrelid = t.oid AND a.attnum = k.attnum),
+             ARRAY[]::text[]), ',')                            AS columns,
+  ix.indisunique                                               AS is_unique,
+  ix.indisprimary                                              AS is_primary,
+  COALESCE(s.idx_scan, 0)                                      AS scans
+FROM pg_index ix
+JOIN pg_class i     ON i.oid = ix.indexrelid
+JOIN pg_class t     ON t.oid = ix.indrelid
+JOIN pg_namespace n ON n.oid = t.relnamespace
+LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = ix.indexrelid
+WHERE n.nspname = '{{schema}}'
+ORDER BY t.relname, i.relname;</code></pre></details>
+<details><summary>81. <code>sqlreview.tables</code> — 某模式下的表清单（主键/外键/列名）</summary><div class="params">参数：<code>schema</code>（STRING）：模式名</div><pre><code>SELECT
+  n.nspname::text                                              AS schema,
+  c.relname::text                                              AS table,
+  EXISTS (SELECT 1 FROM pg_constraint pk
+          WHERE pk.conrelid = c.oid AND pk.contype = 'p')      AS has_pk,
+  array_to_string(
+    COALESCE((SELECT array_agg(fk.conname::text)
+              FROM pg_constraint fk
+              WHERE fk.conrelid = c.oid AND fk.contype = 'f'),
+             ARRAY[]::text[]), ',')                            AS fks,
+  array_to_string(
+    COALESCE((SELECT array_agg(a.attname::text ORDER BY a.attnum)
+              FROM pg_attribute a
+              WHERE a.attrelid = c.oid AND a.attnum &gt; 0 AND NOT a.attisdropped),
+             ARRAY[]::text[]), ',')                            AS columns
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind = 'r' AND n.nspname = '{{schema}}'
+ORDER BY c.relname;</code></pre></details>
+<details><summary>82. <code>sqlreview.top_sql</code> — 按总耗时排序的 Top N 线上语句（供静态审查用）</summary><div class="params">参数：<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT unique_sql_id::text, query
+FROM dbe_perf.statement
+WHERE n_calls &gt; 0 AND query IS NOT NULL AND LENGTH(TRIM(query)) &gt; 0
+ORDER BY total_elapse_time DESC
+LIMIT {{limit}};</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>SQL 调优（<code>sqltune</code>，18 条）</h4>
+<details><summary>83. <code>sqltune.column_stats</code> — SQL 涉及的表的列统计信息（证据包</summary><div class="params">参数：<code>names</code>（STRING）：带引号的表名字面量列表，如 &#x27;orders&#x27;,&#x27;items&#x27;。取值必须来自调用方已校验的标识符，不可直接取用户输入</div><pre><code>SELECT schemaname, tablename, attname, n_distinct, null_frac, avg_width, correlation,
+       COALESCE(most_common_vals::text, '') AS most_common_vals,
+       COALESCE(most_common_freqs::text, '') AS most_common_freqs,
+       COALESCE(histogram_bounds::text, '') AS histogram_bounds
+FROM pg_stats
+WHERE tablename IN ({{names}});</code></pre></details>
+<details><summary>84. <code>sqltune.column_types</code> — 占位符比较列的真实类型（替换前探测，让合成值类型正确）</summary><div class="params">参数：<code>tables</code>（STRING）：带引号的表名字面量列表，如 &#x27;orders&#x27;,&#x27;items&#x27;。取值必须来自 evidence.extract_tables() 产出的标识符，经 coltypes._quoted_list() 转义，不可直接取用户输入；<code>columns</code>（STRING）：带引号的列名字面量列表，如 &#x27;grp&#x27;,&#x27;uid&#x27;。取值必须来自 placeholder.comparison_column() 提取的标识符，经 coltypes._quoted_list() 转义，不可直接取用户输入</div><pre><code>SELECT n.nspname AS schema_name, c.relname AS table_name,
+       a.attname, format_type(a.atttypid, NULL) AS type_name
+FROM pg_attribute a
+JOIN pg_class c ON c.oid = a.attrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relname IN ({{tables}})
+  AND a.attname IN ({{columns}})
+  AND a.attnum &gt; 0 AND NOT a.attisdropped
+  AND c.relkind IN ('r','v','p','m')
+  AND n.nspname NOT IN ('pg_catalog','information_schema');</code></pre></details>
+<details><summary>85. <code>sqltune.exec_history</code> — 按 unique_query_id 取近 N 天每小时的执行次数、平均 / 最大耗时与执行计划指纹(计划只在变化时给出)</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_query_id(整数,可能为负)；<code>days</code>（INTEGER）：往回看几天(调用方传 7)</div><pre><code>SELECT hour, runs, avg_ms, max_ms, plan_sig,
+       CASE WHEN prev_sig IS NULL OR prev_sig &lt;&gt; plan_sig THEN query_plan END AS query_plan
+  FROM (SELECT hour, runs, avg_ms, max_ms, plan_sig, query_plan,
+               lag(plan_sig) OVER (ORDER BY hour) AS prev_sig
+          FROM (SELECT to_char(hour, 'YYYY-MM-DD HH24:MI') AS hour, runs,
+                       round(avg_us / 1000.0, 1) AS avg_ms,
+                       round(max_us / 1000.0, 1) AS max_ms,
+                       CASE WHEN coalesce(query_plan, '') = '' THEN NULL
+                            ELSE md5(regexp_replace(regexp_replace(query_plan, '\((cost|actual)[^)]*\)', '', 'g'),
+                                                    '[0-9]', '', 'g')) END AS plan_sig,
+                       query_plan
+                  FROM (SELECT date_trunc('hour', start_time) AS hour, query_plan,
+                               row_number() OVER (PARTITION BY date_trunc('hour', start_time)
+                                                  ORDER BY (coalesce(query_plan, '') = ''), start_time DESC) AS rn,
+                               count(*) OVER (PARTITION BY date_trunc('hour', start_time)) AS runs,
+                               avg(db_time) OVER (PARTITION BY date_trunc('hour', start_time)) AS avg_us,
+                               max(db_time) OVER (PARTITION BY date_trunc('hour', start_time)) AS max_us
+                          FROM dbe_perf.statement_history
+                         WHERE unique_query_id = {{sid}}
+                           AND start_time &gt;= now() - {{days}} * INTERVAL '1 day') r
+                 WHERE rn = 1) a) b
+ ORDER BY hour;</code></pre></details>
+<details><summary>86. <code>sqltune.from_history</code> — 按 unique_query_id 从 SQL 历史里取最近一条完整语句</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_query_id（整数，可能为负）</div><pre><code>SELECT schema_name, query
+FROM dbe_perf.statement_history
+WHERE unique_query_id = {{sid}}
+  AND query NOT LIKE '/* missing SQL statement%'
+ORDER BY start_time DESC
+LIMIT 1;</code></pre></details>
+<details><summary>87. <code>sqltune.from_statement</code> — 按 unique_sql_id 从 SQL 统计视图里取语句正文</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_sql_id（整数，可能为负）</div><pre><code>SELECT query, user_name FROM dbe_perf.statement
+WHERE unique_sql_id = {{sid}}
+  AND query IS NOT NULL
+  AND LENGTH(TRIM(query)) &gt; 0
+LIMIT 1;</code></pre></details>
+<details><summary>88. <code>sqltune.indexes</code> — SQL 涉及的表上已有的索引（证据包</summary><div class="params">参数：<code>names</code>（STRING）：带引号的表名字面量列表，如 &#x27;orders&#x27;,&#x27;items&#x27;。取值必须来自调用方已校验的标识符，不可直接取用户输入</div><pre><code>SELECT n.nspname AS schema_name, t.relname AS table_name,
+       i.relname AS index_name,
+       ix.indisunique,
+       ix.indisprimary,
+       i.relpages AS index_relpages,
+       i.reltuples::bigint AS index_reltuples,
+       pg_get_indexdef(ix.indexrelid) AS index_def
+FROM pg_class t
+JOIN pg_index ix ON t.oid = ix.indrelid
+JOIN pg_class i ON i.oid = ix.indexrelid
+JOIN pg_namespace n ON n.oid = t.relnamespace
+WHERE t.relname IN ({{names}});</code></pre></details>
+<details><summary>89. <code>sqltune.key_gucs</code> — 与执行计划相关的关键 GUC 参数（证据包</summary><div class="params">参数：无</div><pre><code>SELECT name, setting, COALESCE(unit, '') AS unit
+FROM pg_settings
+WHERE name IN (
+  'work_mem', 'maintenance_work_mem', 'shared_buffers',
+  'effective_cache_size', 'random_page_cost', 'seq_page_cost',
+  'cpu_tuple_cost', 'cpu_index_tuple_cost', 'cpu_operator_cost', 'block_size',
+  'query_dop',
+  'max_parallel_workers_per_gather', 'from_collapse_limit',
+  'join_collapse_limit', 'geqo_threshold', 'default_statistics_target')
+ORDER BY name;</code></pre></details>
+<details><summary>90. <code>sqltune.plan_json</code> — 取一条只读 SQL 的执行计划（JSON 格式，不执行该 SQL；代价推演用）</summary><div class="params">参数：<code>sql</code>（STRING）：待分析的只读 SQL（单条语句）</div><pre><code>EXPLAIN (ANALYZE false, BUFFERS false, FORMAT JSON) {{sql}}</code></pre></details>
+<details><summary>91. <code>sqltune.plan_json_schema</code> — 先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(JSON格式,不执行该 SQL;代价推演用)</summary><div class="params">参数：<code>schema</code>（STRING）：SQL 原本执行时的 schema(statement_history.schema_name);只放行合法标识符；<code>sql</code>（STRING）：待分析的只读 SQL(单条语句;写语句不受理)</div><pre><code>SET search_path TO "{{schema}}", public; EXPLAIN (ANALYZE false, BUFFERS false, FORMAT JSON) {{sql}}</code></pre></details>
+<details><summary>92. <code>sqltune.plan_text</code> — 取一条只读 SQL 的执行计划（TEXT 格式，不执行该 SQL）</summary><div class="params">参数：<code>sql</code>（STRING）：待分析的只读 SQL（单条语句）</div><pre><code>EXPLAIN (ANALYZE false, BUFFERS false, FORMAT TEXT) {{sql}}</code></pre></details>
+<details><summary>93. <code>sqltune.plan_text_analyze</code> — 取一条只读 SQL 的执行计划（TEXT 格式；现场按客户只读要求把 ANALYZE 固定关闭，不执行该 SQL，结果与 plan_text 相同，是估算计划；保留此名只为兼容）</summary><div class="params">参数：<code>sql</code>（STRING）：待分析的只读 SQL（单条语句；写语句不受理）</div><pre><code>EXPLAIN (ANALYZE false, BUFFERS false, FORMAT TEXT) {{sql}}</code></pre></details>
+<details><summary>94. <code>sqltune.plan_text_analyze_schema</code> — 先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(TEXT格式;现场按客户只读要求 ANALYZE 固定关闭,估算计划)</summary><div class="params">参数：<code>schema</code>（STRING）：SQL 原本执行时的 schema(statement_history.schema_name);只放行合法标识符；<code>sql</code>（STRING）：待分析的只读 SQL(单条语句;写语句不受理)</div><pre><code>SET search_path TO "{{schema}}", public; EXPLAIN (ANALYZE false, BUFFERS false, FORMAT TEXT) {{sql}}</code></pre></details>
+<details><summary>95. <code>sqltune.plan_text_schema</code> — 先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(TEXT格式,不执行该 SQL)</summary><div class="params">参数：<code>schema</code>（STRING）：SQL 原本执行时的 schema(statement_history.schema_name);只放行合法标识符；<code>sql</code>（STRING）：待分析的只读 SQL(单条语句;写语句不受理)</div><pre><code>SET search_path TO "{{schema}}", public; EXPLAIN (ANALYZE false, BUFFERS false, FORMAT TEXT) {{sql}}</code></pre></details>
+<details><summary>96. <code>sqltune.stat_now</code> — 按 unique_sql_id 取这条语句自统计清零以来的执行次数、平均 / 最大 / 最小耗时与 CPU、数据 IO 时间</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_sql_id(整数,可能为负)</div><pre><code>SELECT sum(n_calls) AS calls,
+       round(sum(total_elapse_time) / 1000.0, 1) AS total_ms,
+       round(sum(total_elapse_time) / 1000.0 / nullif(sum(n_calls), 0), 1) AS avg_ms,
+       round(max(max_elapse_time) / 1000.0, 1) AS max_ms,
+       round(min(nullif(min_elapse_time, 0)) / 1000.0, 1) AS min_ms,
+       round(sum(cpu_time) / 1000.0, 1) AS cpu_ms,
+       round(sum(data_io_time) / 1000.0, 1) AS io_ms,
+       sum(n_returned_rows) AS returned_rows
+  FROM dbe_perf.statement
+ WHERE unique_sql_id = {{sid}};</code></pre></details>
+<details><summary>97. <code>sqltune.stat_trend</code> — 按 unique_sql_id 取近 N 天每个 WDR 快照时刻这条语句的累计执行次数与总耗时(用于按小时的趋势)</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_sql_id(整数,可能为负)；<code>days</code>（INTEGER）：往回看几天(调用方传 7)</div><pre><code>SELECT s.snapshot_id,
+       to_char(s.start_ts, 'YYYY-MM-DD HH24:MI:SS') AS snap_ts,
+       sum(t.snap_n_calls) AS calls,
+       sum(t.snap_total_elapse_time) AS total_us
+  FROM snapshot.snap_summary_statement t
+  JOIN snapshot.snapshot s ON s.snapshot_id = t.snapshot_id
+ WHERE t.snap_unique_sql_id = {{sid}}
+   AND s.start_ts &gt;= now() - {{days}} * INTERVAL '1 day'
+ GROUP BY s.snapshot_id, s.start_ts
+ ORDER BY s.snapshot_id;</code></pre></details>
+<details><summary>98. <code>sqltune.stats_freshness</code> — SQL 涉及的表的统计信息新鲜度（推演前置门，不新鲜则不出代价结论）</summary><div class="params">参数：<code>names</code>（STRING）：带引号的表名字面量列表，如 &#x27;orders&#x27;,&#x27;items&#x27;。取值必须来自调用方已校验的标识符，不可直接取用户输入</div><pre><code>SELECT schemaname, relname,
+       n_live_tup, n_dead_tup,
+       COALESCE(to_char(last_analyze, 'YYYY-MM-DD HH24:MI:SS'), 'never') AS last_analyze,
+       COALESCE(to_char(last_autoanalyze, 'YYYY-MM-DD HH24:MI:SS'), 'never') AS last_autoanalyze,
+       analyze_count, autoanalyze_count
+FROM pg_stat_user_tables
+WHERE relname IN ({{names}});</code></pre></details>
+<details><summary>99. <code>sqltune.tables</code> — SQL 涉及的表的页数/行数/大小（证据包</summary><div class="params">参数：<code>names</code>（STRING）：带引号的表名字面量列表，如 &#x27;orders&#x27;,&#x27;items&#x27;。取值必须来自调用方已校验的标识符，不可直接取用户输入</div><pre><code>SELECT n.nspname, c.relname, c.relpages,
+       c.reltuples::bigint AS reltuples,
+       pg_relation_size(c.oid) / current_setting('block_size')::bigint AS curpages,
+       c.relkind,
+       pg_total_relation_size(c.oid) / 1024.0 / 1024.0 AS size_mb
+FROM pg_class c
+LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
+WHERE c.relname IN ({{names}}) AND c.relkind IN ('r','v','p','m');</code></pre></details>
+<details><summary>100. <code>sqltune.version</code> — 数据库版本（证据包的环境行）</summary><div class="params">参数：无</div><pre><code>SELECT version() AS version;</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>Top 存储过程（<code>topproc</code>，1 条）</h4>
+<details><summary>101. <code>topproc.top_procs</code> — 资源消耗最高的存储过程/函数（pg_stat_user_functions）</summary><div class="params">参数：<code>order</code>（STRING）：排序表达式。必须来自调用方的受控白名单，不可直接取用户输入；<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT n.nspname, p.proname, s.calls,
+       ROUND(s.total_time::numeric, 2) AS total_ms,
+       ROUND(s.self_time::numeric, 2) AS self_ms
+FROM pg_stat_user_functions s
+JOIN pg_proc p ON p.oid = s.funcid
+JOIN pg_namespace n ON n.oid = p.pronamespace
+ORDER BY {{order}} NULLS LAST
+LIMIT {{limit}};</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>Top SQL（<code>topsql</code>，2 条）</h4>
+<details><summary>102. <code>topsql.snap_statement</code> — 指定快照时刻的语句累计值（按 sql_id 聚合），用于时间段 Top SQL</summary><div class="params">参数：<code>snap</code>（INTEGER）：快照 ID；<code>limit</code>（INTEGER）：返回条数上限（起点取宽，见注释）</div><pre><code>SELECT
+  snap_unique_sql_id::text AS unique_sql_id,
+  LEFT(REGEXP_REPLACE(COALESCE(NULLIF(REGEXP_REPLACE(max(snap_query), '^(\s*(--[^\n]*(\n|$)|/\*([^*]|\*+[^*/])*\*+/))+\s*', ''), ''), max(snap_query)),
+                     '\s+', ' ', 'g'), 80) AS query,
+  sum(snap_n_calls) AS calls,
+  ROUND(sum(snap_total_elapse_time)/1000000::numeric, 2) AS total_sec,
+  ROUND((sum(snap_total_elapse_time)/NULLIF(sum(snap_n_calls),0))/1000::numeric, 2) AS avg_ms,
+  sum(snap_n_returned_rows) AS rows,
+  ROUND(sum(snap_cpu_time)/1000000::numeric, 2) AS cpu_sec,
+  ROUND(sum(snap_data_io_time)/1000000::numeric, 2) AS io_sec
+FROM snapshot.snap_summary_statement
+WHERE snapshot_id = {{snap}}
+GROUP BY snap_unique_sql_id
+HAVING sum(snap_n_calls) &gt; 0
+ORDER BY sum(snap_total_elapse_time) DESC
+LIMIT {{limit}};</code></pre></details>
+<details><summary>103. <code>topsql.top_sql</code> — 资源消耗最高的语句（dbe_perf.statement）</summary><div class="params">参数：<code>order</code>（STRING）：排序表达式。必须来自调用方的受控白名单，不可直接取用户输入；<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT
+  unique_sql_id::text,
+  LEFT(REGEXP_REPLACE(COALESCE(NULLIF(REGEXP_REPLACE(query, '^(\s*(--[^\n]*(\n|$)|/\*([^*]|\*+[^*/])*\*+/))+\s*', ''), ''), query),
+                     '\s+', ' ', 'g'), 80) AS query,
+  n_calls AS calls,
+  ROUND(total_elapse_time/1000000::numeric, 2) AS total_sec,
+  ROUND((total_elapse_time/NULLIF(n_calls,0))/1000::numeric, 2) AS avg_ms,
+  n_returned_rows AS rows,
+  ROUND(cpu_time/1000000::numeric, 2) AS cpu_sec,
+  ROUND(data_io_time/1000000::numeric, 2) AS io_sec
+FROM (SELECT unique_sql_id,
+             max(query)             AS query,
+             sum(n_calls)           AS n_calls,
+             sum(total_elapse_time) AS total_elapse_time,
+             sum(n_returned_rows)   AS n_returned_rows,
+             sum(n_blocks_hit)      AS n_blocks_hit,
+             sum(n_blocks_fetched)  AS n_blocks_fetched,
+             sum(cpu_time)          AS cpu_time,
+             sum(data_io_time)      AS data_io_time
+        FROM dbe_perf.statement
+       GROUP BY unique_sql_id) s
+WHERE n_calls &gt; 0
+ORDER BY {{order}}
+LIMIT {{limit}};</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>vacuum（<code>vacuum</code>，7 条）</h4>
+<details><summary>104. <code>vacuum.autovac_settings</code> — autovacuum / vacuum_cost 相关 GUC 现值</summary><div class="params">参数：无</div><pre><code>SELECT name, setting
+  FROM pg_settings
+ WHERE name LIKE 'autovacuum%' OR name LIKE 'vacuum_cost%'
+ ORDER BY name;</code></pre></details>
+<details><summary>105. <code>vacuum.autovac_workers</code> — 当前正在执行的 autovacuum worker</summary><div class="params">参数：无</div><pre><code>SELECT pid,
+       COALESCE(sessionid,0) AS sessionid,
+       EXTRACT(EPOCH FROM (now()-xact_start)) AS xact_age_s,
+       COALESCE(query,'') AS query
+  FROM pg_stat_activity
+ WHERE query LIKE 'autovacuum:%';</code></pre></details>
+<details><summary>106. <code>vacuum.bloat_estimate</code> — 表膨胀估算的输入（页数、行数、平均行宽、真实大小）</summary><div class="params">参数：<code>limit</code>（INTEGER）：返回表数上限</div><pre><code>SELECT n.nspname AS schema,
+       c.relname AS "table",
+       c.relpages::bigint                       AS relpages,
+       (pg_relation_size(c.oid) / 8192)::bigint AS real_pages,
+       c.reltuples::bigint                      AS reltuples,
+       pg_relation_size(c.oid)::bigint          AS real_bytes,
+       (SELECT sum(s.avg_width)
+          FROM pg_stats s
+         WHERE s.schemaname = n.nspname AND s.tablename = c.relname) AS avg_row_width
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE c.relkind = 'r'
+   AND n.nspname NOT IN ('pg_catalog','information_schema','snapshot','dbe_perf',
+                         'dbe_pldeveloper','cstore','pg_toast')
+   AND pg_relation_size(c.oid) &gt; 8192 * 128
+ ORDER BY pg_relation_size(c.oid) DESC
+ LIMIT {{limit}};</code></pre></details>
+<details><summary>107. <code>vacuum.dead_tuples</code> — 用户表死元组清单（含存活/死元组数、表大小、autovacuum 服务历史）</summary><div class="params">参数：<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT n.nspname AS schema,
+       t.relname AS "table",
+       t.n_live_tup AS n_live_tup,
+       t.n_dead_tup AS n_dead_tup,
+       c.reltuples AS reltuples,
+       pg_total_relation_size(c.oid) AS table_bytes,
+       EXTRACT(EPOCH FROM (now()-t.last_autovacuum)) AS last_autovacuum_age_s,
+       EXTRACT(EPOCH FROM (now()-t.last_vacuum)) AS last_vacuum_age_s,
+       t.vacuum_count AS vacuum_count,
+       t.autovacuum_count AS autovacuum_count,
+       CASE WHEN 'autovacuum_enabled=false' = ANY(c.reloptions) THEN false ELSE true END AS autovac_enabled,
+       COALESCE(array_to_string(c.reloptions, ','), '') AS reloptions
+  FROM pg_stat_user_tables t
+  JOIN pg_class c ON c.oid = t.relid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname NOT IN ('pg_catalog','information_schema','snapshot','dbe_perf','dbe_pldeveloper','cstore')
+ ORDER BY t.n_dead_tup DESC
+ LIMIT {{limit}};</code></pre></details>
+<details><summary>108. <code>vacuum.freeze_age</code> — 每个库的事务号回卷水位（frozenxid 落后当前快照多少）</summary><div class="params">参数：无</div><pre><code>SELECT d.datname,
+       (txid_snapshot_xmin(txid_current_snapshot())
+        - d.datfrozenxid64::text::numeric)::bigint      AS freeze_age,
+       (SELECT setting::numeric FROM pg_settings
+         WHERE name = 'autovacuum_freeze_max_age')::bigint AS max_age,
+       (SELECT setting FROM pg_settings
+         WHERE name = 'vacuum_freeze_table_age')         AS freeze_table_age
+  FROM pg_database d
+ WHERE d.datallowconn
+ ORDER BY freeze_age DESC;</code></pre></details>
+<details><summary>109. <code>vacuum.kernel_info</code> — 内核事务水位(gs_get_kernel_info,GaussDB 私有):XACT / STANDBY / UNDO 各模块内存态指标</summary><div class="params">参数：无</div><pre><code>SELECT node_name, module, name, value
+  FROM gs_get_kernel_info();</code></pre></details>
+<details><summary>110. <code>vacuum.oldest_xmin</code> — 卡住死元组回收的三类根因（长事务 / 两阶段事务 / 复制槽）</summary><div class="params">参数：无</div><pre><code>SELECT 'long_xact' AS source,
+       CAST(pid AS text) AS identifier,
+       EXTRACT(EPOCH FROM (now()-xact_start)) AS xmin_age_s,
+       'usename=' || COALESCE(usename,'') || ' state=' || COALESCE(state,'') ||
+         ' query=' || COALESCE(substr(query,1,200),'') AS detail
+  FROM pg_stat_activity
+ WHERE xact_start IS NOT NULL
+   AND state IN ('active','idle in transaction')
+   AND client_port IS NOT NULL
+   AND pid &lt;&gt; pg_backend_pid()
+UNION ALL
+SELECT 'prepared_xact' AS source,
+       gid AS identifier,
+       EXTRACT(EPOCH FROM (now()-prepared)) AS xmin_age_s,
+       'owner=' || COALESCE(owner,'') || ' database=' || COALESCE(database,'') AS detail
+  FROM pg_prepared_xacts
+UNION ALL
+SELECT 'replication_slot' AS source,
+       slot_name AS identifier,
+       CAST(NULL AS double precision) AS xmin_age_s,
+       'xmin=' || COALESCE(CAST(xmin AS text),'') ||
+         ' catalog_xmin=' || COALESCE(CAST(catalog_xmin AS text),'') ||
+         ' active=' || CAST(active AS text) AS detail
+  FROM pg_replication_slots
+ WHERE xmin IS NOT NULL OR catalog_xmin IS NOT NULL
+ORDER BY xmin_age_s DESC NULLS FIRST;</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>等待事件（<code>waitevent</code>，2 条）</h4>
+<details><summary>111. <code>waitevent.events</code> — 窗口内等待事件下钻明细（snap_global_wait_events，按具体 event 聚合，非仅 wait_class）</summary><div class="params">参数：<code>b</code>（INTEGER）：起始快照 ID；<code>e</code>（INTEGER）：结束快照 ID；<code>top</code>（INTEGER）：返回条数上限</div><pre><code>WITH b AS (SELECT snap_type AS wait_class, snap_event AS event, sum(snap_wait) AS waits, sum(snap_total_wait_time) AS wt
+             FROM snapshot.snap_global_wait_events WHERE snapshot_id={{b}} GROUP BY snap_type, snap_event),
+     e AS (SELECT snap_type AS wait_class, snap_event AS event, sum(snap_wait) AS waits, sum(snap_total_wait_time) AS wt
+             FROM snapshot.snap_global_wait_events WHERE snapshot_id={{e}} GROUP BY snap_type, snap_event)
+SELECT e.wait_class,
+       e.event,
+       SUM(e.waits-b.waits) AS waits,
+       SUM(e.wt-b.wt)       AS wait_us
+FROM e JOIN b USING (wait_class, event)
+WHERE upper(e.wait_class) NOT IN ('STATUS','NONE')
+GROUP BY e.wait_class, e.event
+HAVING SUM(e.wt-b.wt) &gt; 0
+ORDER BY wait_us DESC LIMIT {{top}};</code></pre></details>
+<details><summary>112. <code>waitevent.instance_time</code> — 窗口内 DB time 各项的增量（snap_global_instance_time 后减前）</summary><div class="params">参数：<code>b</code>（INTEGER）：起始快照 ID；<code>e</code>（INTEGER）：结束快照 ID</div><pre><code>WITH b AS (SELECT snap_stat_name AS stat_name, sum(snap_value) AS v
+             FROM snapshot.snap_global_instance_time
+            WHERE snapshot_id = {{b}} GROUP BY snap_stat_name),
+     e AS (SELECT snap_stat_name AS stat_name, sum(snap_value) AS v
+             FROM snapshot.snap_global_instance_time
+            WHERE snapshot_id = {{e}} GROUP BY snap_stat_name)
+SELECT e.stat_name AS stat_name,
+       (e.v - b.v)  AS delta_us
+  FROM e JOIN b USING (stat_name)
+ ORDER BY delta_us DESC;</code></pre></details>
+</div>
+<div class="sqlgroup"><h4>WDR 报告（<code>wdr</code>，14 条）</h4>
+<details><summary>113. <code>wdr.cache</code> — 窗口内物理读最多的表（snap_summary_statio_all_tables）</summary><div class="params">参数：<code>b</code>（INTEGER）：起始快照 ID；<code>e</code>（INTEGER）：结束快照 ID；<code>top</code>（INTEGER）：返回条数上限</div><pre><code>WITH b AS (SELECT db_name, snap_schemaname, snap_relname,
+                  (COALESCE(snap_heap_blks_read,0)+COALESCE(snap_idx_blks_read,0)) AS phys,
+                  (COALESCE(snap_heap_blks_hit,0)+COALESCE(snap_idx_blks_hit,0))   AS logi
+             FROM snapshot.snap_summary_statio_all_tables WHERE snapshot_id={{b}}),
+     e AS (SELECT db_name, snap_schemaname, snap_relname,
+                  (COALESCE(snap_heap_blks_read,0)+COALESCE(snap_idx_blks_read,0)) AS phys,
+                  (COALESCE(snap_heap_blks_hit,0)+COALESCE(snap_idx_blks_hit,0))   AS logi
+             FROM snapshot.snap_summary_statio_all_tables WHERE snapshot_id={{e}})
+SELECT e.snap_relname,
+       (e.phys - COALESCE(b.phys, 0)) AS phys_read,
+       (e.logi - COALESCE(b.logi, 0)) AS logical_read
+FROM e LEFT JOIN b USING (db_name, snap_schemaname, snap_relname)
+WHERE (e.phys - COALESCE(b.phys, 0)) &gt; 0
+ORDER BY phys_read DESC LIMIT {{top}};</code></pre></details>
+<details><summary>114. <code>wdr.checkpoint</code> — 窗口内检查点次数增量（定时触发 / 请求触发）</summary><div class="params">参数：<code>b</code>（INTEGER）：起始快照 ID；<code>e</code>（INTEGER）：结束快照 ID</div><pre><code>WITH b AS (SELECT snap_node_name, snap_checkpoints_timed AS timed, snap_checkpoints_req AS req
+             FROM snapshot.snap_global_bgwriter_stat WHERE snapshot_id={{b}}),
+     e AS (SELECT snap_node_name, snap_checkpoints_timed AS timed, snap_checkpoints_req AS req
+             FROM snapshot.snap_global_bgwriter_stat WHERE snapshot_id={{e}})
+SELECT COALESCE(SUM(e.timed-b.timed),0) AS checkpoints_timed,
+       COALESCE(SUM(e.req-b.req),0)     AS checkpoints_req
+FROM e JOIN b USING (snap_node_name);</code></pre></details>
+<details><summary>115. <code>wdr.db_stat</code> — 窗口内库级统计增量（提交/回滚/死锁/临时文件/缓存）</summary><div class="params">参数：<code>b</code>（INTEGER）：起始快照 ID；<code>e</code>（INTEGER）：结束快照 ID</div><pre><code>WITH b AS (SELECT snap_datname, snap_xact_commit, snap_xact_rollback, snap_deadlocks,
+                  snap_temp_bytes, snap_blks_hit, snap_blks_read
+             FROM snapshot.snap_summary_stat_database WHERE snapshot_id={{b}}),
+     e AS (SELECT snap_datname, snap_xact_commit, snap_xact_rollback, snap_deadlocks,
+                  snap_temp_bytes, snap_blks_hit, snap_blks_read
+             FROM snapshot.snap_summary_stat_database WHERE snapshot_id={{e}})
+SELECT COALESCE(SUM(e.snap_xact_commit - COALESCE(b.snap_xact_commit, 0)),0)     AS xact_commit,
+       COALESCE(SUM(e.snap_xact_rollback - COALESCE(b.snap_xact_rollback, 0)),0) AS xact_rollback,
+       COALESCE(SUM(e.snap_deadlocks - COALESCE(b.snap_deadlocks, 0)),0)         AS deadlocks,
+       COALESCE(SUM(e.snap_temp_bytes - COALESCE(b.snap_temp_bytes, 0)),0)       AS temp_bytes,
+       COALESCE(SUM(e.snap_blks_hit - COALESCE(b.snap_blks_hit, 0)),0)           AS blks_hit,
+       COALESCE(SUM(e.snap_blks_read - COALESCE(b.snap_blks_read, 0)),0)         AS blks_read
+FROM e LEFT JOIN b USING (snap_datname);</code></pre></details>
+<details><summary>116. <code>wdr.db_summary</code> — 窗口内库级提交数与缓存读写增量</summary><div class="params">参数：<code>b</code>（INTEGER）：起始快照 ID；<code>e</code>（INTEGER）：结束快照 ID</div><pre><code>WITH b AS (SELECT snap_datname, snap_xact_commit, snap_blks_read, snap_blks_hit
+             FROM snapshot.snap_summary_stat_database WHERE snapshot_id={{b}}),
+     e AS (SELECT snap_datname, snap_xact_commit, snap_blks_read, snap_blks_hit
+             FROM snapshot.snap_summary_stat_database WHERE snapshot_id={{e}})
+SELECT COALESCE(SUM(e.snap_xact_commit - COALESCE(b.snap_xact_commit, 0)),0) AS xact_commit,
+       COALESCE(SUM(e.snap_blks_read - COALESCE(b.snap_blks_read, 0)),0)     AS blks_read,
+       COALESCE(SUM(e.snap_blks_hit - COALESCE(b.snap_blks_hit, 0)),0)       AS blks_hit
+FROM e LEFT JOIN b USING (snap_datname);</code></pre></details>
+<details><summary>117. <code>wdr.file_io</code> — 窗口内物理读写最多的文件（snap_summary_file_iostat）</summary><div class="params">参数：<code>b</code>（INTEGER）：起始快照 ID；<code>e</code>（INTEGER）：结束快照 ID；<code>top</code>（INTEGER）：返回条数上限</div><pre><code>WITH b AS (SELECT snap_filenum, snap_dbid, snap_spcid, snap_phyrds AS reads, snap_phywrts AS writes
+             FROM snapshot.snap_summary_file_iostat WHERE snapshot_id={{b}}),
+     e AS (SELECT snap_filenum, snap_dbid, snap_spcid, snap_phyrds AS reads, snap_phywrts AS writes
+             FROM snapshot.snap_summary_file_iostat WHERE snapshot_id={{e}})
+SELECT ('db'||e.snap_dbid||'/spc'||e.snap_spcid||'/f'||e.snap_filenum) AS filename,
+       (e.reads  - COALESCE(b.reads,  0)) AS reads,
+       (e.writes - COALESCE(b.writes, 0)) AS writes
+FROM e LEFT JOIN b USING (snap_filenum, snap_dbid, snap_spcid)
+WHERE (e.reads  - COALESCE(b.reads,  0)) &gt; 0
+   OR (e.writes - COALESCE(b.writes, 0)) &gt; 0
+ORDER BY reads DESC LIMIT {{top}};</code></pre></details>
+<details><summary>118. <code>wdr.load_profile</code> — 【已弃用,勿用】窗口内 DB time 与 CPU time 增量(snap_summary_statement,内连接会漏语句)</summary><div class="params">参数：<code>b</code>（INTEGER）：起始快照 ID；<code>e</code>（INTEGER）：结束快照 ID</div><pre><code>WITH b AS (SELECT snap_unique_sql_id AS sid, sum(snap_total_elapse_time) AS t, sum(snap_cpu_time) AS c
+             FROM snapshot.snap_summary_statement WHERE snapshot_id={{b}} GROUP BY snap_unique_sql_id),
+     e AS (SELECT snap_unique_sql_id AS sid, sum(snap_total_elapse_time) AS t, sum(snap_cpu_time) AS c
+             FROM snapshot.snap_summary_statement WHERE snapshot_id={{e}} GROUP BY snap_unique_sql_id)
+SELECT COALESCE(SUM(e.t-b.t),0)  AS db_time_us,
+       COALESCE(SUM(e.c-b.c),0)  AS cpu_time_us
+FROM e JOIN b USING (sid);</code></pre></details>
+<details><summary>119. <code>wdr.native_report</code> — 调用原生 WDR 报告生成（留底/审计用，失败不影响主流程）</summary><div class="params">参数：<code>begin</code>（INTEGER）：起始快照 ID；<code>end</code>（INTEGER）：结束快照 ID；<code>scope</code>（STRING）：报告范围。调用方须先经 sql_literal 转义；<code>node</code>（STRING）：节点名。调用方须先经 sql_literal 转义</div><pre><code>SELECT generate_wdr_report({{begin}}, {{end}}, 'all', '{{scope}}', '{{node}}') AS report_line;</code></pre></details>
+<details><summary>120. <code>wdr.node_name</code> — 当前节点名</summary><div class="params">参数：无</div><pre><code>SHOW pgxc_node_name;</code></pre></details>
+<details><summary>121. <code>wdr.plan_in_window</code> — 按 unique_query_id 取 WDR 窗口内最近一次真实执行计划(含执行时间、耗时、返回行数)</summary><div class="params">参数：<code>sid</code>（INTEGER）：unique_query_id(整数,可能为负)；<code>begin_time</code>（DATETIME）：窗口起点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss；<code>end_time</code>（DATETIME）：窗口终点(数据库所在时区),格式 yyyy-MM-dd HH:mm:ss</div><pre><code>SELECT to_char(start_time, 'YYYY-MM-DD HH24:MI:SS') AS start_time,
+       round(db_time / 1000.0, 1) AS db_time_ms,
+       n_returned_rows,
+       query_plan
+  FROM dbe_perf.statement_history
+ WHERE unique_query_id = {{sid}}
+   AND start_time &gt;= CAST('{{begin_time}}' AS TIMESTAMP)
+   AND start_time &lt;= CAST('{{end_time}}' AS TIMESTAMP)
+   AND query_plan IS NOT NULL AND query_plan &lt;&gt; ''
+ ORDER BY start_time DESC
+ LIMIT 1;</code></pre></details>
+<details><summary>122. <code>wdr.snapshots</code> — 最近的快照列表</summary><div class="params">参数：<code>limit</code>（INTEGER）：返回条数上限</div><pre><code>SELECT snapshot_id,
+       to_char(start_ts,'YYYY-MM-DD HH24:MI:SS') AS start_ts,
+       to_char(end_ts,'YYYY-MM-DD HH24:MI:SS')   AS end_ts,
+       round(EXTRACT(EPOCH FROM (end_ts-start_ts))/60)::bigint AS dur_min
+FROM snapshot.snapshot ORDER BY snapshot_id DESC LIMIT {{limit}};</code></pre></details>
+<details><summary>123. <code>wdr.top_sql</code> — 窗口内耗时增量最大的语句</summary><div class="params">参数：<code>b</code>（INTEGER）：起始快照 ID；<code>e</code>（INTEGER）：结束快照 ID；<code>top</code>（INTEGER）：返回条数上限</div><pre><code>WITH b AS (SELECT snap_unique_sql_id AS sid, max(snap_query) AS query,
+                  sum(snap_n_calls) AS calls, sum(snap_total_elapse_time) AS elapsed, sum(snap_cpu_time) AS cpu,
+                  sum(COALESCE(snap_sort_spill_size,0)+COALESCE(snap_hash_spill_size,0)) AS spill,
+                  sum(snap_n_blocks_fetched-snap_n_blocks_hit) AS phys
+             FROM snapshot.snap_summary_statement WHERE snapshot_id={{b}} GROUP BY snap_unique_sql_id),
+     e AS (SELECT snap_unique_sql_id AS sid, max(snap_query) AS query,
+                  sum(snap_n_calls) AS calls, sum(snap_total_elapse_time) AS elapsed, sum(snap_cpu_time) AS cpu,
+                  sum(COALESCE(snap_sort_spill_size,0)+COALESCE(snap_hash_spill_size,0)) AS spill,
+                  sum(snap_n_blocks_fetched-snap_n_blocks_hit) AS phys
+             FROM snapshot.snap_summary_statement WHERE snapshot_id={{e}} GROUP BY snap_unique_sql_id)
+SELECT e.sid, e.query,
+       (e.calls   - COALESCE(b.calls,   0)) AS calls,
+       (e.elapsed - COALESCE(b.elapsed, 0)) AS elapsed_us,
+       (e.cpu     - COALESCE(b.cpu,     0)) AS cpu_us,
+       (e.spill   - COALESCE(b.spill,   0)) AS spill_kb,
+       (e.phys    - COALESCE(b.phys,    0)) AS phys_blocks
+FROM e LEFT JOIN b USING (sid)
+WHERE (e.elapsed - COALESCE(b.elapsed, 0)) &gt; 0
+ORDER BY elapsed_us DESC LIMIT {{top}};</code></pre></details>
+<details><summary>124. <code>wdr.waits</code> — 窗口内等待类聚合（snap_global_wait_events）</summary><div class="params">参数：<code>b</code>（INTEGER）：起始快照 ID；<code>e</code>（INTEGER）：结束快照 ID；<code>top</code>（INTEGER）：返回条数上限</div><pre><code>WITH b AS (SELECT snap_type AS wait_class, snap_event AS event, sum(snap_wait) AS waits, sum(snap_total_wait_time) AS wt
+             FROM snapshot.snap_global_wait_events WHERE snapshot_id={{b}} GROUP BY snap_type, snap_event),
+     e AS (SELECT snap_type AS wait_class, snap_event AS event, sum(snap_wait) AS waits, sum(snap_total_wait_time) AS wt
+             FROM snapshot.snap_global_wait_events WHERE snapshot_id={{e}} GROUP BY snap_type, snap_event)
+SELECT e.wait_class,
+       SUM(e.waits-b.waits) AS waits,
+       SUM(e.wt-b.wt)       AS wait_us
+FROM e JOIN b USING (wait_class, event)
+WHERE upper(e.wait_class) NOT IN ('STATUS','NONE')
+GROUP BY e.wait_class
+HAVING SUM(e.wt-b.wt) &gt; 0
+ORDER BY wait_us DESC LIMIT {{top}};</code></pre></details>
+<details><summary>125. <code>wdr.wdr_enabled</code> — WDR 快照功能是否开启</summary><div class="params">参数：无</div><pre><code>SHOW enable_wdr_snapshot;</code></pre></details>
+<details><summary>126. <code>wdr.window</code> — 快照窗口的起止时间与时长</summary><div class="params">参数：<code>begin</code>（INTEGER）：起始快照 ID；<code>end</code>（INTEGER）：结束快照 ID</div><pre><code>SELECT to_char(b.start_ts,'YYYY-MM-DD HH24:MI') AS b_start,
+       to_char(e.start_ts,'YYYY-MM-DD HH24:MI') AS e_start,
+       round(EXTRACT(EPOCH FROM (e.start_ts-b.start_ts))/60)::bigint AS dur
+FROM (SELECT start_ts FROM snapshot.snapshot WHERE snapshot_id={{begin}}) b,
+     (SELECT start_ts FROM snapshot.snapshot WHERE snapshot_id={{end}}) e;</code></pre></details>
+</div>
+<h2 id="附录-b-配置项速查">附录 B：配置项速查<a class="anchor" href="#附录-b-配置项速查">#</a></h2>
+<p><strong><code>agent-config</code></strong>（用户环境读，改了之后新建 / 重启的用户容器生效）：</p>
+<table>
+<tr><th>键</th><th>说明</th></tr>
+<tr><td><code>GRMP_API_HOST</code> / <code>GRMP_API_PORT</code></td><td>中间件地址</td></tr>
+<tr><td><code>GRMP_PATH_PREFIX</code></td><td><strong>必填</strong>。中间件接口路径前缀，中间件团队提供</td></tr>
+<tr><td><code>GRMP_APPKEY</code></td><td>中间件签名的 Appkey；空 = 不签名</td></tr>
+<tr><td><code>GRMP_SIGN_MODE</code></td><td><code>full</code>（Appkey + Timestamp + Signature，私钥在 Secret <code>grmp-sm2</code>）/ <code>headers-only</code>（只发 Appkey + Timestamp，过渡期用）</td></tr>
+<tr><td><code>GRMP_SIGN_USER_ID</code></td><td>SM2 签名的 userId，默认 <code>1234567812345678</code>（国标默认）；OpenSSL 默认是空串，用哪个问清中间件团队</td></tr>
+<tr><td><code>GRMP_SIGN_TIMESTAMP</code></td><td><code>ms</code> / <code>s</code></td></tr>
+<tr><td><code>GRMP_SIGN_FORMAT</code> / <code>GRMP_SIGN_ENCODING</code></td><td>签名格式 <code>raw</code> / <code>der</code>；编码 <code>hex</code> / <code>base64</code></td></tr>
+<tr><td><code>GRMP_SIGN_PAYLOAD</code></td><td>被签名的串，默认 <code>{path}+{timestamp}</code></td></tr>
+<tr><td><code>GRMP_USER_ID_HEADER</code> / <code>GRMP_USER_ID_PARAM</code></td><td>中间件要显式收调用人工号时，放在哪个请求头 / 报文顶层键；都空 = 不发</td></tr>
+<tr><td><code>GRMP_INSTANCE_ALIASES</code></td><td>实例别名，<code>别名=实例IP/库名  # 说明</code>，换行或分号分隔</td></tr>
+<tr><td><code>MODEL_BASE_URL</code> / <code>MODEL_ID</code> / <code>MODEL_PROVIDER_NAME</code></td><td>模型服务（OpenAI 兼容）地址、模型名、显示名</td></tr>
+<tr><td><code>MODEL_INPUT_MODALITIES</code></td><td>模型能接收的输入，如 <code>text,image</code>；空 = 纯文本。只在模型确实支持图片时加 <code>image</code></td></tr>
+<tr><td><code>GSDB_DASH_BASE_URL</code></td><td>回答里「打开报告」链接的站点前缀；空 = <code>/dash/...</code></td></tr>
+<tr><td><code>KB_CLIP_ORIGINS</code></td><td>网页剪藏：允许剪藏的内网网站（<code>协议://主机[:端口]</code>，逗号分隔）；空 = 关闭。网关也读这一项，改完重启网关</td></tr>
+<tr><td><code>KB_CLIP_MAX_MB</code></td><td>网页剪藏：单次剪藏（网页 + 页内图片）总大小上限，默认 30，最大 45</td></tr>
+</table>
+<p><strong><code>gateway-config</code></strong>（网关读，改完重启网关）：</p>
+<table>
+<tr><th>键</th><th>默认</th><th>说明</th></tr>
+<tr><td><code>USER_IMAGE_REGISTRY</code> / <code>USER_IMAGE_TAG</code></td><td>—</td><td>用户容器镜像的仓库前缀与标签；<code>USER_IMAGE_TAG</code> 是升级开关</td></tr>
+<tr><td><code>RUNTIME_MODE</code></td><td><code>ondemand</code></td><td><code>pool</code> = 固定池化</td></tr>
+<tr><td><code>USER_HEADER</code> / <code>ROLES_HEADER</code></td><td><code>X-Agent-User</code> / <code>X-Agent-Roles</code></td><td>统一认证传工号、角色用的请求头名</td></tr>
+<tr><td><code>TRUST_CIDRS</code></td><td>空</td><td>按来源网段信任（与信任凭据二选一或并用）</td></tr>
+<tr><td><code>KB_ADMIN_ROLES</code></td><td><code>kb-admin</code></td><td>哪些角色是知识库管理员</td></tr>
+<tr><td><code>IDLE_SECONDS</code></td><td>1800</td><td>按需模式：闲置多久收起用户容器</td></tr>
+<tr><td><code>FRONTEND_SERVICE</code></td><td><code>frontend</code></td><td>网关把 <code>/dash/*</code> 转给哪个 Service</td></tr>
+<tr><td><code>POOL_IDLE_SECONDS</code></td><td>1800</td><td>固定池化：在用多久没有交互就转保留</td></tr>
+<tr><td><code>POOL_EARLY_IDLE_SECONDS</code></td><td>600</td><td>满员时，闲置超过这么久的在用者可被提前转保留</td></tr>
+<tr><td><code>POOL_RETAIN_DAYS</code></td><td>7</td><td>保留多少天没来就腾挪</td></tr>
+<tr><td><code>POOL_FREE_SLOTS</code></td><td>1</td><td>每个 Pod 后台至少留几个空槽位</td></tr>
+<tr><td><code>POOL_SWEEP_SECONDS</code> / <code>POOL_WAIT_SECONDS</code></td><td>30 / 60</td><td>后台清扫周期；一次请求为分配最多等多久</td></tr>
+</table>
+<p>完整说明见《完整手册》5.5、5.12。</p>
+<h2 id="附录-c-交付物清单">附录 C：交付物清单<a class="anchor" href="#附录-c-交付物清单">#</a></h2>
+<table>
+<tr><th>项</th><th>内容</th></tr>
+<tr><td>代码</td><td><code>https://github.com/sqlrush/gh_gs_k8s_agent</code>，标签 <code>agent-v1.4.2</code></td></tr>
+<tr><td>镜像（由贵方从代码构建）</td><td><code>gaussdb-agent-runtime</code>、<code>gaussdb-agent-kb-import</code>、<code>gaussdb-agent-gateway</code>，标签 <code>agent-v1.4.2-oc1.18.27</code></td></tr>
+<tr><td>标准知识库镜像（我方发布）</td><td><code>gaussdb-agent-kbstd:agent-v1.4.2-oc1.18.27</code>：GaussDB 官方文档集，GHCR 私有仓库（按人开通）或离线包；部署时由 Job <code>kbstd-install-v1-4-2</code> 自动装进知识库</td></tr>
+<tr><td>k8s 清单</td><td><code>k8s/base/</code>（命名空间、RBAC、配置、网关、网络策略、NAS 卷）、<code>k8s/templates/</code>（用户环境模板，构建进网关镜像）、<code>k8s/tools/</code>（<code>runtime-doctor.sh</code>、<code>sso-sim.py</code>、<code>render-pool.py</code>）</td></tr>
+<tr><td>白名单</td><td><code>docs/delivery/scripts.sql</code>（126 条）与 4 份升级增量、《诊断脚本白名单清单》</td></tr>
+<tr><td>文档</td><td>本方案；《从源码构建到 K8s 运行：完整手册》；《前端对接接口说明》v1.1 与 <code>docs/api/</code>；《代码结构说明》；《回答模板化交付说明》</td></tr>
+</table>
+</main></div>
+</body>
+</html>

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# 构建三个镜像。默认本机架构;--platform linux/amd64,linux/arm64 交叉构建(需要 buildx)。
+# 构建后端三个镜像;第 4 个 kbstd(标准知识库:GaussDB 官方文档集)要给 --kbstd <放 kb-std-*.tar.gz 的目录> 才构建
+# (包不在代码仓库里,由我方随版本发布在镜像仓与离线包里),不给就跳过并说明。默认本机架构;--platform linux/amd64,linux/arm64 交叉构建(需要 buildx)。
 #
-# 用法: scripts/build-images.sh [TAG] [--platform P] [--registry R --push [--single-arch]]
+# 用法: scripts/build-images.sh [TAG] [--platform P] [--registry R --push [--single-arch]] [--kbstd <目录>]
 #   本地构建:   scripts/build-images.sh dev
 #   推仓库:     scripts/build-images.sh agent-v1.0.5-oc1.18.27 \
 #                 --registry ghcr.io/sqlrush --platform linux/amd64,linux/arm64 --push
@@ -18,16 +19,22 @@ HERE=$(cd "$(dirname "$0")/.." && pwd)
 TAG=""
 if [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; then TAG=$1; shift; fi
 [ -n "$TAG" ] || TAG="$(git -C "$HERE" describe --tags --always)-oc1.18.27"
-PLATFORM=""; PUSH=""; REGISTRY=""; SINGLE=""
+PLATFORM=""; PUSH=""; REGISTRY=""; SINGLE=""; KBSTD=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --platform) PLATFORM="--platform $2"; shift 2 ;;
     --registry) REGISTRY="${2%/}"; shift 2 ;;
     --push) PUSH="--push"; shift ;;
     --single-arch) SINGLE="yes"; shift ;;
+    --kbstd) KBSTD="$2"; shift 2 ;;
     *) echo "unknown $1" >&2; exit 2 ;;
   esac
 done
+
+if [ -n "$KBSTD" ] && ! ls "$KBSTD"/kb-std-*.tar.gz >/dev/null 2>&1; then
+  echo "--kbstd $KBSTD 里没有标准知识库包(kb-std-*.tar.gz);包由 kb.py docset pack 打出" >&2
+  exit 2
+fi
 
 if [ -n "$PUSH" ]; then
   if [ -z "$REGISTRY" ]; then
@@ -63,6 +70,15 @@ docker buildx build $PLATFORM $LOAD $PUSH -f "$HERE/docker/Dockerfile.gateway" \
   -t "${PREFIX}gaussdb-agent-gateway:$TAG" "$HERE"
 # 前端不在本仓库构建:由前端方自建镜像,按 docs/前端对接接口说明.md 接入
 echo "built: ${PREFIX}gaussdb-agent-{runtime,kb-import,gateway}:$TAG"
+# 标准知识库(官方文档集):只装数据包,部署时由 Job kbstd-install 装进 NAS。包不在代码仓库里,要从 --kbstd 传进来
+if [ -n "$KBSTD" ]; then
+  # shellcheck disable=SC2086
+  docker buildx build $PLATFORM $LOAD $PUSH -f "$HERE/docker/Dockerfile.kbstd" --build-context "kbstd=$KBSTD" \
+    -t "${PREFIX}gaussdb-agent-kbstd:$TAG" "$HERE"
+  echo "built: ${PREFIX}gaussdb-agent-kbstd:$TAG($(cd "$KBSTD" && ls kb-std-*.tar.gz | tr '\n' ' '))"
+else
+  echo "没构建 gaussdb-agent-kbstd(标准知识库):没给 --kbstd <放 kb-std-*.tar.gz 的目录>。它由我方随版本发布,从镜像仓或离线包取"
+fi
 
 if [ -n "$PUSH" ]; then
   echo

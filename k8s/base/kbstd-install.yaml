@@ -1,0 +1,59 @@
+# 标准知识库(GaussDB 官方文档集)随版本自动装上(2026-10-27):`kubectl apply -k` 之后这个一次性 Job 把标准知识库镜像里的包
+# 装进 NAS 的 kb/docsets/,不需要知识库管理员登录,也不经过模型。
+#   · 同版本跳过:装着的内容版本与包里一致就什么都不动,重复 apply 无害;
+#   · 只动 kb/docsets/<代号>/:客户自己的规范、案例、条目一个字节都不碰;换版时旧的留一份在 kb/docsets/.rollback/;
+#   · 装之前逐个文件核对包里记的 sha256,对不上就不换,原有的照旧可用;装完重建 L0 / L1。
+# **Job 名带版本号**:Job 的 Pod 模板不可改,同名对象换镜像再 apply 会报 field is immutable;换版本就是新对象。
+# 7 天后自动删掉;之后再 apply -k 会重跑一遍,同版本跳过。看结果:
+#   kubectl -n gaussdb-agent logs job/kbstd-install-v1-4-2
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kbstd-install-v1-4-2
+  namespace: gaussdb-agent
+  labels: {app: gaussdb-kbstd}
+spec:
+  backoffLimit: 6                  # 导入环境正在写知识库时(持写锁)会失败,稍后重试即可
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels: {app: gaussdb-kbstd}
+    spec:
+      restartPolicy: Never
+      enableServiceLinks: false
+      automountServiceAccountToken: false      # 不调 k8s API
+      securityContext: {runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, runAsNonRoot: true}
+      initContainers:
+        # 标准知识库镜像里只有包:取出来放到两个容器共用的临时盘上
+        - name: unpack
+          image: gaussdb-agent-kbstd:agent-v1.4.2-oc1.18.27
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "cp /kbstd/kb-std-*.tar.gz /packs/ && ls -l /packs"]
+          securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: packs, mountPath: /packs}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 500m, memory: 64Mi}
+      containers:
+        # 用导入镜像里的 kb.py 装(与知识库管理员手工 `kb.py docset install` 是同一段代码)
+        - name: install
+          image: gaussdb-agent-kb-import:agent-v1.4.2-oc1.18.27
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "/opt/agent/config/opencode/skills/gaussdb-kb-import/scripts/kb.py",
+                    "docset", "install", "/packs", "--kb", "/nas/kb"]
+          env:
+            - {name: HOME, value: /tmp}
+            - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
+          securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: nas, mountPath: /nas/kb, subPath: kb}
+            - {name: packs, mountPath: /packs, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}
+      volumes:
+        - {name: nas, persistentVolumeClaim: {claimName: nas}}
+        - {name: packs, emptyDir: {sizeLimit: 2Gi}}
+        - {name: tmp, emptyDir: {sizeLimit: 1Gi}}

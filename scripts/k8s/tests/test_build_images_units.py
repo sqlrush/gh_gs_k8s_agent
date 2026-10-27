@@ -98,3 +98,20 @@ def test_local_build_keeps_plain_tags_and_loads(run):
     for line in calls:
         assert "--load" in line and "--push" not in line
         assert "-t gaussdb-agent-" in line and "ghcr.io" not in line
+
+
+def test_kbstd_is_built_only_from_a_directory_that_holds_a_pack(run, tmp_path):
+    """标准知识库镜像的包不在代码仓库里:给了 --kbstd 才构建第 5 个,目录里没有包就拒绝;不给就照旧三个并说明。"""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    proc, calls = run("t1", "--kbstd", str(empty))
+    assert proc.returncode == 2 and "kb-std-" in proc.stderr and not calls
+    packs = tmp_path / "packs"
+    packs.mkdir()
+    (packs / "kb-std-G25132C-abc.tar.gz").write_bytes(b"x")
+    proc, calls = run("t1", "--kbstd", str(packs))
+    assert proc.returncode == 0, proc.stderr
+    assert len(calls) == 4 and "Dockerfile.kbstd" in calls[-1] and "--build-context kbstd=%s" % packs in calls[-1]
+    assert "-t gaussdb-agent-kbstd:t1" in calls[-1] and "--load" in calls[-1]
+    proc, calls = run("t2")
+    assert "没构建 gaussdb-agent-kbstd" in proc.stdout
