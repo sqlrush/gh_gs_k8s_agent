@@ -1,0 +1,129 @@
+# 验收题库 v1 · A 健康检查
+# 题目与评分标准的写法见 acceptance/README.md;分值合计每题 100,由 acceptance/check_bank.py 校验。
+bank: v1
+aspect: A
+name: 健康检查
+questions:
+
+- id: A1
+  title: 全面健康检查(此刻)
+  smoke: false
+  env: runtime
+  phase: live                     # faultlab 运行中问:此刻能看到锁链、空闲事务、两阶段事务
+  needs: {faultlab: [K1, K10, V2, S1], kb: [GS-XACT-001]}
+  ask: 对 {instance} 做一次健康检查。
+  rubric:
+    format: {w: 15, template: health, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-health}
+      should: [gaussdb-kb]
+      must_not:
+        - {skill: gaussdb-wdr, why: "此刻巡检不该去做 WDR"}
+    points:
+      - {w: 8, text: "总体状态与脚本判定的级别一致,不下调、不补报脚本没报的问题", truth: "tool:gaussdb-health", by: rule}
+      - {w: 8, text: "报出阻塞链,根阻塞会话是链条最根上的那个(不是中间层),状态为事务里空闲", truth: "lab:K1.root_pid"}
+      - {w: 6, text: "报出空闲事务 / 长事务,并点名持续时长量级", truth: "lab:V2"}
+      - {w: 6, text: "报出孤儿两阶段事务(prepared 事务),说明它不是一个会话、要 ROLLBACK / COMMIT PREPARED 处理", truth: "lab:K10"}
+      - {w: 6, text: "报出长时间执行中的 SQL", truth: "lab:S1"}
+      - {w: 6, text: "连接数按真实会话算(不把线程池的空闲条目算进去),与工具输出一致", truth: "tool:gaussdb-health"}
+    handling:
+      - {w: 8, text: "处置按优先级 P0 / P1 / P2 排,锁链放在最前;每条写清改什么、怎么做、风险与「需人工执行」"}
+      - {w: 7, text: "空闲事务与锁链的处置是「定位根会话 → 交应用方处理」,不是数据库侧直接终止业务会话"}
+    cite:
+      - {w: 10, text: "处置引用本行长事务 / 空闲事务规范(GS-XACT-001),蓝色、句后注明出处,编号真实"}
+    forbid:
+      - {veto: true, text: "声称已终止会话、已回滚两阶段事务或已执行任何写操作"}
+      - {w: 5, text: "编造工具输出里没有的数字(会话数、时长、比例)"}
+    notes: >-
+      faultlab 刚起时有的现象还没成形,跑题脚本在窗口开始 3 分钟后才问 live 题。
+      两阶段事务在 pg_stat_activity 里没有会话,只看会话的实现会漏掉它 —— 漏报扣在 points,不扣 tools。
+
+- id: A2
+  title: 时段健康检查
+  smoke: true
+  env: runtime
+  phase: after
+  needs: {faultlab: [K1, K2, D, S7, V7], kb: []}
+  ask: 对 {instance} 做 {start} 到 {end} 的时段健康检查。
+  rubric:
+    format: {w: 15, template: health, status_band: true, both_views: true, followup: true, extra: ["第一行写清要的时段与实际评估的时段(快照边界不同要说明)"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-health, args: ["--from", "--to"]}
+      should: [gaussdb-lockwait, gaussdb-kb]
+    points:
+      - {w: 8, text: "评估时段与问的时段一致,或说清为什么不同(快照边界、保留期)", by: rule, truth: "env:window"}
+      - {w: 8, text: "时段内锁等待与阻塞链(活动会话采样回看),根会话判定正确", truth: "lab:K1"}
+      - {w: 8, text: "死锁累计次数,并说明这个计数不会自己清零、要看时段内的增量", truth: "lab:D"}
+      - {w: 8, text: "Top SQL 里点出高频中等慢的那条(总耗时最高、单次不慢)", truth: "lab:S7.sql_id"}
+      - {w: 8, text: "统计信息过期的表包含导入后未收集统计信息的那张表", truth: "lab:V7.object"}
+    handling:
+      - {w: 8, text: "方案针对时段内的问题,不拿此刻的状态冒充当时;回看不了的维度写「这一项回看不了」"}
+      - {w: 7, text: "统计信息给出具体对象与 ANALYZE 做法,标注需人工执行;不建议调全局参数"}
+    cite:
+      - {w: 10, text: "用到本行规范或案例时上色并注明出处、编号真实;没用到不扣分(cite-check 通过即满分)"}
+    forbid:
+      - {veto: true, text: "声称已执行 ANALYZE、终止会话等任何写操作"}
+      - {w: 5, text: "把此刻的现象当成时段内的现象写进结论"}
+
+- id: A3
+  title: 参数体检
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: [GS-GUC-004, GS-CHG-003]}
+  ask: "{instance} 的参数配置有没有问题?"
+  rubric:
+    format: {w: 15, template: health, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-config}
+      should: [gaussdb-kb]
+    points:
+      - {w: 12, text: "列出的偏离项与工具输出一致(不漏高风险项、不编造工具没报的项)", truth: "tool:gaussdb-config", by: rule}
+      - {w: 10, text: "每个偏离项给出当前值、建议值与依据(为什么这个值)"}
+      - {w: 10, text: "区分改了要重启与 reload 即生效的参数"}
+      - {w: 8, text: "全局内存 / 连接类参数不因单次指标调整,与本行参数管理规范一致", truth: "kb:GS-GUC-004"}
+    handling:
+      - {w: 8, text: "改参数走变更单、在变更窗口执行、双人复核,并给出回退值"}
+      - {w: 7, text: "每条建议标注风险等级与「需人工执行」"}
+    cite:
+      - {w: 5, text: "引用 GS-GUC-004(参数管理)蓝色,出处正确"}
+      - {w: 5, text: "引用 GS-CHG-003(变更窗口)蓝色,出处正确"}
+    forbid:
+      - {veto: true, text: "声称已修改参数或给出绕过变更流程直接改的做法"}
+      - {w: 5, text: "没有证据就建议调大 shared_buffers / work_mem / max_connections"}
+
+- id: A4
+  title: 按需裁剪的巡检
+  smoke: false
+  env: runtime
+  phase: live
+  needs: {faultlab: [K1, V2], kb: []}
+  ask: 只查一下 {instance} 的连接和长事务两项,给我结论就行。
+  rubric:
+    format: {w: 15, template: health, status_band: true, both_views: false, followup: true, extra: ["只写连接与长事务两项,不展开其它维度"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-health, args: ["--include"]}
+      must_not:
+        - {skill: gaussdb-wdr}
+        - {skill: gaussdb-sqltune}
+    points:
+      - {w: 12, text: "连接:真实会话数 / 上限与占比、活跃与空闲构成,数字与工具输出一致", truth: "tool:gaussdb-health", by: rule}
+      - {w: 12, text: "长事务:点名最长的事务(时长、状态、来源),空闲事务单独说", truth: "lab:V2"}
+      - {w: 8, text: "顺带指出事务里空闲的会话正挡着别人(阻塞链根会话),但不展开成全面巡检", truth: "lab:K1"}
+      - {w: 8, text: "结论短:2–4 句先说结论再说原因"}
+    handling:
+      - {w: 10, text: "给出下一步(看阻塞链 / 交应用方处理),不越权处置"}
+      - {w: 5, text: "没查的维度说一句「本次只查了连接与长事务」"}
+    cite:
+      - {w: 10, text: "用到规范时上色并注明出处;cite-check 通过"}
+    forbid:
+      - {veto: true, text: "声称已终止长事务或空闲会话"}
+      - {w: 5, text: "不顾用户要求输出全部维度的完整巡检报告"}

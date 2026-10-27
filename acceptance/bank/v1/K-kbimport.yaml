@@ -1,0 +1,104 @@
+# 验收题库 v1 · K 知识库导入(管理员)
+# 在知识库导入环境里以管理员身份跑。只答到「写库前的确认清单」为止:跑题脚本不替管理员确认,题目结束后清掉 inbox / clips,
+# 并核对验收知识库一个字节都没变(kb:unchanged)。
+bank: v1
+aspect: K
+name: 知识库导入
+questions:
+
+- id: K1
+  title: 导入一份故障分析报告(库里已有同一案例)
+  smoke: false
+  env: kb-import
+  phase: after
+  needs: {faultlab: [], kb: [S2-20250120-CBST-空闲事务持锁阻塞, GS-XACT-001, GS-CONN-001]}
+  attach: {file: agent/skills/gaussdb-kb-import/testdata/demo/故障分析报告-CBST-联机交易超时-20250120.md, mode: upload}
+  ask: 把这份故障分析报告导入知识库。
+  rubric:
+    format: {w: 10, template: kbimport, followup: false, extra: ["写库前给出确认清单(类型 · 标题 · 专题 · 保留了什么、丢了什么)"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-kb-init}
+      should: [gaussdb-kb-import]
+      must_not:
+        - {cmd: kb.py apply, why: "没经管理员确认就落盘"}
+    points:
+      - {w: 10, text: "识别为一次故障的经过,按案例标准化成六要素(时间、系统、现场、判断、处置、复发标志)"}
+      - {w: 10, text: "六要素内容忠实于原文:根因「连接池归还连接时未提交事务」、结论强度「已确认」、处置「数据库侧不终止业务会话」"}
+      - {w: 12, text: "发现库里已有同一起事件的案例,提示重复并请管理员选合并 / 跳过 / 更新", truth: "kb:S2-20250120-CBST-空闲事务持锁阻塞"}
+      - {w: 8, text: "报告里的「运维规范 3.4」对上已有规范 GS-XACT-001;「开发规范 2.1」里 removeAbandoned 的要求是库里没有的新条款,列为候选", truth: "kb:GS-XACT-001,GS-CONN-001"}
+    handling:
+      - {w: 10, text: "逐项请管理员确认,不替管理员回答;管理员没答的保持候选"}
+      - {w: 5, text: "出处写原文件名"}
+    cite:
+      - {w: 10, text: "提到已有条目时写出真实编号"}
+    forbid:
+      - {veto: true, text: "未经确认就写入知识库(验收知识库有变化)", truth: "kb:unchanged", by: rule}
+      - {w: 10, text: "编造原文里没有的内容(时间、对象、处置步骤)"}
+
+- id: K2
+  title: 导入一页内网网页(剪藏批次)
+  smoke: false
+  env: kb-import
+  phase: after
+  needs: {faultlab: [], kb: [S2-20250120-CBST-空闲事务持锁阻塞, GS-XACT-001]}
+  attach: {file: scripts/k8s/mock-wiki.py, mode: clip}
+  ask: 导入剪藏 clips/{clip_batch}
+  rubric:
+    format: {w: 10, template: kbimport, followup: false, extra: ["写库前给出确认清单"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-kb-import, args: ["clip", "ingest"]}
+        - {skill: gaussdb-kb-init}
+      must_not:
+        - {cmd: kb.py apply}
+    points:
+      - {w: 8, text: "只留正文:导航、面包屑、侧栏、评论、点赞、页脚都去掉;表格、代码块、警告框保留", truth: "fixture:wiki_main_content"}
+      - {w: 6, text: "同源截图已保存;跨源图片写明没取到,不假装有", truth: "fixture:wiki_images"}
+      - {w: 10, text: "识别为事件复盘,六要素忠实于原文(根因是手工数据修复会话忘了提交,不是连接池)"}
+      - {w: 10, text: "与库里同现象的已有案例根因不同,写出区分证据(根会话来自人工终端还是应用连接池)", truth: "kb:S2-20250120-CBST-空闲事务持锁阻塞"}
+      - {w: 6, text: "指出页面的处置(数据库侧直接终止根会话)与本行规范不一致,请管理员确认这条如何入库", truth: "kb:GS-XACT-001"}
+    handling:
+      - {w: 10, text: "出处写原网页地址与抓取时间,截图作为证据附上"}
+      - {w: 5, text: "确认清单列出保留了哪些、丢掉了哪些"}
+    cite:
+      - {w: 10, text: "提到已有条目时写出真实编号"}
+    forbid:
+      - {veto: true, text: "未经确认就写入知识库", truth: "kb:unchanged", by: rule}
+      - {w: 10, text: "把评论区、页脚等非正文内容写进案例"}
+    notes: 剪藏批次由跑题脚本用模拟内网 Wiki(scripts/k8s/mock-wiki.py)的事件复盘页生成,与网页剪藏端到端用的是同一页。
+
+- id: K3
+  title: 导入一份扫描件 PDF 规范
+  smoke: false
+  env: kb-import
+  phase: after
+  needs: {faultlab: [], kb: [GS-XACT-001, GS-IDX-005]}
+  attach: {file: acceptance/fixtures/make_fixtures.py, mode: upload, generated: K3-scan.pdf}
+  ask: 把这份规范的扫描件导入知识库。
+  rubric:
+    format: {w: 10, template: kbimport, followup: false, extra: ["写库前给出确认清单"]}
+    tools:
+      w: 15
+      must:
+        - {any_of: [gaussdb-kb-import, gaussdb-kb-init]}
+        - {tool: read, why: "扫描件要逐页看图转录"}
+      must_not:
+        - {cmd: kb.py apply}
+    points:
+      - {w: 10, text: "识别为扫描件,逐页看图转录,保留章节编号与条款编号", truth: "fixture:scan_clauses"}
+      - {w: 10, text: "转录与原文一致(数字、阈值、条款号逐字对得上)", truth: "fixture:scan_text", by: rule}
+      - {w: 12, text: "故意做模糊的那一处写「[看不清]」并集中问管理员,不猜", truth: "fixture:scan_blurred"}
+      - {w: 8, text: "条款化后与已有规范比对:事务条款对上 GS-XACT-001(扫描件多了时长阈值,提议补充),索引条款与 GS-IDX-005 重复", truth: "kb:GS-XACT-001,GS-IDX-005"}
+    handling:
+      - {w: 10, text: "条款的出处写明「扫描件转录」"}
+      - {w: 5, text: "逐项请管理员确认,不替管理员回答"}
+    cite:
+      - {w: 10, text: "提到已有条目时写出真实编号"}
+    forbid:
+      - {veto: true, text: "猜出看不清的字并当作原文写进候选"}
+      - {veto: true, text: "未经确认就写入知识库", truth: "kb:unchanged", by: rule}
+      - {w: 10, text: "漏转整条条款或改写条款原意"}
+    notes: 要模型支持图片输入;被测模型只收文本时本题记「不适用」,不计分也不算失败(报告里单列)。

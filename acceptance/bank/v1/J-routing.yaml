@@ -1,0 +1,86 @@
+# 验收题库 v1 · J 交互与路由
+bank: v1
+aspect: J
+name: 交互与路由
+questions:
+
+- id: J1
+  title: 用实例别名提问
+  smoke: false
+  env: runtime
+  phase: live
+  needs: {faultlab: [K1], kb: []}
+  ask: "{alias} 现在怎么样?"
+  rubric:
+    format: {w: 15, template: health, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 20
+      must:
+        - {skill: gaussdb-login, args: ["--alias"]}
+        - {skill: gaussdb-health}
+      should: [{skill: gaussdb-login, args: ["--list"]}]
+    points:
+      - {w: 15, text: "认出这是部署时登记的实例别名并用别名登录,不去问实例 IP"}
+      - {w: 10, text: "回答里写明别名对应的是哪个实例(库名)"}
+      - {w: 15, text: "「怎么样」按健康检查回答,结论与工具输出一致", truth: "tool:gaussdb-health", by: rule}
+    handling:
+      - {w: 10, text: "处置建议有优先级与边界(锁链交应用方)"}
+    cite:
+      - {w: 10, text: "用到知识库时上色并注明出处;cite-check 通过"}
+    forbid:
+      - {w: 5, text: "拿别名当库名或 IP 去试登录"}
+
+- id: J2
+  title: 多轮追问「展开说说第 2 条」
+  smoke: false
+  env: runtime
+  phase: live
+  needs: {faultlab: [K1, V2, K10], kb: []}
+  ask: 对 {instance} 做一次健康检查。
+  followups: [展开说说第 2 条。]
+  rubric:
+    format: {w: 15, template: any, followup: true, extra: ["只展开第 2 条,不重出整份巡检报告"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-health}
+      should: [gaussdb-lockwait, gaussdb-vacuum, gaussdb-sqltune]
+    points:
+      - {w: 15, text: "第二轮展开的正是上一轮列出的第 2 条(对得上标题与对象)", truth: "turn:1.item2", by: judge}
+      - {w: 15, text: "展开有新的证据:调了针对这一条的诊断,而不是把上一轮的话换个说法"}
+      - {w: 10, text: "沿用上一轮的实例与会话,不让用户重新提供实例信息"}
+    handling:
+      - {w: 10, text: "展开部分给出可执行的处置(改什么、怎么做、风险、需人工执行)"}
+      - {w: 5, text: "结尾提议下一条可展开的方向"}
+    cite:
+      - {w: 10, text: "用到知识库时上色并注明出处;cite-check 通过"}
+    forbid:
+      - {w: 5, text: "展开的不是第 2 条,或与上一轮内容矛盾"}
+    notes: 评分只看第二轮回答;「第 2 条」以第一轮回答里的编号为准(裁判同时拿到两轮原文)。
+
+- id: J3
+  title: 一句话里既要查实例又要规范
+  smoke: false
+  env: runtime
+  phase: live
+  needs: {faultlab: [K1, V2], kb: [GS-XACT-001, RB-LCK-001]}
+  ask: "{instance} 现在有没有事务里空闲的会话?本行规范对这种会话是怎么规定的?"
+  rubric:
+    format: {w: 15, template: fault, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {any_of: [gaussdb-health, gaussdb-lockwait]}
+        - {skill: gaussdb-kb}
+    points:
+      - {w: 15, text: "列出事务里空闲的会话:时长、来源、是否挡着别人", truth: "lab:K1.root_pid,V2"}
+      - {w: 15, text: "本行规定:长事务与空闲事务经应用运维平台定位、由应用方处理,数据库侧不终止业务会话", truth: "kb:GS-XACT-001"}
+      - {w: 10, text: "把规范落到这次的会话上:哪几个该通知应用方、哪个是阻塞链的根"}
+    handling:
+      - {w: 10, text: "按手册给出处置顺序与审批要求", truth: "kb:RB-LCK-001"}
+      - {w: 5, text: "预防:空闲事务告警阈值与应用侧事务收尾"}
+    cite:
+      - {w: 10, text: "规范与手册蓝色、编号真实;不单列「客户知识库参照」一节"}
+    forbid:
+      - {veto: true, text: "声称已终止会话"}
+      - {w: 5, text: "编造规范里没有的阈值(例如本行规定空闲 N 分钟必须 kill)"}

@@ -1,0 +1,238 @@
+# 验收题库 v1 · B 故障排查
+bank: v1
+aspect: B
+name: 故障排查
+questions:
+
+- id: B1
+  title: 交易超时找原因(时段)
+  smoke: true
+  env: runtime
+  phase: after
+  needs: {faultlab: [K1, K2, S7, L1], kb: [GS-XACT-001, RB-LCK-001]}
+  ask: "{instance} 在 {start} 到 {end} 之间交易大量超时,是什么原因?"
+  rubric:
+    format: {w: 15, template: fault, status_band: true, both_views: true, followup: true, extra: ["第一行写清评估时段"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-health, args: ["--from", "--to"]}
+      should: [gaussdb-lockwait, gaussdb-waitevent, gaussdb-topsql, gaussdb-kb]
+      must_not:
+        - {skill: gaussdb-sqltune, why: "还没定位到某条 SQL 就去调优是跑偏"}
+    points:
+      - {w: 10, text: "① 现象里同时摆出关联现象:DB time 构成、锁等待、长 / 空闲事务、Top SQL、活跃会话,各带数字;没采到的写「未采集」"}
+      - {w: 10, text: "根因落在阻塞链:根会话事务里空闲持锁,等锁的会话堆积导致超时", truth: "lab:K1.root_pid"}
+      - {w: 8, text: "证据链分清源头与后果:被挡住的语句耗时高是「等出来的」,不是 SQL 自己慢", truth: "lab:K1"}
+      - {w: 6, text: "另点出批处理 FOR UPDATE 的抖动型等锁或高频慢 SQL 是次要因素,不与主因混为一谈", truth: "lab:K2"}
+      - {w: 6, text: "数字(等锁会话数、最长等待、根会话空闲时长)与工具输出同量级", truth: "tool:gaussdb-lockwait", by: rule}
+    handling:
+      - {w: 8, text: "P0 是处理根会话:先确认归属 → 通知应用方 → 超时未解除再按规范审批后只终止根会话"}
+      - {w: 7, text: "预防:应用侧事务收尾 / 连接池归还检查,数据库侧空闲事务超时与告警阈值,并说明与规范的关系"}
+    cite:
+      - {w: 5, text: "引用 RB-LCK-001(阻塞链处置手册)蓝色,步骤与手册一致"}
+      - {w: 5, text: "引用 GS-XACT-001(数据库侧不终止业务会话)蓝色,出处正确"}
+    forbid:
+      - {veto: true, text: "建议批量终止等待会话,或声称已终止会话"}
+      - {w: 5, text: "把超时归因于 SQL 慢、建议加索引作为主方案"}
+
+- id: B2
+  title: 锁等待、根会话与按规范处置
+  smoke: true
+  env: runtime
+  phase: after
+  needs: {faultlab: [K1, K4, K2], kb: [RB-LCK-001, GS-XACT-001, S2-20250120-CBST-空闲事务持锁阻塞]}
+  ask: "{instance} 在 {start} 到 {end} 之间的锁等待情况怎么样?根会话都有哪些,按本行规范和手册该怎么处置?"
+  rubric:
+    format: {w: 15, template: fault, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-lockwait, args: ["--from", "--to"]}
+      should: [gaussdb-kb, gaussdb-health]
+    points:
+      - {w: 10, text: "行锁阻塞链与层数:root ← mid1 ← mid2 ← 3 个等待者,共四层", truth: "lab:K1.depth"}
+      - {w: 10, text: "根会话算到最根上那个(不是 mid1 / mid2),状态事务里空闲并给出空闲时长量级", truth: "lab:K1.root_pid"}
+      - {w: 8, text: "表级锁排队(LOCK TABLE 独占模式,对象 fl.acct_child)与行锁链分开说,是两件事", truth: "lab:K4.object"}
+      - {w: 6, text: "被阻塞会话数与最长等待时长与工具输出同量级", truth: "tool:gaussdb-lockwait", by: rule}
+      - {w: 6, text: "根因是根会话事务未结束持锁,而不是 SQL 慢"}
+    handling:
+      - {w: 8, text: "处置照手册:定位 application_name / 来源 → 通知应用方 → 超过 10 分钟未解除经值班经理审批后只终止根会话"}
+      - {w: 7, text: "预防:应用补事务收尾与连接池回收配置;数据库侧空闲事务告警阈值"}
+    cite:
+      - {w: 4, text: "引用 RB-LCK-001,蓝色,出处编号正确"}
+      - {w: 3, text: "引用 GS-XACT-001 的审批要求,蓝色"}
+      - {w: 3, text: "提到本行先例(空闲事务持锁阻塞的案例)并说明与这次的异同"}
+    forbid:
+      - {veto: true, text: "建议批量终止等待会话 / 声称已终止会话"}
+      - {w: 5, text: "编造 pid 或时长(与真值、工具输出都对不上)"}
+
+- id: B3
+  title: 死锁日志分析
+  smoke: true
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: [GS-DML-003, S2-20250812-CBMS-死锁频发]}
+  attach: {file: agent/tests/fixtures/deadlock/og5_sanitized.log, mode: paste}
+  ask: 帮我分析一下这段数据库日志里的死锁,是什么原因,怎么改?
+  rubric:
+    format: {w: 15, template: fault, status_band: false, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-lockwait, args: ["--deadlock-log"]}
+      should: [gaussdb-kb]
+    points:
+      - {w: 8, text: "日志里共 4 次死锁", truth: "fixture:deadlocks", by: rule}
+      - {w: 8, text: "两会话交叉更新同表两行(fl.acct id 10 / 11)是第一种形态", truth: "fixture:D1"}
+      - {w: 8, text: "三会话成环(fl.acct id 20 / 21 / 22)单独识别", truth: "fixture:D2"}
+      - {w: 8, text: "跨表互等(fl.acct_child 与 fl.acct)单独识别", truth: "fixture:D3"}
+      - {w: 8, text: "唯一索引插入冲突(fl.uniq_race 同时插入)单独识别,并说明它不是行更新顺序问题", truth: "fixture:D6"}
+    handling:
+      - {w: 8, text: "不同形态给不同改法:统一加锁顺序(按主键升序) / 一开始就 SELECT … FOR UPDATE / 固定跨表写入顺序 / 唯一键冲突改业务去重或重试"}
+      - {w: 7, text: "说明死锁由内核检测后回滚其中一个事务,应用要能捕获并重试"}
+    cite:
+      - {w: 10, text: "引用本行更新顺序规范 GS-DML-003(按主键升序、多表固定顺序)蓝色;可引用本行死锁案例"}
+    forbid:
+      - {w: 5, text: "编造日志里没有的语句、表名或次数"}
+
+- id: B4
+  title: 表越来越大、查询变慢
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [V1, V5, V2, V3, V4], kb: [GS-VAC-002, S3-20250318-CBMS-大表死元组累积无法清理]}
+  ask: "{instance} 上有几张表越来越大,查询也变慢了,帮我看看怎么回事。"
+  rubric:
+    format: {w: 15, template: fault, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-vacuum}
+      should: [gaussdb-health, gaussdb-kb]
+    points:
+      - {w: 8, text: "点名 autovacuum 被关掉的表(表级关闭)与死元组比例", truth: "lab:V1.object"}
+      - {w: 8, text: "另一张表 autovacuum 是开着的但被表级限速(cost_delay / cost_limit)追不上,不能判成「关了」", truth: "lab:V5.object"}
+      - {w: 12, text: "回收水位被卡的来源分清三类:长事务、两阶段事务(给出 gid)、复制槽,各自成行", truth: "lab:V2,V3,V4"}
+      - {w: 6, text: "死元组数量 / 比例与工具输出一致", truth: "tool:gaussdb-vacuum", by: rule}
+      - {w: 6, text: "说明水位被卡时单纯 VACUUM(甚至 VACUUM FULL)也收不回死元组"}
+    handling:
+      - {w: 8, text: "三类来源建议不同:长事务交应用方结束;两阶段事务 ROLLBACK / COMMIT PREPARED;复制槽删槽或让消费端跟上"}
+      - {w: 7, text: "关掉的打开、限速的调表级 cost 参数;热小表按本行口径调表级阈值;都标「需人工执行」"}
+    cite:
+      - {w: 10, text: "引用 GS-VAC-002(热表表级阈值)蓝色;可引用本行大表死元组案例"}
+    forbid:
+      - {veto: true, text: "声称已执行 VACUUM / 删除复制槽 / 回滚两阶段事务"}
+      - {w: 5, text: "只说「有死元组,建议 vacuum」而不分来源"}
+
+- id: B5
+  title: 临时文件落盘与调大 work_mem
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [S2, S6], kb: [GS-GUC-004, S3-20250515-CBMS-排序下盘]}
+  ask: "{instance} 在 {start} 到 {end} 之间临时文件落盘严重吗?能不能直接把全局 work_mem 调大?"
+  rubric:
+    format: {w: 15, template: fault, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-memanalyze}
+      should: [gaussdb-wdr, gaussdb-topsql, gaussdb-kb]
+    points:
+      - {w: 10, text: "落盘最多的语句点名到具体 SQL(窗口函数 + 小 work_mem 那条、三层派生表那条)", truth: "lab:S6.sql_id"}
+      - {w: 10, text: "落盘量 / 次数与工具输出同量级", truth: "tool:gaussdb-memanalyze", by: rule}
+      - {w: 10, text: "回答「能不能全局调大」:不能;理由是全局 work_mem 按每个算子每个会话放大、会挤爆内存,且本行全局参数不因单次指标调整"}
+      - {w: 10, text: "给出替代:会话级 / 语句级设置 work_mem、改写 SQL 减少排序 / 哈希规模"}
+    handling:
+      - {w: 8, text: "方案按 P0 / P1 / P2 排,先治语句再谈参数"}
+      - {w: 7, text: "会话级参数的具体写法与适用范围(只给那几条报表 / 批量语句)"}
+    cite:
+      - {w: 10, text: "引用 GS-GUC-004 蓝色;可引用本行排序下盘案例"}
+    forbid:
+      - {veto: true, text: "声称已修改参数"}
+      - {w: 5, text: "直接给出「全局 work_mem 调到 xx」作为主方案"}
+
+- id: B6
+  title: 连接数快满了(前提不成立)
+  smoke: false
+  env: runtime
+  phase: live
+  needs: {faultlab: [K1, V2], kb: [GS-CONN-001, WK-0001, S2-20250725-CBST-连接数逼近上限]}
+  ask: "{instance} 连接数快满了,怎么办?"
+  rubric:
+    format: {w: 15, template: fault, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-health}
+      should: [gaussdb-lockwait, gaussdb-kb]
+    points:
+      - {w: 12, text: "先核实:给出真实会话数 / 上限与占比;实际没到告警线就直说「目前没有快满」", truth: "env:conn"}
+      - {w: 10, text: "会话构成:活跃、空闲、事务里空闲各多少,来源分布"}
+      - {w: 10, text: "指出事务里空闲 / 被锁挡住的会话会让连接堆积,这是连接涨的常见源头", truth: "lab:K1"}
+      - {w: 8, text: "说明线程池模式下空闲线程条目不算会话"}
+    handling:
+      - {w: 8, text: "真要处理时:先查连接泄漏(按来源分组看建立时间)、再看连接池配置,不首选调大 max_connections"}
+      - {w: 7, text: "建议加连接数告警与按来源的监控"}
+    cite:
+      - {w: 5, text: "引用本行连接池规范 GS-CONN-001 蓝色"}
+      - {w: 5, text: "可引用连接泄漏排查经验 WK-0001,并说明该条未验证"}
+    forbid:
+      - {w: 5, text: "不核实就顺着「快满了」的前提给扩容方案"}
+
+- id: B7
+  title: 等待事件构成(时段)
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [L1, K2, S2, K9], kb: [GS-WAIT-001]}
+  ask: "{instance} 在 {start} 到 {end} 之间等待事件主要是什么?"
+  rubric:
+    format: {w: 15, template: fault, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-waitevent}
+      should: [gaussdb-wdr, gaussdb-kb]
+    points:
+      - {w: 10, text: "DB time 构成(CPU / IO / 锁 / 轻量锁 / 其它)的占比,数字与工具输出一致", truth: "tool:gaussdb-waitevent", by: rule}
+      - {w: 10, text: "轻量锁里点出 WAL 相关(提交风暴)", truth: "lab:L1"}
+      - {w: 8, text: "锁等待事件的累计(批处理 FOR UPDATE 的抖动型等锁)", truth: "lab:K2"}
+      - {w: 6, text: "IO 占比上升与落盘语句的关系", truth: "lab:S2"}
+      - {w: 6, text: "提到表扩展相关等待(并发插入抢扩展锁)", truth: "lab:K9"}
+    handling:
+      - {w: 8, text: "WAL 类等待优先拆批与调提交策略,不调 wal_buffers"}
+      - {w: 7, text: "每类等待给出下一步该用哪个诊断(锁 → 阻塞链;IO → 落盘语句)"}
+    cite:
+      - {w: 10, text: "引用 GS-WAIT-001 蓝色,出处正确"}
+    forbid:
+      - {w: 5, text: "没有证据就建议调 wal_buffers 或其它内核参数"}
+
+- id: B8
+  title: 内存使用高是谁占的
+  smoke: false
+  env: runtime
+  phase: live
+  needs: {faultlab: [S2, S6, S5], kb: []}
+  ask: "{instance} 内存使用很高,是谁占的?"
+  rubric:
+    format: {w: 15, template: fault, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-memanalyze}
+      should: [gaussdb-health]
+    points:
+      - {w: 10, text: "内存的大头分布(共享内存 / 会话 / 内存上下文),数字与工具输出一致", truth: "tool:gaussdb-memanalyze", by: rule}
+      - {w: 10, text: "点名占用多的会话 / 语句(大排序、大哈希)", truth: "lab:S6"}
+      - {w: 10, text: "估算偏差导致的内存问题(估几行实际上万行)", truth: "lab:S5"}
+      - {w: 10, text: "区分「共享缓冲区占满是正常」与「会话内存涨是问题」"}
+    handling:
+      - {w: 8, text: "方案先治语句(改写、统计信息),再谈参数;参数调整要有证据"}
+      - {w: 7, text: "告诉用户哪些维度是此刻值、过去的分布回看不了"}
+    cite:
+      - {w: 10, text: "用到知识库时上色并注明出处;cite-check 通过"}
+    forbid:
+      - {veto: true, text: "声称已终止会话或已修改内存参数"}
+      - {w: 5, text: "没有证据就给出调整 shared_buffers / max_process_memory 的具体值"}

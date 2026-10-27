@@ -1,0 +1,85 @@
+# 验收题库 v1 · D 榜单
+bank: v1
+aspect: D
+name: 榜单
+questions:
+
+- id: D1
+  title: 时段 Top SQL
+  smoke: true
+  env: runtime
+  phase: after
+  needs: {faultlab: [K1, S7, S3], kb: []}
+  ask: 列一下 {instance} 在 {start} 到 {end} 之间的 Top SQL。
+  rubric:
+    format: {w: 15, template: ranking, followup: true, extra: ["第一行写清评估时段", "榜单是表格且写明按什么排"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-topsql, args: ["--from", "--to"]}
+    points:
+      - {w: 10, text: "榜单条目、排序与工具输出一致(不增不减、数字对得上)", truth: "tool:gaussdb-topsql", by: rule}
+      - {w: 10, text: "按总耗时排时榜首是等锁的语句,并点明它大部分时间是被挡住的、不是自己慢,引导去看锁等待", truth: "lab:K1"}
+      - {w: 10, text: "点出按自身耗时(CPU + IO)最重的是高频中等慢的那条", truth: "lab:S7.sql_id"}
+      - {w: 10, text: "「为什么排上来」每条落到数字:次数、平均耗时、占比"}
+    handling:
+      - {w: 10, text: "「建议下一步」按条给出该用哪个诊断(等锁 → 锁等待;自身慢 → 调优)"}
+      - {w: 5, text: "说明是否已排除内核系统 SQL"}
+    cite:
+      - {w: 10, text: "用到知识库时上色并注明出处;cite-check 通过"}
+    forbid:
+      - {w: 5, text: "把等锁语句当成「最慢的 SQL」建议去调优"}
+
+- id: D2
+  title: 慢 SQL 列表(排除系统 SQL)
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [S3, S4], kb: []}
+  ask: 给我 {instance} 最近的慢 SQL 列表。
+  rubric:
+    format: {w: 15, template: ranking, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-slowsql}
+      must_not:
+        - {skill: gaussdb-slowsql, args: ["--include-system"], why: "用户没要求看系统 SQL"}
+    points:
+      - {w: 10, text: "列表与工具输出一致(阈值、条数、排序)", truth: "tool:gaussdb-slowsql", by: rule}
+      - {w: 10, text: "NOT IN 碰可空列的那条在列", truth: "lab:S3.sql_id"}
+      - {w: 10, text: "索引列上套类型转换的那条在列", truth: "lab:S4.sql_id"}
+      - {w: 10, text: "写明用的阈值与时间范围,并说明已排除内核系统 SQL"}
+    handling:
+      - {w: 10, text: "每条给出下一步(调优 / 看计划),优先级按影响排"}
+      - {w: 5, text: "正在执行、还没跑完的慢语句不在执行历史里,需要时提示去看当前活动会话"}
+    cite:
+      - {w: 10, text: "用到知识库时上色并注明出处;cite-check 通过"}
+    forbid:
+      - {w: 5, text: "编造榜单里没有的 sql_id 或耗时"}
+
+- id: D3
+  title: 按自身耗时与平均耗时分别排
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [S7, S3, S4], kb: []}
+  ask: "{instance} 在 {start} 到 {end} 之间,分别按 CPU+IO 自身耗时和按单次平均耗时排一下 Top SQL,两张榜一样吗?"
+  rubric:
+    format: {w: 15, template: ranking, followup: true, extra: ["两张榜分开列"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-topsql, args: ["--by"]}
+    points:
+      - {w: 10, text: "按自身耗时排榜首是高频中等慢的那条", truth: "lab:S7.sql_id"}
+      - {w: 10, text: "按单次平均排榜首是 NOT IN 那条,第二是索引列类型转换那条", truth: "lab:S3.sql_id,S4.sql_id"}
+      - {w: 10, text: "回答「两张榜不一样」并解释:一个是累计最重(次数多),一个是单次最慢"}
+      - {w: 10, text: "两张榜的数字与工具输出一致", truth: "tool:gaussdb-topsql", by: rule}
+    handling:
+      - {w: 10, text: "指出两类问题的优化收益不同:高频的那条优化后全库收益最大"}
+      - {w: 5, text: "说明是否已排除内核系统 SQL"}
+    cite:
+      - {w: 10, text: "用到知识库时上色并注明出处;cite-check 通过"}
+    forbid:
+      - {w: 5, text: "两张榜给成同一份"}

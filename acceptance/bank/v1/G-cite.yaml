@@ -1,0 +1,115 @@
+# 验收题库 v1 · G 知识引用
+# 这一组专看「引得对不对」:该引的引了、颜色分得清(本行蓝 #2f6fdb / 官方青 #0f7c86)、编号真实、同现象不同根因写区分证据、看适用性。
+bank: v1
+aspect: G
+name: 知识引用
+questions:
+
+- id: G1
+  title: 处置先例
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: [S2-20250120-CBST-空闲事务持锁阻塞, RB-LCK-001, GS-XACT-001]}
+  ask: 根会话事务里空闲、把一堆交易锁住了,我们行以前处理过这种情况吗?当时怎么处理的?
+  rubric:
+    format: {w: 15, template: qa, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-kb, args: ["query"]}
+      should: [{skill: gaussdb-kb, args: ["show"]}]
+    points:
+      - {w: 12, text: "找到本行先例:连接池归还连接时未提交事务导致的空闲事务持锁阻塞", truth: "kb:S2-20250120-CBST-空闲事务持锁阻塞", by: rule}
+      - {w: 10, text: "当时的处置:数据库侧不终止业务会话,按 application_name + 来源地址定位,应用方重启连接池并补回收配置"}
+      - {w: 10, text: "手册步骤:定位根会话 → 通知应用运维平台 → 应用方处理 → 超 10 分钟未解除经值班经理审批后数据库侧终止根会话", truth: "kb:RB-LCK-001"}
+      - {w: 8, text: "复发标志:同一个 application_name 反复成为根会话"}
+    handling:
+      - {w: 10, text: "说明手册的不适用情形(根会话是主备同步、备份或变更窗口内的 DDL)"}
+      - {w: 5, text: "提议需要时去实例上核对当前是否有同类阻塞"}
+    cite:
+      - {w: 5, text: "案例、手册、规范三条都上蓝色并注明出处,编号真实"}
+      - {w: 5, text: "用到多条时句后写 [1] [2],与第一行解答来源的顺序一致"}
+    forbid:
+      - {w: 5, text: "编造本行没有的先例细节(时间、系统、处置结果)"}
+
+- id: G2
+  title: 同现象不同根因
+  smoke: true
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: [S2-20250224-CBST-偶现单条update慢, S2-20250611-CBST-异步任务日志表update抖动, S3-20250505-CBST-偶现update慢-网络抖动]}
+  ask: 单条 update 平时几毫秒,偶尔要好几秒,我们行以前遇到过吗?是什么原因?
+  rubric:
+    format: {w: 15, template: qa, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-kb, args: ["query"]}
+    points:
+      - {w: 12, text: "列出两类根因的先例:autovacuum 尾部空页回收持 8 级锁与 DML 互相取消;网络抖动", truth: "kb:S2-20250224-CBST-偶现单条update慢,S3-20250505-CBST-偶现update慢-网络抖动", by: rule}
+      - {w: 14, text: "写出区分证据:凭什么判是哪一种(autovacuum 日志与截断时刻对得上、语句服务端耗时正常而客户端耗时高……)"}
+      - {w: 8, text: "指出另一个先例(异步任务日志表)与第一类同根因", truth: "kb:S2-20250611-CBST-异步任务日志表update抖动"}
+      - {w: 6, text: "不替用户下结论:说明要看实例上的证据才能判定是哪一种"}
+    handling:
+      - {w: 10, text: "两类根因各自的处置要点(表级 vacuum 参数 / 截断开关;网络侧排查)"}
+      - {w: 5, text: "提议去实例上取证(锁等待回看、vacuum 记录)"}
+    cite:
+      - {w: 10, text: "三个案例都蓝色、编号真实、句后编号与第一行顺序一致"}
+    forbid:
+      - {w: 5, text: "只给一种根因,或把两种根因混成一句"}
+
+- id: G3
+  title: 官方说法与本行要求
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: [PD-G25132C-02396, PD-G25132C-02410, GS-GUC-004]}
+  ask: shared_buffers 和 work_mem 官方建议怎么设?跟我们行里的要求一样吗?
+  rubric:
+    format: {w: 15, template: qa, followup: true, extra: ["第一行解答来源之后写「两者不一致,以贵行规范为准」(或说明哪里一致)"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-kb, args: ["query"]}
+    points:
+      - {w: 10, text: "官方对 shared_buffers 的取值说明与条目一致", truth: "kb:PD-G25132C-02396", by: judge}
+      - {w: 10, text: "官方对 work_mem 的取值说明与条目一致", truth: "kb:PD-G25132C-02410", by: judge}
+      - {w: 12, text: "本行要求:全局参数由绑核方案与容量模型固定,不因单次指标调整;报表类需求走只读实例或会话级参数", truth: "kb:GS-GUC-004"}
+      - {w: 8, text: "讲清两者的关系:官方给的是一般建议,本行是对生产实例的约束,冲突时以本行为准"}
+    handling:
+      - {w: 10, text: "给出在本行约束下的做法(会话级 work_mem、只读实例)"}
+      - {w: 5, text: "引申:为什么全局 work_mem 不能随便调大"}
+    cite:
+      - {w: 6, text: "官方条目青色、本行规范蓝色,一眼分得清"}
+      - {w: 4, text: "cite-check 通过"}
+    forbid:
+      - {w: 5, text: "把官方建议说成本行要求(颜色或措辞混淆)"}
+
+- id: G4
+  title: 条目适不适用本实例
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: [KD-0001, EP-CBST]}
+  ask: 知识库里那个 EXCEPTION 块导致 LockMgrLock 争用的缺陷,{instance} 会中吗?我们 CBST 呢?
+  rubric:
+    format: {w: 15, template: any, followup: true, extra: ["先给结论(会 / 不会 / 判断不了)再给依据"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-kb}
+        - {any_of: [gaussdb-login, gaussdb-health], why: "要取实例的产品与版本"}
+    points:
+      - {w: 10, text: "缺陷影响 505.1–505.2、505.2.1 修复", truth: "kb:KD-0001", by: rule}
+      - {w: 12, text: "按实例实际的产品与版本判断适不适用(取到的版本写出来)", truth: "env:instance.version"}
+      - {w: 10, text: "CBST 是 505.2.0,在受影响范围内", truth: "kb:EP-CBST"}
+      - {w: 8, text: "说明适用不等于已发生:要看 LockMgrLock 等待占比与存储过程的 EXCEPTION 用法"}
+    handling:
+      - {w: 10, text: "受影响的给出规避与升级建议(升到 505.2.1 及以上;减少循环里的 EXCEPTION 块)"}
+      - {w: 5, text: "版本取不到时如实说「判断不了」并说明需要什么信息"}
+    cite:
+      - {w: 10, text: "缺陷与画像条目蓝色、编号真实"}
+    forbid:
+      - {veto: true, text: "不看版本就断言「会中」或「不会中」并给出编造的版本号"}
+      - {w: 5, text: "把只适用 GaussDB 505 的缺陷套到其它产品上"}

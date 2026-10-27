@@ -12,6 +12,7 @@ GaussDB 数据库智能体的**后端**：把 opencode 与 GaussDB / openGauss �
 | [docs/delivery/白名单脚本清单.md](docs/delivery/白名单脚本清单.md) | 中间件团队 | 126 条诊断脚本的用途、参数与 SQL 全文；全量 `scripts.sql` 与 4 份升级增量都在 `docs/delivery/` |
 | [docs/从源码构建到K8s运行-完整手册.md](docs/从源码构建到K8s运行-完整手册.md) | 实施 / 运维 / 开发 | 从拉代码、构建 3 个镜像、推仓库，到部署进 K8s、开通工号、对话里跑通健康检查；可选的固定池化。每步带实测输出 |
 | [docs/前端对接接口说明.md](docs/前端对接接口说明.md) | 前端 | 接入后端的全部接口（v1.1）：身份与网关行为、对话接口与事件流、报告接口、大盘链接格式、回答正文的渲染与版式、联调清单 |
+| [docs/智能体验收方案.md](docs/智能体验收方案.md) | 后端 / 项目经理 | **每次升级智能体怎么验收**：11 个方面 48 道题、每题的评分标准（版式、工具、要点、处置、引用、禁止项）、三层评分、失分归因到工具 / 提示词 / 模型、发版门槛；题库在 [acceptance/](acceptance/) |
 | [docs/代码结构说明.md](docs/代码结构说明.md) | 后端 / 前端 / 双方的编码智能体 | 逐个目录说明每个文件的作用、一个请求在代码里怎么走、改什么去哪里（有守卫测试，加删文件要同步） |
 | [docs/api/](docs/api/) | 前端 / 后端 | 机器可读的接口定义：`opencode-1.18.27-openapi.json`（对话接口全集）、`reports-contract.json`（报告字段契约，后端单测逐条核对） |
 | [docs/delivery/回答模板化-交付说明.md](docs/delivery/回答模板化-交付说明.md) | 平台 / 中间件 / 前端 | 回答模板化（2026-10-26）要做的事：白名单增量 3 条、镜像升级、前端第二种颜色、装后冒烟 |
@@ -35,7 +36,8 @@ docker/      Dockerfile(base → runtime / kb-import)、Dockerfile.gateway、容
 gateway/     接入网关
 k8s/         base/ 部署清单;templates/ 网关按工号建 Pod 的模板;tools/ 现场工具(runtime-doctor、sso-sim、render-pool);local/ 本地测试集群覆盖
 scripts/     构建、离线打包、大盘样例数据(dash-samples.py)、测试集群与端到端脚本
-docs/        构建部署手册、前端对接接口说明、代码结构说明、api/ 机器可读的接口定义
+docs/        构建部署手册、前端对接接口说明、代码结构说明、智能体验收方案、api/ 机器可读的接口定义
+acceptance/  智能体版本验收题库:bank/v1/ 48 题评分标准、fixtures/ 夹具、check_bank.py 离线校验
 ```
 
 前端代码约定放在 `frontend/`（由前端方建立与维护）。
@@ -44,7 +46,7 @@ docs/        构建部署手册、前端对接接口说明、代码结构说明�
 
 | 范围 | 负责方 | 目录 |
 |---|---|---|
-| 后端：网关、用户镜像、技能、部署清单、构建与打包脚本 | 我方 | `agent/`、`docker/`、`gateway/`、`k8s/`、`scripts/` |
+| 后端：网关、用户镜像、技能、部署清单、构建与打包脚本、验收题库 | 我方 | `agent/`、`docker/`、`gateway/`、`k8s/`、`scripts/`、`acceptance/` |
 | 前端：页面、大盘、前端镜像 | 前端方 | `frontend/` |
 | 接口：对话 / 报告接口、事件、链接格式、报告字段契约 | 双方共同 | `docs/前端对接接口说明.md`、`docs/api/` |
 
@@ -65,7 +67,7 @@ pip install pytest PyYAML cryptography psycopg2-binary sqlite-vec pillow pycrypt
 python -m pytest -q
 ```
 
-四组测试：`agent/tests/`（技能与公共模块）、`docker/tests/`（容器程序）、`gateway/tests/`（网关）、`scripts/k8s/tests/`（部署脚本与清单守卫）。
+五组测试：`agent/tests/`（技能与公共模块）、`docker/tests/`（容器程序）、`gateway/tests/`（网关）、`scripts/k8s/tests/`（部署脚本与清单守卫）、`acceptance/tests/`（验收题库）。
 需要真实数据库的用例（标记 `live`）没配连接时自动跳过。
 
 ## 许可

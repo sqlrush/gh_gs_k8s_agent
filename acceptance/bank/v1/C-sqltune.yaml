@@ -1,0 +1,180 @@
+# 验收题库 v1 · C SQL 优化
+bank: v1
+aspect: C
+name: SQL 优化
+questions:
+
+- id: C1
+  title: 按 sql_id 调优(NOT IN 碰上可空列)
+  smoke: true
+  env: runtime
+  phase: after
+  needs: {faultlab: [S3], kb: []}
+  ask: 帮我优化一下 {instance} 上 sql_id 为 {sql_id:S3} 的 SQL,把执行计划也贴出来。
+  rubric:
+    format: {w: 15, template: sqltune, status_band: true, both_views: true, followup: true, extra: ["贴出执行计划(代码块)"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-sqltune}
+      should: [gaussdb-sqlfetch, gaussdb-topsql]
+    points:
+      - {w: 8, text: "现状与趋势:执行次数、平均 / 总耗时,数字与工具输出一致", truth: "tool:gaussdb-sqltune", by: rule}
+      - {w: 10, text: "计划解读指出 NOT IN 走了逐行子计划(SubPlan),没有变成反连接", truth: "lab:S3"}
+      - {w: 10, text: "说清原因:子查询的列可空,NOT IN 不能等价改成反连接"}
+      - {w: 8, text: "改写成 NOT EXISTS,并给出改写前后的代价对比(或说明为什么没对比)"}
+      - {w: 4, text: "改写后的 SQL 完整可执行"}
+    handling:
+      - {w: 10, text: "说明改写的语义差异:子查询列里有 NULL 时 NOT IN 与 NOT EXISTS 结果不同,要确认业务语义或补非空条件后才能上线"}
+      - {w: 5, text: "上线前在测试环境核对结果集一致,标「需人工执行」"}
+    cite:
+      - {w: 10, text: "用到知识库时上色并注明出处;cite-check 通过"}
+    forbid:
+      - {veto: true, text: "声称已在生产执行改写后的 SQL 或已建索引"}
+      - {w: 5, text: "把 NOT IN 改 NOT EXISTS 说成「完全等价」"}
+
+- id: C2
+  title: 贴 SQL 文本问为什么慢(索引列上套类型转换)
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [S4], kb: []}
+  attach: {file: "faultlab:sql/slow/s4.sql", mode: paste, strip_comments: true}
+  ask: "{instance} 上这条 SQL 为什么这么慢?"
+  rubric:
+    format: {w: 15, template: sqltune, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-sqltune, args: ["--sql-stdin"]}
+      must_not:
+        - {skill: gaussdb-explain, args: ["--analyze"], why: "这条要跑几分钟,不该为看计划真跑一遍"}
+    points:
+      - {w: 12, text: "指出条件里把类型转换套在索引列上(code::bigint),索引 idx_customers_code 用不上", truth: "lab:S4"}
+      - {w: 10, text: "计划解读:每取一行订单都全表扫客户表,给出估算行数与代价"}
+      - {w: 10, text: "改写:把转换挪到常量 / 另一侧,或建表达式索引,并说明各自前提(类型、取值范围)"}
+      - {w: 8, text: "给出改写前后代价对比"}
+    handling:
+      - {w: 8, text: "建表达式索引要走变更流程、说明写入代价;优先改写 SQL"}
+      - {w: 7, text: "改写的语义核对(类型转换失败的行、前导零等)"}
+    cite:
+      - {w: 10, text: "用到知识库时上色并注明出处;cite-check 通过"}
+    forbid:
+      - {w: 5, text: "只建议「加索引」而没看出索引已存在却用不上"}
+
+- id: C3
+  title: 只看执行计划,不要优化
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [S1], kb: []}
+  ask: 只帮我看一下 {instance} 上 sql_id 为 {sql_id:S1} 的执行计划,先不用优化。
+  rubric:
+    format: {w: 20, template: explain, status_band: false, both_views: false, followup: true, extra: ["不输出 SQL 优化四段"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-explain, args: ["--sql-id"]}
+      must_not:
+        - {skill: gaussdb-explain, args: ["--analyze"], why: "这条语句一次都跑不完,不能用 EXPLAIN ANALYZE"}
+        - {skill: gaussdb-sqltune, why: "用户说了不要优化"}
+    points:
+      - {w: 12, text: "一句话结论点出相关子查询逐行执行(SubPlan)", truth: "lab:S1"}
+      - {w: 12, text: "计划走查找到内层 payments 全表扫描(Seq Scan on payments),order_id 上没有索引"}
+      - {w: 8, text: "走查按执行顺序、每个节点给估算行数与代价,说清代价主要花在哪个节点"}
+      - {w: 8, text: "说明这是估算计划(没有真跑)"}
+    handling:
+      - {w: 10, text: "结尾只用一句问句提议是否要优化,不展开改写方案"}
+    cite:
+      - {w: 10, text: "用到知识库时上色并注明出处;cite-check 通过"}
+    forbid:
+      - {w: 5, text: "编造计划里没有的节点或数字"}
+
+- id: C4
+  title: 存储过程哪里慢
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: [GS-PROC-001, KD-0001, S2-20250303-CBST-存过循环单条提交慢, S3-20250410-CBMS-存过动态SQL硬解析]}
+  attach: {file: acceptance/fixtures/C4-proc.sql, mode: db}
+  ask: "{instance} 上的存储过程 fl.p_accept_adjust 跑得很慢,帮我看看哪里慢、怎么改。"
+  rubric:
+    format: {w: 15, template: proctune, status_band: true, both_views: false, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-proctune}
+      should: [gaussdb-procinfo, gaussdb-kb]
+    points:
+      - {w: 10, text: "循环里逐行提交(每行一个 COMMIT)", truth: "fixture:commit_in_loop"}
+      - {w: 10, text: "动态 SQL 拼接常量、没有绑定变量,每次硬解析", truth: "fixture:dynamic_sql_no_bind"}
+      - {w: 10, text: "每次循环进一个 EXCEPTION 块(子事务),异常分支只记日志不回滚、吞掉错误", truth: "fixture:exception_per_row"}
+      - {w: 10, text: "给出改写:集合式一条 UPDATE 或按 5000 行分批提交、USING 绑定变量、异常分支回滚并抛出"}
+    handling:
+      - {w: 8, text: "改写前后逻辑等价的核对点(异常行怎么处理、部分提交的影响)"}
+      - {w: 7, text: "改过程走变更流程,先在测试环境跑通"}
+    cite:
+      - {w: 5, text: "引用 GS-PROC-001(循环提交、绑定变量、异常回滚)蓝色"}
+      - {w: 5, text: "提到 KD-0001(大量 EXCEPTION 块的 LockMgrLock 争用)时说清它只影响 505.1–505.2,本实例是否适用"}
+    forbid:
+      - {veto: true, text: "声称已修改或重建存储过程"}
+      - {w: 5, text: "不看版本就把 KD-0001 当成本实例的根因"}
+    notes: 夹具过程由跑题脚本建在验收库的 fl 模式里(fl_app 用户),题目跑完删掉;它不会被调用,只供静态分析。
+
+- id: C5
+  title: 审查变更脚本合不合规
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: [GS-IDX-005, GS-CHG-003, GS-DML-006, GS-DML-003, S3-20250707-CBST-索引未使用-季度报表]}
+  attach: {file: acceptance/fixtures/C5-change.sql, mode: paste}
+  ask: 帮我审查一下这段要上生产的脚本,合不合本行规范?
+  rubric:
+    format: {w: 15, template: review, followup: true, extra: ["给风险等级 L1–L4", "逐项问题列表", "改写建议"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-sqlreview}
+      should: [gaussdb-kb]
+    points:
+      - {w: 10, text: "DROP INDEX:未使用索引不得直接删,要登记台账、观察满 30 天且覆盖一次月末批量", truth: "kb:GS-IDX-005"}
+      - {w: 8, text: "举出本行反例:看着没用的索引其实是季度报表在用", truth: "kb:S3-20250707-CBST-索引未使用-季度报表"}
+      - {w: 8, text: "分区键上套 to_char 函数,分区裁剪失效;改成范围条件", truth: "kb:GS-DML-006"}
+      - {w: 8, text: "账户表整表 UPDATE 不分批:按主键升序每 5000 行一个事务", truth: "kb:GS-DML-003"}
+      - {w: 6, text: "说明对象在 验收实例上不存在时按文本审查,结论不依赖实例统计"}
+    handling:
+      - {w: 8, text: "给出可执行的改写版脚本(范围条件、分批更新)"}
+      - {w: 7, text: "上线要求:变更单、23:00–06:00 窗口、双人复核", truth: "kb:GS-CHG-003"}
+    cite:
+      - {w: 10, text: "四条规范逐条上色(蓝)并注明编号,编号真实"}
+    forbid:
+      - {veto: true, text: "声称已执行脚本"}
+      - {w: 5, text: "判定「合规」或漏掉 DROP INDEX 的问题"}
+
+- id: C6
+  title: 单次不慢、总耗时最高的 SQL 值不值得优化
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [S7], kb: [GS-CHG-003]}
+  ask: "{instance} 上 sql_id 为 {sql_id:S7} 的 SQL 每次也就零点几秒,值得优化吗?怎么优化?"
+  rubric:
+    format: {w: 15, template: sqltune, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-sqltune}
+      should: [gaussdb-topsql]
+    points:
+      - {w: 10, text: "值得:执行次数极高,总耗时是全库最高的一条,给出次数与总耗时", truth: "lab:S7.sql_id"}
+      - {w: 10, text: "计划:按 cust_code 查订单,这一列没有索引,每次全表扫", truth: "lab:S7"}
+      - {w: 10, text: "建议在该列建索引,并用假设索引给出建索引前后的代价对比"}
+      - {w: 10, text: "估算优化后的收益(总耗时 / CPU 下降量级)"}
+    handling:
+      - {w: 8, text: "建索引用不阻塞写入的方式(CONCURRENTLY),说明建索引期间的影响"}
+      - {w: 7, text: "走变更单与变更窗口", truth: "kb:GS-CHG-003"}
+    cite:
+      - {w: 10, text: "引用变更规范时蓝色并注明出处;cite-check 通过"}
+    forbid:
+      - {veto: true, text: "声称已建索引"}
+      - {w: 5, text: "只看单次耗时就判定「不需要优化」"}

@@ -14,6 +14,7 @@ out/
 *.log
 # 测试夹具里的日志样本是测试数据,要进仓库(漏了它 lockwait 的死锁日志测试收集期就报错)
 !agent/tests/fixtures/**/*.log
+!acceptance/fixtures/*.log
 
 # 系统与工具
 .DS_Store

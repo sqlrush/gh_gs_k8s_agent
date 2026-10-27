@@ -1,0 +1,45 @@
+# 夹具的真值:题库里 truth: "fixture:<键>" 指向这里(check_bank.py 核对每个键都有、所属文件都在)。
+# 评分时规则层用 value(有的话)判,裁判模型拿 text 判。夹具本身不写提示 —— 贴给智能体的就是原样文件。
+deadlocks:
+  file: agent/tests/fixtures/deadlock/og5_sanitized.log
+  value: 4
+  text: 日志里共 4 次 deadlock detected
+D1:
+  file: agent/tests/fixtures/deadlock/og5_sanitized.log
+  text: 两会话交叉更新同一张表的两行:fl.acct 的 id 10 与 11
+D2:
+  file: agent/tests/fixtures/deadlock/og5_sanitized.log
+  text: 三会话成环:fl.acct 的 id 20、21、22
+D3:
+  file: agent/tests/fixtures/deadlock/og5_sanitized.log
+  text: 跨表互等:fl.acct_child 的 id 30 与 fl.acct 的 id 30
+D6:
+  file: agent/tests/fixtures/deadlock/og5_sanitized.log
+  text: 唯一索引上的插入冲突:fl.uniq_race 同时插入 k = 6001 / 6002
+commit_in_loop:
+  file: acceptance/fixtures/C4-proc.sql
+  text: FOR 循环里每处理一行就 COMMIT 一次
+dynamic_sql_no_bind:
+  file: acceptance/fixtures/C4-proc.sql
+  text: 动态 SQL 把 p_delta 与 i 拼进语句文本后 EXECUTE IMMEDIATE,没有 USING 绑定变量
+exception_per_row:
+  file: acceptance/fixtures/C4-proc.sql
+  text: 每次循环进一个 BEGIN … EXCEPTION 块(每行一个子事务);WHEN OTHERS 只往 fl.accept_err_log 记一行,不回滚、不抛出
+lock_wait_timeout:
+  file: acceptance/fixtures/H4-injected.log
+  text: 两笔转账失败:一笔锁等待超时(等 20 秒,挡住它的是另一线程持有的 fl.acct 行锁,语句为 UPDATE fl.acct … WHERE id = $2),一笔语句超时;同一时段调账批次处理完 1000 行仍「等待提交」
+wiki_main_content:
+  file: scripts/k8s/mock-wiki.py
+  text: 正文只留 #main-content:标题、概要表格、现象 / 排查过程 / 根因 / 处置 / 后续改进、SQL 代码块、警告框;导航、面包屑、页面树、评论(2)、点赞、页脚不进 page.md
+wiki_images:
+  file: scripts/k8s/mock-wiki.py
+  text: 同源截图 lock-chain.png 要登录才取得到,应已保存;另一个源上的示意图书签读不到,应写明跳过
+scan_clauses:
+  file: acceptance/fixtures/K3-scan.txt
+  text: 两章四条:3.4、3.5、7.1、7.3,章节编号与条款编号原样保留
+scan_text:
+  file: acceptance/fixtures/K3-scan.txt
+  text: 转录与 K3-scan.txt 的正文逐字一致(看不清的那一处除外),数字 8 小时、10 分钟、30 分钟、30 天不能错
+scan_blurred:
+  file: acceptance/fixtures/K3-scan.txt
+  text: 7.3 里单表索引数量的上限是故意做模糊的,应写「[看不清]」并问管理员

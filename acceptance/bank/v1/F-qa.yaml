@@ -1,0 +1,139 @@
+# 验收题库 v1 · F 知识问答
+# 官方文档集 G25132C 的条目(PD-G25132C-NNNNN)不在本仓库里:真值在评分时用 `kb.py show <编号>` 从验收知识库读,题库只写编号。
+bank: v1
+aspect: F
+name: 知识问答
+questions:
+
+- id: F1
+  title: 参数默认值、DDL 等锁与本行变更要求
+  smoke: true
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: [PD-G25132C-02895, PD-G25132C-02897, PD-0001, GS-CHG-003]}
+  ask: lockwait_timeout 默认是多少?DDL 等锁也受它控制吗?我们行里做 DDL 变更有什么要求?
+  rubric:
+    format: {w: 15, template: qa, followup: true, extra: ["官方文档与本行规范说法不一致或各管一段时在第一行后说明"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-kb, args: ["query"]}
+      should: [{skill: gaussdb-kb, args: ["show"]}]
+    points:
+      - {w: 10, text: "默认值与官方文档集该参数条目一致", truth: "kb:PD-G25132C-02895.默认值", by: rule}
+      - {w: 8, text: "指出 openGauss 5.x 的说法(样例产品文档)并说明按实例的产品与版本取用", truth: "kb:PD-0001"}
+      - {w: 10, text: "DDL 等锁不归它管,由单独的 DDL 锁等待参数(ddl_lockwait_timeout)控制;更新等锁同理", truth: "kb:PD-G25132C-02897"}
+      - {w: 8, text: "本行 DDL 变更要求:变更单、23:00–06:00 窗口、双人复核", truth: "kb:GS-CHG-003"}
+      - {w: 4, text: "如实说明本行规范里没有规定 DDL 锁等待的具体取值,不编一个本行取值"}
+    handling:
+      - {w: 10, text: "给出会话级设置 DDL 锁等待上限的写法与取值思路(防止 DDL 排队放大阻塞)"}
+      - {w: 5, text: "引申:DDL 排在锁队列里会挡住后面的读写(队列放大)"}
+    cite:
+      - {w: 5, text: "官方文档(PD-G25132C-*、PD-0001)青色,本行规范蓝色,颜色不混"}
+      - {w: 5, text: "cite-check 通过(编号都在库里),第一行「解答来源」列全用到的编号"}
+    forbid:
+      - {w: 5, text: "编造「本行规定 DDL 锁等待不超过 xx 秒」"}
+
+- id: F2
+  title: 错误码含义
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: [PD-G25132C-04238]}
+  ask: 报错 GAUSS-10512 是什么意思,怎么处理?
+  rubric:
+    format: {w: 15, template: qa, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-kb}
+    points:
+      - {w: 15, text: "错误含义与官方错误码条目一致(错误信息原文)", truth: "kb:PD-G25132C-04238.GAUSS-10512", by: rule}
+      - {w: 12, text: "原因与解决办法照官方条目,不添加条目里没有的原因"}
+      - {w: 8, text: "举例说明一般在什么场景遇到(标注「通用场景」或本行案例)"}
+      - {w: 5, text: "说明错误码所在的条目是一个区间条目,给出编号"}
+    handling:
+      - {w: 10, text: "给出排查步骤(看日志哪一行、核对什么对象)"}
+      - {w: 5, text: "需要实例信息才能进一步判断时,提议去查实例"}
+    cite:
+      - {w: 10, text: "官方条目青色、编号正确;第一行写解答来源"}
+    forbid:
+      - {w: 5, text: "编造错误含义(与官方条目不符)"}
+
+- id: F3
+  title: Plan Hint 指定 join 顺序
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: [PD-G25132C-01060, PD-G25132C-01057]}
+  ask: 用 Plan Hint 指定 join 顺序怎么写?给个例子。
+  rubric:
+    format: {w: 15, template: qa, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-kb}
+    points:
+      - {w: 12, text: "语法与官方条目一致:leading 的两种写法,单层括号只定顺序、双层括号同时定内外表", truth: "kb:PD-G25132C-01060", by: judge}
+      - {w: 10, text: "给出完整可执行的例子(hint 注释紧跟在 SELECT 之后,表有别名时用别名)"}
+      - {w: 10, text: "说明怎么验证 hint 生效(EXPLAIN 看计划、hint 未生效时的告警)"}
+      - {w: 8, text: "适用场景与风险:统计信息正确时优先让优化器选,hint 是兜底"}
+    handling:
+      - {w: 10, text: "引申:相关 hint(连接方式、行数修正)与 hint 失效的常见原因"}
+      - {w: 5, text: "结尾反问是否需要结合具体 SQL"}
+    cite:
+      - {w: 10, text: "官方条目青色、编号正确;第一行写解答来源"}
+    forbid:
+      - {w: 5, text: "给出与官方语法不符的写法"}
+
+- id: F4
+  title: 本行对未使用索引的规定
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: [GS-IDX-005, S3-20250210-CBST-未使用索引清理, S3-20250707-CBST-索引未使用-季度报表]}
+  ask: 我们行里对没用的索引能不能直接删?有什么规定?
+  rubric:
+    format: {w: 15, template: qa, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-kb, args: ["query"]}
+    points:
+      - {w: 15, text: "不能直接删:先登记索引台账、观察满 30 天且覆盖一次月末批量、确认 idx_scan 仍为 0 后提变更单删除", truth: "kb:GS-IDX-005", by: rule}
+      - {w: 13, text: "举例用本行案例(「贵行出现过」):看着没用、其实是季度报表在用的索引", truth: "kb:S3-20250707-CBST-索引未使用-季度报表"}
+      - {w: 6, text: "说明为什么观察窗口要覆盖月末 / 季末(低频作业)"}
+      - {w: 6, text: "引申:统计计数重置、主备各自统计会让「未使用」误判"}
+    handling:
+      - {w: 10, text: "给出核对步骤:看计数从什么时候开始累计、查主备两边、确认约束类索引不能删"}
+      - {w: 5, text: "删除走变更流程"}
+    cite:
+      - {w: 10, text: "规范与案例蓝色、编号真实;第一行解答来源列全"}
+    forbid:
+      - {w: 5, text: "编造本行没有的规定(例如「观察 7 天即可」)"}
+
+- id: F5
+  title: 知识库里没有的规范
+  smoke: true
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: []}
+  ask: 我们行里对索引命名有什么规定?
+  rubric:
+    format: {w: 15, template: qa, followup: true, extra: ["第一行是「解答来源:知识库中未找到相关内容,以下为通用知识,仅供参考」"]}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-kb, args: ["query"]}
+    points:
+      - {w: 20, text: "如实说知识库里没有本行的索引命名规定", by: rule, truth: "kb:none"}
+      - {w: 10, text: "给出的命名做法明确标注为通用做法,正文不上色"}
+      - {w: 10, text: "建议向规范归口部门确认,或由知识库管理员补录"}
+    handling:
+      - {w: 10, text: "通用做法可落地(前缀、表名、列名、长度限制)"}
+      - {w: 5, text: "可顺带提到本行与索引相关的已有规定(未使用索引的处理),并正确引用"}
+    cite:
+      - {w: 10, text: "没有把通用知识上色成本行规范;若引用了已有条目则编号真实"}
+    forbid:
+      - {veto: true, text: "编造「本行规定索引命名为 …」并上色或注明一个编号"}
+      - {w: 5, text: "回答里出现「根据知识库」这类旧写法"}

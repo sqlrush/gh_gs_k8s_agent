@@ -1,0 +1,64 @@
+# 验收题库 v1 · E WDR
+bank: v1
+aspect: E
+name: WDR
+questions:
+
+- id: E1
+  title: 时段 WDR 分析
+  smoke: true
+  env: runtime
+  phase: after
+  needs: {faultlab: [S7, S6, L1, K1], kb: [GS-WAIT-001]}
+  ask: 对 {instance} 在 {start} 到 {end} 之间做一次 WDR 分析。
+  rubric:
+    format: {w: 15, template: wdr, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-wdr, args: ["--from", "--to"]}
+      must_not:
+        - {cmd: create_wdr_snapshot, why: "只用已有快照,不手工打快照"}
+    points:
+      - {w: 8, text: "负载画像:DB time、每秒事务 / 语句、CPU 与 IO 构成,数字与工具输出一致", truth: "tool:gaussdb-wdr", by: rule}
+      - {w: 10, text: "CPU 维度元凶是高频中等慢的那条", truth: "lab:S7.sql_id"}
+      - {w: 8, text: "溢出(临时文件)维度元凶是窗口函数 + 小 work_mem 那条", truth: "lab:S6.sql_id"}
+      - {w: 8, text: "等待事件段里 WAL 相关轻量锁靠前(窗口的第一段)", truth: "lab:L1"}
+      - {w: 6, text: "锁等待累计显著,并说明对应的阻塞源要用锁等待诊断回看", truth: "lab:K1"}
+    handling:
+      - {w: 8, text: "解决方案按元凶逐条给,先治语句再谈参数"}
+      - {w: 7, text: "WAL 类等待按本行规范优先拆批与调提交策略"}
+    cite:
+      - {w: 10, text: "引用 GS-WAIT-001 蓝色,出处正确"}
+    forbid:
+      - {veto: true, text: "执行或建议用户执行 create_wdr_snapshot 手工打快照"}
+      - {w: 5, text: "各维度元凶与工具输出对不上"}
+
+- id: E2
+  title: 两个快照之间 DB time 花在哪
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [L1, K2, S2], kb: []}
+  ask: "{instance} 快照 {snap_begin} 到 {snap_end} 之间,DB time 主要花在哪?"
+  rubric:
+    format: {w: 15, template: any, followup: true, extra: ["开头写清快照区间对应的时间段", "DB time 构成用表格"]}
+    tools:
+      w: 15
+      must:
+        - {any_of: [gaussdb-waitevent, gaussdb-wdr]}
+      must_not:
+        - {cmd: create_wdr_snapshot}
+    points:
+      - {w: 12, text: "DB time 构成(CPU / IO / 锁 / 轻量锁 / 网络 / 其它)及占比,与工具输出一致", truth: "tool:gaussdb-waitevent", by: rule}
+      - {w: 10, text: "最大的一类点名到具体等待事件", truth: "lab:L1"}
+      - {w: 10, text: "每类时间点名主要贡献的语句或会话"}
+      - {w: 8, text: "快照区间与实际时间对应正确", truth: "env:snaps", by: rule}
+    handling:
+      - {w: 10, text: "按占比给出下一步诊断方向"}
+      - {w: 5, text: "没有证据不提内核参数调整"}
+    cite:
+      - {w: 10, text: "用到知识库时上色并注明出处;cite-check 通过"}
+    forbid:
+      - {veto: true, text: "执行或建议执行 create_wdr_snapshot"}
+      - {w: 5, text: "编造占比或事件名"}
