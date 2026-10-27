@@ -9,7 +9,7 @@ metadata:
   name: gateway-config
   namespace: gaussdb-agent
 data:
-  USER_IMAGE_TAG: "agent-v1.4.0-oc1.18.27"
+  USER_IMAGE_TAG: "agent-v1.4.1-oc1.18.27"
   # 用户 Pod 镜像的仓库前缀,与网关镜像推在同一个仓库时填同一个前缀,例如 registry.example/gaussdb-agent
   # (网关据此建 registry.example/gaussdb-agent/gaussdb-agent-runtime:<USER_IMAGE_TAG>)。
   # 留空 = 不带前缀,只适用于镜像直接载在每个节点上的环境(kind load / docker load)。

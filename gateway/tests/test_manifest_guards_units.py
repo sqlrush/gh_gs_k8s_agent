@@ -192,3 +192,33 @@ def test_user_image_tag_matches_the_gateway_image():
     user = re.search(r'USER_IMAGE_TAG:\s*"([^"]+)"', (base / "configmap-gateway.yaml").read_text(encoding="utf-8")).group(1)
     gw = re.search(r"image:\s*\S*gaussdb-agent-[a-z-]+:(\S+)", (base / "gateway.yaml").read_text(encoding="utf-8")).group(1)
     assert gw == user, "USER_IMAGE_TAG=%s,网关镜像标签 %s —— 两处要一致" % (user, gw)
+
+
+def test_import_container_exposes_the_clip_receiver_and_policies_allow_only_the_gateway():
+    """网页剪藏接收 4095(2026-10-27):容器端口、Service、开关变量、kb-import 入站、网关出站,base 与本地覆盖层各一份。
+    漏一处的表现都是剪藏页报「连不上剪藏接收服务」,而导入容器本身健康。"""
+    ki = (_ROOT / "k8s" / "templates" / "kb-import.yaml").read_text(encoding="utf-8")
+    assert re.search(r"containerPort:\s*4095", ki) and re.search(r"\{port:\s*4095,\s*targetPort:\s*4095", ki)
+    assert re.search(r'\{name:\s*KB_CLIP_RECEIVER,\s*value:\s*"1"\}', ki), "导入容器要打开剪藏接收(entrypoint 按它拉起 serve-clip)"
+    rt = (_ROOT / "k8s" / "templates" / "runtime.yaml").read_text(encoding="utf-8")
+    assert "4095" not in rt and "KB_CLIP_RECEIVER" not in rt, "诊断容器不收剪藏"
+    for path in (_ROOT / "k8s" / "base" / "networkpolicy.yaml", _ROOT / "k8s" / "local" / "networkpolicy-local.yaml"):
+        np = path.read_text(encoding="utf-8")
+        ki_pol = np[np.index("name: kb-import-policy"):np.index("name: gateway-policy")]
+        assert "4095" in ki_pol.split("egress:")[0] and "agent-gateway" in ki_pol.split("egress:")[0], \
+            "%s:kb-import-policy 入站没从网关放行 4095" % path.name
+        gw_pol = np[np.index("name: gateway-policy"):]
+        assert "4095" in gw_pol.split("egress:")[1].split("gaussdb-frontend")[0], "%s:gateway-policy 出站没到 4095" % path.name
+        rt_pol = np[np.index("name: runtime-policy"):np.index("name: kb-import-policy")]
+        assert "4095" not in rt_pol
+
+
+def test_clip_settings_live_once_in_agent_config_and_reach_the_gateway():
+    """名单只在 agent-config 里配一处:导入容器 envFrom 整份读,网关按键映射。"""
+    cm = (_ROOT / "k8s" / "base" / "configmap-agent.yaml").read_text(encoding="utf-8")
+    assert re.search(r'^  KB_CLIP_ORIGINS: ""$', cm, re.M), "默认关闭:名单为空"
+    assert re.search(r'^  KB_CLIP_MAX_MB: "30"$', cm, re.M)
+    gw = (_ROOT / "k8s" / "base" / "gateway.yaml").read_text(encoding="utf-8")
+    for env, key in (("GATEWAY_KB_CLIP_ORIGINS", "KB_CLIP_ORIGINS"), ("GATEWAY_KB_CLIP_MAX_MB", "KB_CLIP_MAX_MB")):
+        assert re.search(r"\{name:\s*%s,\s*valueFrom:\s*\{configMapKeyRef:\s*\{name:\s*agent-config,\s*key:\s*%s,\s*optional:\s*true\}"
+                         % (env, key), gw), "gateway.yaml 没从 agent-config 映射 %s" % key

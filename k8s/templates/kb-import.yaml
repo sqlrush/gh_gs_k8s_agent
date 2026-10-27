@@ -61,9 +61,11 @@ spec:
           image: ${IMAGE}
           imagePullPolicy: ${IMAGE_PULL_POLICY}
           securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
-          ports: [{containerPort: 4096, name: http}]
+          # 4095:网页剪藏接收(docker/clipd.py),只有网关能到(kb-import-policy),口令与 opencode 同一个
+          ports: [{containerPort: 4096, name: http}, {containerPort: 4095, name: clip}]
           env:
             - {name: GSDB_USER_ID, value: "${USER_ID}"}
+            - {name: KB_CLIP_RECEIVER, value: "1"}
             - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
             - {name: OPENCODE_SERVER_PASSWORD, valueFrom: {secretKeyRef: {name: pod-auth-${USER_ID}, key: OPENCODE_SERVER_PASSWORD}}}
             # 凭据不在这个容器:模型经凭据代理(同 Pod 的 credproxy 容器),中间件经它的套接字
@@ -129,4 +131,4 @@ metadata:
   labels: {app: gaussdb-agent, role: kb-import, user: "${USER_ID}"}
 spec:
   selector: {app: gaussdb-agent, role: kb-import, user: "${USER_ID}"}
-  ports: [{port: 4096, targetPort: 4096, name: http}]
+  ports: [{port: 4096, targetPort: 4096, name: http}, {port: 4095, targetPort: 4095, name: clip}]

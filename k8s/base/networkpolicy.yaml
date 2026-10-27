@@ -39,14 +39,14 @@ spec:
     - from:
         - podSelector: {matchLabels: {app: agent-gateway}}
         - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: agent-gateway}}
-      ports: [{port: 4096, protocol: TCP}]
+      ports: [{port: 4096, protocol: TCP}, {port: 4095, protocol: TCP}]   # 4095:网页剪藏接收,只有网关能到
   egress:
     - to: [{namespaceSelector: {}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
       ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
     - to: [{ipBlock: {cidr: 10.0.0.0/8}}]          # 模型服务:平台改成实际地址段与端口
       ports: [{port: 443, protocol: TCP}, {port: 80, protocol: TCP}]
 ---
-# 网关:入站放行上游 SSO / Ingress;出站只要 DNS、k8s API、用户 Pod 的 4096 与 4097(报告只读)。
+# 网关:入站放行上游 SSO / Ingress;出站只要 DNS、k8s API、用户 Pod 的 4096、4097(报告只读)与导入容器的 4095(网页剪藏接收)。
 # 它**不需要**访问中间件、模型服务、数据库 —— 那些是用户 Pod 的事。
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -66,8 +66,8 @@ spec:
   egress:
     - to: [{namespaceSelector: {}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
       ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
-    - to: [{podSelector: {matchLabels: {app: gaussdb-agent}}}]     # 转发到用户 Pod:4096 对话,4097 报告只读
-      ports: [{port: 4096, protocol: TCP}, {port: 4097, protocol: TCP}]
+    - to: [{podSelector: {matchLabels: {app: gaussdb-agent}}}]     # 转发到用户 Pod:4096 对话,4097 报告只读,4095 剪藏接收(导入容器)
+      ports: [{port: 4096, protocol: TCP}, {port: 4097, protocol: TCP}, {port: 4095, protocol: TCP}]
     - to: [{podSelector: {matchLabels: {app: gaussdb-frontend}}}]  # /dash/* 转发到大盘前端
       ports: [{port: 8080, protocol: TCP}]
     # k8s apiserver。地址段按集群实际填 —— 这里给的是常见的 Service ClusterIP 段。

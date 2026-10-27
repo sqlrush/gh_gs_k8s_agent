@@ -1010,11 +1010,14 @@ def test_pdf_conversion_timeout_becomes_a_kberror(monkeypatch, tmp_path):
         kb.extract_pdf(p)
 
 
-def test_a_scanned_pdf_is_refused_before_anything_is_written(tmp_path):
-    """端到端红线:ingest 一份扫描件,必须**非零退出**,且 KB 里不得留下任何
-    半成品 —— 一个空的 source.md 会让模型误以为「这份规范没有条款」。"""
+def test_a_scanned_pdf_is_rendered_for_transcription_never_imported_blank(tmp_path):
+    """端到端红线(2026-10-27 改):扫描件不再一律拒绝,而是每页渲染成图片交给模型看图转录 ——
+    但**绝不能**出现一份看起来像正文、其实是空的 source.md。退出码 2(还有活没干完),
+    source.md 里只有转录要求,validate 也点名「还没转录」。"""
     if not kb.shutil.which("pdftotext") and not kb.shutil.which("mutool"):
         pytest.skip("本机没有 PDF 转换器")
+    if not kb.shutil.which("pdftoppm"):
+        pytest.skip("本机没有 pdftoppm")
     d = tmp_path / "kb"
     src = tmp_path / "扫描规范.pdf"
     src.write_bytes(_scanned_pdf(12))
@@ -1023,10 +1026,36 @@ def test_a_scanned_pdf_is_refused_before_anything_is_written(tmp_path):
         [sys.executable, str(_SCRIPT), "ingest", str(src), "--kb", str(d)],
         capture_output=True, text=True)
 
-    assert out.returncode == 1, out.stdout
-    assert "扫描件" in out.stderr or "扫描件" in out.stdout
-    assert not (d / "inbox").exists() or not list((d / "inbox").rglob("source.md")), \
-        "拒绝导入时绝不能留下半成品 source.md"
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert "扫描件" in out.stdout and "看图转录" in out.stdout
+    inbox = d / "inbox" / "扫描规范"
+    pages = sorted((inbox / "pages").glob("page-*.jpg"))
+    assert len(pages) == 12 and pages[0].name == "page-01.jpg"
+    stub = (inbox / "source.md").read_text(encoding="utf-8")
+    assert stub.startswith("<!-- 扫描件转录稿") and "不要猜" in stub and stub.rstrip().endswith("-->"), stub
+    assert not list(d.glob("rules/*.yaml")), "转录之前不能有任何条款"
+    val = subprocess.run([sys.executable, str(_SCRIPT), "validate", "--kb", str(d)], capture_output=True, text=True)
+    assert "还没转录" in val.stdout, val.stdout
+
+
+def test_a_scanned_pdf_that_cannot_be_rendered_is_refused_before_anything_is_written(tmp_path, monkeypatch):
+    """渲染不了(没装 pdftoppm 等)时退回旧红线:非零退出,不留半成品 source.md。"""
+    from common.kb import extract as kbx
+    from common.kb import pdfpages
+
+    def no_render(*_a, **_k):
+        raise kbx.ExtractError("这里没有 pdftoppm")
+
+    def scanned(_p):
+        raise kbx.UnreadablePdf("PDF 提取到的文本过少……扫描件", 12, "scanned")
+
+    monkeypatch.setattr(pdfpages, "render_pages", no_render)
+    monkeypatch.setattr(kbx, "extract_source", scanned)
+    d = tmp_path / "kb"
+    src = tmp_path / "扫描规范.pdf"
+    src.write_bytes(_scanned_pdf(12))
+    assert kb.main(["ingest", str(src), "--kb", str(d)]) == 1
+    assert not list((d / "inbox").rglob("source.md")) if (d / "inbox").exists() else True
 
 
 def test_a_text_pdf_imports(tmp_path):

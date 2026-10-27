@@ -433,7 +433,7 @@ def cmd_taxonomy(args: argparse.Namespace) -> int:
 
 # ---------------------------------------------------------------- inbox-clean
 
-_KEEP_INBOX = ("uploads", "drafts")
+_KEEP_INBOX = ("uploads", "drafts", "clips")   # clips:网页剪藏,按批次用 kb.py clip clean
 
 
 def clean_inbox(kb: pathlib.Path, slug: str, discard: bool = False) -> str:

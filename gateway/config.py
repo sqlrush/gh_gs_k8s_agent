@@ -9,8 +9,10 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import List, Mapping, Tuple
+from urllib.parse import urlsplit
 
 from . import reaper
 
@@ -32,6 +34,8 @@ RUNTIME_ONDEMAND, RUNTIME_POOL = "ondemand", "pool"
 # 只给测试集群:把固定池化各时长的下限降到 5 秒(e2e 要在几分钟里走完闲置 → 保留 → 腾挪)。
 # **刻意不叫 GATEWAY_***,正式清单(gateway.yaml / ConfigMap)里不许出现它(守卫测试核对)。
 TEST_SHORT_TIMERS = "POOL_TEST_SHORT_TIMERS"
+# 网页剪藏单次上限(MB)的天花板:网关单请求上限 64 MB,图片按 base64 传要多三分之一
+KB_CLIP_MAX_MB_CEILING = 45
 
 
 class ConfigError(Exception):
@@ -70,6 +74,9 @@ class Config:
     pool_free_slots: int = 1                # 每个 Pod 后台至少留几个空闲槽位给新人
     pool_sweep_seconds: int = 30
     pool_wait_seconds: int = 60             # 一次请求最多为分配等多久;等不到回等待页(30 秒自动重试)
+    # 网页剪藏(2026-10-27):允许剪藏的内网网站(源);空 = 关闭。与导入容器读同一份 agent-config
+    kb_clip_origins: Tuple[str, ...] = ()
+    kb_clip_max_mb: int = 30
 
     @property
     def trust_configured(self) -> bool:
@@ -87,6 +94,22 @@ def _int(env: Mapping[str, str], key: str, default: int, minimum: int = 0) -> in
     if v < minimum:
         raise ConfigError("%s=%d 太小,至少 %d" % (key, v, minimum))
     return v
+
+
+def _clip_origins(raw: str) -> Tuple[str, ...]:
+    out: List[str] = []
+    for item in re.split(r"[,\s]+", raw or ""):
+        item = item.strip().rstrip("/")
+        if not item:
+            continue
+        s = urlsplit(item)
+        if s.scheme not in ("http", "https") or not s.hostname or s.path or s.query or s.fragment or "@" in s.netloc:
+            raise ConfigError("KB_CLIP_ORIGINS(agent-config)里的 %r 不对:每项只写「协议://主机[:端口]」,"
+                              "如 https://wiki.example.internal,不带路径" % item)
+        o = ("%s://%s" % (s.scheme, s.netloc)).lower()
+        if o not in out:
+            out.append(o)
+    return tuple(out)
 
 
 def load(env: Mapping[str, str]) -> Config:
@@ -135,6 +158,10 @@ def load(env: Mapping[str, str]) -> Config:
         raise ConfigError("固定池化模式要 GATEWAY_POOL_CONTROL_KEY(Secret sandbox-control 的 KEY,与各 Pod 管家同一把),"
                           "没配或不足 16 个字符")
     short = (env.get(TEST_SHORT_TIMERS) or "").strip() == "1"
+    clip_mb = _int(env, "GATEWAY_KB_CLIP_MAX_MB", 30, minimum=1)
+    if clip_mb > KB_CLIP_MAX_MB_CEILING:
+        raise ConfigError("KB_CLIP_MAX_MB=%d 太大,最多 %d(网关单请求上限 64 MB,图片按 base64 传要多三分之一)"
+                          % (clip_mb, KB_CLIP_MAX_MB_CEILING))
 
     def low(n: int) -> int:
         return 5 if short else n
@@ -168,4 +195,6 @@ def load(env: Mapping[str, str]) -> Config:
         pool_free_slots=_int(env, "GATEWAY_POOL_FREE_SLOTS", 1, minimum=0),
         pool_sweep_seconds=_int(env, "GATEWAY_POOL_SWEEP_SECONDS", 30, minimum=5),
         pool_wait_seconds=_int(env, "GATEWAY_POOL_WAIT_SECONDS", 60, minimum=low(10)),
+        kb_clip_origins=_clip_origins(env.get("GATEWAY_KB_CLIP_ORIGINS") or ""),
+        kb_clip_max_mb=clip_mb,
     )

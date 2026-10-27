@@ -41,6 +41,12 @@ data:
   # 知识库导入要读照片 / 截图时必须含 image,否则 read 报「this model does not support image input」。
   # 只在模型服务确实支持图片时才开:纯文本模型开了,发图那一轮模型服务会报错。
   MODEL_INPUT_MODALITIES: ""
+  # 网页剪藏(知识库导入,2026-10-27):允许剪藏的内网网站,写「协议://主机[:端口]」,逗号分隔,
+  # 如 https://wiki.example.internal,https://confluence.example.internal。空 = 关闭剪藏。
+  # 网关(剪藏页只收这些网站交来的内容)与导入容器(kb.py clip status)读的是这同一份;改完重启网关,导入容器下次进入时生效。
+  KB_CLIP_ORIGINS: ""
+  # 单次剪藏(网页 + 页内图片)的总大小上限,单位 MB。默认 30,最大 45(网关单请求上限 64 MB,图片按 base64 传要多三分之一)
+  KB_CLIP_MAX_MB: "30"
   # 回答里「打开报告」链接的站点前缀。技能给出的链接是 <前缀>/dash/<页面>?<参数>(页面与参数见
   # docs/前端对接接口说明.md 第 7 章)。留空 = 根相对地址 /dash/...,大盘与对话页同源时点开就对;
   # 大盘在别的站点(贵方门户)时填那个站点,例如 https://portal.example.com。改了要重启用户 Pod 才生效。

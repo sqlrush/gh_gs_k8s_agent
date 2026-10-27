@@ -42,7 +42,7 @@ spec:
     - from:
         - podSelector: {matchLabels: {app: agent-gateway}}
         - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: agent-gateway}}
-      ports: [{port: 4096, protocol: TCP}]
+      ports: [{port: 4096, protocol: TCP}, {port: 4095, protocol: TCP}]   # 4095:网页剪藏接收,只有网关能到
   egress:
     - to: [{namespaceSelector: {}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
       ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
@@ -69,8 +69,8 @@ spec:
   egress:
     - to: [{namespaceSelector: {}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
       ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
-    - to: [{podSelector: {matchLabels: {app: gaussdb-agent}}}]     # 转发到用户 Pod:4096 对话,4097 报告只读
-      ports: [{port: 4096, protocol: TCP}, {port: 4097, protocol: TCP}]
+    - to: [{podSelector: {matchLabels: {app: gaussdb-agent}}}]     # 转发到用户 Pod:4096 对话,4097 报告只读,4095 剪藏接收(导入容器)
+      ports: [{port: 4096, protocol: TCP}, {port: 4097, protocol: TCP}, {port: 4095, protocol: TCP}]
     - to: [{podSelector: {matchLabels: {app: gaussdb-frontend}}}]  # /dash/* 转发到大盘前端(与 base 同步)
       ports: [{port: 8080, protocol: TCP}]
     # OrbStack 的 apiserver:Service ClusterIP 在 192.168.194.0/24,但**真实端点**是

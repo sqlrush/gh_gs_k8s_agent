@@ -45,3 +45,14 @@ def test_slot_mode_execs_the_slot_daemon_before_touching_anything():
     before = [l.strip() for l in _EP[:m.start()].splitlines() if l.strip() and not l.lstrip().startswith("#")]
     assert before == ["set -euo pipefail"], "槽位分支要是第一条命令:之前连变量都不设"
     assert m.end() < _EP.index('if [ "${POOL_MODE:-0}" = "steward" ]'), "要在管家分支之前"
+
+
+def test_clip_receiver_runs_only_in_the_import_container_and_is_stopped_with_the_rest():
+    """网页剪藏接收(2026-10-27):模板给导入容器 KB_CLIP_RECEIVER=1,诊断容器没有这个端口;不是就绪条件,放后台。"""
+    m = re.search(r'^if \[ "\$\{KB_CLIP_RECEIVER:-0\}" = "1" \]; then\n(.*?)^fi$', _EP, re.M | re.S)
+    assert m, "serve-clip 要由 KB_CLIP_RECEIVER 开关"
+    body = [ln.strip() for ln in m.group(1).splitlines() if ln.strip()]
+    assert body == ["$PODCTL serve-clip --port 4095 &", "CLIPD=$!"]
+    assert m.start() > _EP.index("opencode serve --hostname"), "要在 opencode 之后(它要往 opencode 里发起导入)"
+    assert re.search(r'^CLIPD=""$', _EP[:m.start()], re.M), "set -u 下没开剪藏时 $CLIPD 也要有定义"
+    assert re.search(r'^kill "\$REFRESHER" "\$SYNCER" "\$REPORTS" \$CLIPD ', _EP, re.M), "停机要连剪藏接收一起收掉"

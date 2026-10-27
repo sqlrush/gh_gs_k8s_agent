@@ -31,6 +31,7 @@ from common.kb import extract as kbextract  # noqa: E402
 from common.kb import imgconv  # noqa: E402
 from common.kb import ingest as kbingest  # noqa: E402
 from common.kb import initstd  # noqa: E402
+from common.kb import pdfpages  # noqa: E402
 from common.kb.atomic import write_text_atomic  # noqa: E402
 
 
@@ -103,6 +104,36 @@ def _template() -> Dict:
     return tpl
 
 
+def _clip_origin(src: pathlib.Path) -> str:
+    """网页剪藏转出的 page.md(frontmatter kind: web-clip)→「来源 URL(网页剪藏,抓取于 …)」,其余返回空串。
+
+    出处写成原网页而不是 page.md:剪藏批次处理完就清掉了,page.md 指不回去;URL 随标准化文件进 sources/ 快照,
+    条目的出处顺着快照就能追到原网页(2026-10-27 端到端发现:入库的案例只剩 page.md,原网页地址丢了)。
+    """
+    if src.suffix.lower() != ".md":
+        return ""
+    try:
+        head = src.read_text(encoding="utf-8", errors="replace")[:4096]
+    except OSError:
+        return ""
+    if not head.startswith("---\nkind: web-clip\n"):
+        return ""
+    meta = {}
+    for line in head.split("\n---", 1)[0].splitlines()[1:]:
+        key, sep, value = line.partition(":")
+        if sep:
+            meta[key.strip()] = value.strip()
+    url = meta.get("source_url", "")
+    try:
+        url = json.loads(url) if url.startswith('"') else url
+    except ValueError:
+        pass
+    if not url:
+        return ""
+    when = meta.get("fetched_at", "")
+    return "%s(网页剪藏%s)" % (url, ",抓取于 %s" % when if when else "")
+
+
 def _table_work(path: pathlib.Path, snapshot_name: str) -> List[Dict]:
     """csv/xlsx:一行一单,列名能对上的字段先填好(仍由模型确认)。"""
     if path.suffix.lower() in (".xlsx", ".xls"):
@@ -156,13 +187,39 @@ def cmd_scan(args: argparse.Namespace) -> int:
         if c.kind in ("text", "doc"):
             try:
                 text = kbextract.normalize_text(kbextract.extract_source(src))
+            except kbextract.UnreadablePdf as exc:
+                # 扫描件 / 乱码 PDF:每页渲染成 jpg,整份一张工作单,由模型逐页看图(2026-10-27)
+                try:
+                    rendered = pdfpages.render_pages(snapshot, batch / "sources" / (src.stem + "-pages"))
+                except kbextract.ExtractError as exc2:
+                    entry["kind"] = "unsupported"
+                    entry["reason"] = "%s(渲染成图片也没成功:%s)" % (exc, exc2)
+                    unsupported.append("%s —— %s" % (src.name, entry["reason"].splitlines()[0]))
+                    manifest["files"].append(entry)
+                    continue
+                entry["kind"] = "scanned"
+                entry["pages"] = [str(p.relative_to(batch)) for p in rendered.pages]
+                orders = [{"source": src.name, "text": None, "known": {}, "suggest": {}, "by_model": True,
+                           "image_paths": [str(p) for p in rendered.pages]}]
+                images.append("%s —— 扫描件 PDF,%s;逐页用 read 看工作单 image_paths 里的图" % (src.name, rendered.note()))
             except kbextract.ExtractError as exc:
                 entry["kind"] = "unsupported"
                 entry["reason"] = str(exc)
                 unsupported.append("%s —— %s" % (src.name, str(exc).splitlines()[0]))
                 manifest["files"].append(entry)
                 continue
-            orders = [{"source": src.name, "text": text, "known": {}, "suggest": {}}]
+            else:
+                order = {"source": _clip_origin(src) or src.name, "text": text, "known": {}, "suggest": {}}
+                if src.suffix.lower() == ".pptx":
+                    try:
+                        media = kbextract.pptx_media(src, batch / "sources" / (src.stem + "-media"))
+                    except (kbextract.ExtractError, OSError):
+                        media = []
+                    if media:
+                        order["image_paths"] = [str(p) for _n, p in media]
+                        images.append("%s —— 幻灯片里有 %d 张图片(截图、监控曲线),文字已抽出;需要时看工作单 image_paths 补充"
+                                      % (src.name, len(media)))
+                orders = [order]
         elif c.kind == "table":
             try:
                 orders = _table_work(src, src.name)
@@ -178,7 +235,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
             if readable is not None:
                 view_of[src.name] = readable
                 entry["readable"] = str(readable.relative_to(batch))
-            orders = [{"source": src.name, "text": None, "known": {}, "suggest": {}}]
+            orders = [{"source": src.name, "text": None, "known": {}, "suggest": {}, "by_model": True,
+                       "image_paths": [str(view_of.get(src.name, snapshot))]}]
             images.append("%s —— %s" % (src.name, note or c.reason))
         else:
             unsupported.append("%s —— %s" % (src.name, c.reason))
@@ -193,8 +251,10 @@ def cmd_scan(args: argparse.Namespace) -> int:
                 "source_file": src.name,
                 "source": order["source"],
                 "source_kind": src.suffix.lower().lstrip(".") or "unknown",
-                "extracted_by": "model" if c.kind == "image" else "script",
-                "image_path": str(view_of.get(src.name, snapshot)) if c.kind == "image" else None,
+                "extracted_by": "model" if order.get("by_model") else "script",
+                # image_path:第一张(兼容旧草稿与旧说明);image_paths:全部(扫描件的每一页、pptx 的幻灯片图片)
+                "image_path": (order.get("image_paths") or [None])[0] if order.get("by_model") else None,
+                "image_paths": order.get("image_paths") or [],
                 "text": order["text"],
                 "known": order["known"],
                 "suggest": order["suggest"],

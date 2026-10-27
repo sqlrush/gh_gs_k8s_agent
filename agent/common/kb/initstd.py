@@ -43,8 +43,10 @@ _PLACEHOLDER = re.compile(r"^(?:todo|tbd|n/?a|待填|待补|待定|无|暂无|�
 _MIN_LEN = 4                         # 四段正文的下限:比这还短的不是内容,是敷衍
 
 TEXT_SUFFIXES = frozenset({".txt", ".md", ".markdown", ".sql", ".log"})
-DOC_SUFFIXES = frozenset({".docx", ".doc", ".pdf", ".rtf"})
-TABLE_SUFFIXES = frozenset({".csv", ".xlsx", ".xls"})
+DOC_SUFFIXES = frozenset({".docx", ".doc", ".pdf", ".pptx"})
+TABLE_SUFFIXES = frozenset({".csv", ".xlsx"})
+# 老格式:读不了,明确告诉用户另存成什么(以前 .xls / .rtf 列在支持里、实际一读就报错)
+_RESAVE = {".xls": ".xlsx", ".rtf": ".docx", ".ppt": ".pptx", ".wps": ".docx", ".et": ".xlsx", ".dps": ".pptx"}
 IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff",
                             ".heic", ".heif"})
 # opencode 的 read 工具读不了的图片格式:苹果手机直出的 HEIC 是现场最常见的一种。
@@ -79,7 +81,7 @@ def classify(path: pathlib.Path) -> Classified:
     if suffix in TEXT_SUFFIXES:
         return Classified(path, "text", "纯文本,脚本直接读")
     if suffix in DOC_SUFFIXES:
-        return Classified(path, "doc", "文档,脚本经转换器抽文本(扫描件 PDF 无文本层时会拒绝并说明)")
+        return Classified(path, "doc", "文档,脚本经转换器抽文本(扫描件 PDF 渲染成页面图片交给你看;pptx 的图片一并取出)")
     if suffix in TABLE_SUFFIXES:
         return Classified(path, "table", "表格,脚本按行拆成一行一单")
     if suffix in IMAGE_SUFFIXES:
@@ -88,6 +90,8 @@ def classify(path: pathlib.Path) -> Classified:
             reason += ("；注意这是 %s,read 打不开原件——scan 会自动转成 jpg 副本(看工作单的 image_path),"
                        "转不了时如实告诉用户,请他转成 jpg / png 再传" % suffix.lstrip(".").upper())
         return Classified(path, "image", reason)
+    if suffix in _RESAVE:
+        return Classified(path, "unsupported", "老格式 %s 读不了:请另存为 %s 再传" % (suffix, _RESAVE[suffix]))
     return Classified(path, "unsupported", "不支持的格式 %s" % (suffix or "(无后缀)"))
 
 

@@ -1,7 +1,7 @@
 ---
 name: gaussdb-kb-init
-version: 1.2.0
-description: "入库前的标准化(知识库导入的第一步,管理员用):把客户给的各种工单材料——word / pdf / txt / md / csv / xlsx / 照片截图——统一整理成同一种 md(时间、系统、现场、判断、处置、复发标志六要素),作为导入知识库之前的标准格式;整理完再交给 gaussdb-kb-import 入库(md + 向量 + 图)。用户说「这些工单/报告怎么入库」「格式乱七八糟先整理一下」「把这堆材料标准化」「照片里的工单怎么导进去」即用。脚本负责快照、分类、抽文本、渲染、校验;你负责读原文(照片要用 read 工具看图)把六要素写出来。"
+version: 1.3.0
+description: "入库前的标准化(知识库导入的第一步,管理员用):把客户给的各种工单材料——word / pdf(含扫描件)/ ppt(pptx)/ txt / md / csv / xlsx / 照片截图 / 剪藏下来的内网网页——统一整理成同一种 md(时间、系统、现场、判断、处置、复发标志六要素),作为导入知识库之前的标准格式;整理完再交给 gaussdb-kb-import 入库(md + 向量 + 图)。用户说「这些工单/报告怎么入库」「格式乱七八糟先整理一下」「把这堆材料标准化」「照片里的工单怎么导进去」即用。脚本负责快照、分类、抽文本、渲染、校验;你负责读原文(照片要用 read 工具看图)把六要素写出来。"
 allowed-tools: ["exec", "read", "write"]
 compatibility: opencode
 metadata:
@@ -49,13 +49,16 @@ python3 {baseDir}/scripts/kb_init.py scan <文件或目录> [--batch 批次名]
 ```
 
 产出 `<kb>/init/<批次>/`:`sources/` 原件快照、`work/NNN.json` 一单一个工作单、`manifest.json` 清单。
-脚本按格式分三条路:
+脚本按格式分四条路:
 
-- **txt / md / docx / doc / pdf** —— 脚本抽成文本放进工作单的 `text`。
-  扫描件 PDF、乱码 PDF 会被**拒绝并说明原因**(不做 OCR),如实转告用户,让他 OCR 后再来,不要自己编内容。
+- **txt / md / docx / doc / pdf / pptx** —— 脚本抽成文本放进工作单的 `text`。
+  **pptx** 按页输出标题、要点、表格、备注;幻灯片里的图片在工作单的 `image_paths` 里,截图、监控曲线需要时看图补充。
+- **扫描件 / 乱码 PDF** —— 文字层不可用,脚本把每页渲染成 jpg:`text` 是 `null`,`image_paths` 按页序列出全部页面,
+  `extracted_by` 是 `model`。**逐页用 read 看图**,整份材料按一份报告写草稿(一份扫描件里有几单就写成数组);
+  页数超过上限时输出会说明只渲染了前几页,如实告诉用户把 PDF 拆开分批导入。渲染失败的进「没能处理的」。
 - **csv / xlsx** —— 一行一单,列名对得上的字段(工单号 / 系统 / 时间 / 级别)已填进 `known`,
   现场 / 判断 / 处置 的候选放在 `suggest` 里,**仍要你确认**,不是直接采用。
-- **照片 / 截图** —— 脚本 OCR 不了,`text` 是 `null`,`image_path` 给出沙箱内路径。
+- **照片 / 截图** —— 脚本 OCR 不了,`text` 是 `null`,`image_path`(= `image_paths` 第一张)给出沙箱内路径。
   **你用 read 工具打开这张图**,读出内容再写草稿。HEIC / TIF 原件 read 打不开,脚本会自动转成 jpg 副本,
   `image_path` 指向的就是副本(`IMG_2357.HEIC.jpg`);转不了时输出里写明原因,如实告诉用户转成 jpg / png 再传。
   **read 返回「this model does not support image input」(模型不支持图片输入)时,不是图片格式的问题**,
@@ -63,6 +66,8 @@ python3 {baseDir}/scripts/kb_init.py scan <文件或目录> [--batch 批次名]
   (`MODEL_INPUT_MODALITIES`)」,**不要让用户去转格式**(转了也一样读不了),也不要自己去找 OCR 工具。
 
 输出末尾会点名「需要你看图的」和「没能处理的」。**没能处理的不算导入**,要如实转告用户。
+老格式 `.xls` / `.rtf` / `.ppt`(以及 WPS 的 `.et` / `.wps` / `.dps`)读不了,输出里写明另存成什么(`.xlsx` / `.docx` / `.pptx`),照说即可。
+内网网页由 `gaussdb-kb-import` 的剪藏转成 `page.md` 后交到这里(`scan <page.md>`),按普通 md 处理;页内截图在同一批次的 `images/` 下。工作单的 `source` 已经是原网页地址(剪藏批次处理完会被清掉,出处不能写 page.md),草稿里不要改它。
 
 用户给的是自己电脑上的路径(`D:\…`、`~/Desktop/…`)时,skill 在沙箱里读不到:把收件目录告诉他
 (`$GSDB_KB_INBOX`,默认 `<kb>/inbox/uploads`),让他先通过对话界面上传,再用沙箱内路径重试。
@@ -78,7 +83,7 @@ python3 {baseDir}/scripts/kb_init.py scan <文件或目录> [--batch 批次名]
 
 ## 2. 写草稿(你的核心工作)
 
-逐个读 `work/NNN.json`:`text` 有内容就读它;`image_path` 不为空就用 **read 工具看图**。
+逐个读 `work/NNN.json`:`text` 有内容就读它;`image_paths` 不为空就用 **read 工具逐张看图**(扫描件是每一页,pptx 是幻灯片里的图)。
 然后按 `template` 把六要素写进 `draft/NNN.json`(用 write 工具):
 
 ```json
@@ -146,7 +151,7 @@ python3 {baseDir}/../gaussdb-kb-import/scripts/kb.py ingest <out/批次-tickets.
 
 ## 能力边界(如实说明,不要假装)
 
-- **不做 OCR**。照片与扫描件靠你的视觉能力读,读不了(模糊 / 遮挡 / 转换失败)就说读不了,让用户换格式或补材料;
+- **不做 OCR**。照片与扫描件(脚本已渲染成页面图片)靠你的视觉能力读,读不了(模糊 / 遮挡 / 转换失败)就说读不了,让用户换格式或补材料;
   模型没开图片输入时说清是平台配置,见第 1 节。
 - 照片抽出来的内容在文件里标 `extracted_by: model` —— 它没有可 diff 的原文,复核成本和脚本抽的不一样,这一点必须看得见。
 - 六要素是**从原文抽**,不是**由你补全**。补出来的内容没有出处,指不回去的不入库。

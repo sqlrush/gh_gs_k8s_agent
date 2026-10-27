@@ -88,7 +88,7 @@ spec:
         - name: gateway
           # base 是直接 kubectl apply -k 的,**不做占位符渲染** —— 这里写具体标签,
           # 平台按实际版本改(和 configmap-agent.yaml 里的样例值一个道理)。
-          image: gaussdb-agent-gateway:agent-v1.4.0-oc1.18.27
+          image: gaussdb-agent-gateway:agent-v1.4.1-oc1.18.27
           imagePullPolicy: IfNotPresent
           securityContext:
             readOnlyRootFilesystem: true        # 网关不写任何东西
@@ -125,6 +125,9 @@ spec:
             - {name: GATEWAY_POOL_SWEEP_SECONDS, valueFrom: {configMapKeyRef: {name: gateway-config, key: POOL_SWEEP_SECONDS, optional: true}}}
             - {name: GATEWAY_POOL_WAIT_SECONDS, valueFrom: {configMapKeyRef: {name: gateway-config, key: POOL_WAIT_SECONDS, optional: true}}}
             - {name: GATEWAY_POOL_CONTROL_KEY, valueFrom: {secretKeyRef: {name: sandbox-control, key: KEY, optional: true}}}
+            # 网页剪藏(2026-10-27):与导入容器读同一份 agent-config,名单只在一处配
+            - {name: GATEWAY_KB_CLIP_ORIGINS, valueFrom: {configMapKeyRef: {name: agent-config, key: KB_CLIP_ORIGINS, optional: true}}}
+            - {name: GATEWAY_KB_CLIP_MAX_MB, valueFrom: {configMapKeyRef: {name: agent-config, key: KB_CLIP_MAX_MB, optional: true}}}
             # 信任凭据与运维密钥走 Secret。**两者一个都没配时网关拒绝启动**
             # (gateway/config.py):不限制来源就等于「任填工号即可进入任何人的环境」,
             # 而且从外面看不出异常 —— 宁可起不来。

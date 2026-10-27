@@ -206,6 +206,38 @@ def unique_path(target: pathlib.Path) -> pathlib.Path:
     raise KbError(f"同名文件过多,无法为 {target.name} 分配快照名")
 
 
+SCAN_STUB = """<!-- 扫描件转录稿(extracted_by: model)。原件 {snapshot},页面图片在 {pages}/(page-01.jpg 起,{note})。
+     逐页用 read 工具看图,把正文按原样转录到这段说明下面:保留章节编号、条款编号与表格(写成 markdown 表格);
+     看不清的字写「[看不清]」并在最后集中问用户,**不要猜** —— 猜出来的内容进了知识库,会被当成贵方的规范。
+     全部转录完删掉这段说明,再按常规条款化。 -->
+"""
+
+
+def _ingest_scanned(kb: pathlib.Path, src: pathlib.Path, snapshot: pathlib.Path, inbox: pathlib.Path, why) -> int:
+    """扫描件 / 乱码 PDF:每页渲染成 jpg,source.md 先写转录说明,退出码 2(还要模型看图转录)。"""
+    from common.kb import pdfpages
+    try:
+        rendered = pdfpages.render_pages(snapshot, inbox / "pages")
+    except _extract.ExtractError as exc:
+        raise KbError(f"{why}\n(渲染成图片也没成功:{exc})") from exc
+    inbox.mkdir(parents=True, exist_ok=True)
+    pages_rel = (inbox / "pages").relative_to(kb).as_posix()
+    (inbox / "source.md").write_text(
+        SCAN_STUB.format(snapshot=snapshot.relative_to(kb).as_posix(), pages=pages_rel, note=rendered.note()),
+        encoding="utf-8")
+    (inbox / "outline.md").write_text(f"# outline of {src.name}\n\n(扫描件:转录后再看标题)\n", encoding="utf-8")
+    kind = "乱码(字体缺映射)" if getattr(why, "reason", "") == "garbled" else "扫描件(字是图片)"
+    print(f"KB 目录        : {kb}")
+    print(f"原始快照       : {snapshot.relative_to(kb)}")
+    print(f"文字层不可用   : {kind} —— 已把每页渲染成图片,由你看图转录")
+    print(f"页面图片       : {pages_rel}/({rendered.note()})")
+    print(f"转录写到       : {(inbox / 'source.md').relative_to(kb)}(里面有转录要求)")
+    print()
+    print("Next: 逐页 read 页面图片,把正文转录进 source.md(看不清的写「[看不清]」、集中问用户,不要猜);"
+          "转录完再按 SKILL.md 工作流条款化。转录内容来自看图,条款的 source 写明「扫描件转录」。")
+    return 2
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
     src = pathlib.Path(args.file).expanduser()
     if not src.is_file():
@@ -216,13 +248,21 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     kb = resolve_kb_dir(args.kb)
     ensure_kb_skeleton(kb)
 
-    text = normalize_text(extract_source(src))
-    outline = detect_outline(text)
+    unreadable = None
+    try:
+        text = normalize_text(_extract.extract_source(src))
+    except _extract.UnreadablePdf as exc:      # 扫描件 / 乱码 PDF:渲染成图片,由模型看图转录(下面)
+        unreadable, text = exc, ""
+    except _extract.ExtractError as exc:
+        raise KbError(str(exc)) from exc
+    outline = detect_outline(text) if text else []
 
     snapshot = unique_path(kb / "sources" / src.name)
     shutil.copy2(src, snapshot)
 
     inbox = kb / "inbox" / slugify(src.stem)
+    if unreadable is not None:
+        return _ingest_scanned(kb, src, snapshot, inbox, unreadable)
     # Same filename -> same slug -> source.md is overwritten. That is the right
     # default (same name means a new edition of the same document, and the latest
     # is what you want), but doing it *silently* is not: whatever was still waiting
@@ -246,6 +286,15 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     print(f"原始快照       : {snapshot.relative_to(kb)}")
     print(f"待条款化文本   : {(inbox / 'source.md').relative_to(kb)}({total_lines} 行)")
     print(f"标题大纲       : {(inbox / 'outline.md').relative_to(kb)}({len(outline)} 个候选标题)")
+    if src.suffix.lower() == ".pptx":
+        try:
+            media = _extract.pptx_media(src, inbox / "media")
+        except (_extract.ExtractError, OSError) as exc:
+            media = []
+            print(f"幻灯片图片     : 没取出来({exc});不影响文字部分")
+        if media:
+            print(f"幻灯片图片     : {len(media)} 张 → {(inbox / 'media').relative_to(kb)}/(slideNN-*,"
+                  f"截图、架构图、监控曲线需要时用 read 工具看图,把要点补进对应页)")
 
     if superseded:
         print()
@@ -759,10 +808,19 @@ def cmd_validate(args: argparse.Namespace) -> int:
             continue
         if sub.name in ("uploads", "drafts"):            # 收件目录与类型化条目草稿,不是待条款化的规范
             continue
+        if sub.name == "clips":                         # 网页剪藏:每个批次一个目录,没转成 md 的才提醒
+            for clip in sorted(sub.glob("clip-*")):
+                if (clip / "meta.json").is_file() and not (clip / "page.md").is_file():
+                    findings.append(("warn", f"inbox/clips/{clip.name} 剪藏了还没导入(kb.py clip ingest {clip.name})"))
+            continue
         if (sub / "manifest.json").is_file():          # 工单批次,不是规范
             items = list((sub / "items").glob("*.md")) if (sub / "items").is_dir() else []
             if items:
                 findings.append(("warn", f"inbox/{sub.name} 还有 {len(items)} 单工单未处理(propose → review → apply)"))
+            continue
+        src_md = sub / "source.md"
+        if src_md.is_file() and read_text_file(src_md).startswith("<!-- 扫描件转录稿"):
+            findings.append(("warn", f"inbox/{sub.name} 是扫描件,**还没转录**(逐页看 pages/ 的图,转录进 source.md 后再条款化)"))
             continue
         findings.append(("warn", f"inbox/{sub.name} 尚未条款化(处理完后 kb.py inbox-clean {sub.name})"))
 
@@ -892,6 +950,7 @@ def cmd_contract(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     import kb_cases
+    import kb_clip
     import kb_docset
     import kb_items
     import kb_read
@@ -904,7 +963,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_ingest = sub.add_parser("ingest", help="导入规范(txt/md/docx/doc/pdf → 条款化)、工单(xlsx/csv/md/txt/docx → 一单一文件)"
+    p_ingest = sub.add_parser("ingest", help="导入规范(txt/md/docx/doc/pdf/pptx → 条款化;扫描件 PDF 渲染成图片看图转录)、工单(xlsx/csv/md/txt/docx → 一单一文件)"
                                              "或官方文档包(.chm → 官方文档集)")
     p_ingest.add_argument("file", help="文档/工单路径")
     p_ingest.add_argument("--kb", help="KB 目录(默认 $GSDB_KB_DIR 或 <安装根>/kb)")
@@ -927,6 +986,7 @@ def build_parser() -> argparse.ArgumentParser:
     kb_read.add_subcommands(sub)        # 分层读取:导入时核对 L0 / L1、照模板写条目
     kb_items.add_subcommands(sub)       # 类型化条目:add / attach / retype / migrate / profile / taxonomy
     kb_docset.add_subcommands(sub)      # 官方文档集(CHM → 标准知识库):scan / plan / apply / summaries / pack / install
+    kb_clip.add_subcommands(sub)        # 网页剪藏(需要登录的内网网页):status / list / ingest / clean
 
     p_validate = sub.add_parser("validate", help="校验 ID/schema/INDEX 一致性")
     p_validate.add_argument("--kb")
@@ -995,6 +1055,7 @@ def _index_all_locked(args: argparse.Namespace, kb: pathlib.Path) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     import kb_cases
+    import kb_clip
     import kb_docset
     import kb_items
     import kb_read
@@ -1006,7 +1067,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"错误:{exc}", file=sys.stderr)   # 别人正在写:退出码 2(有活没干完),不是 1(坏了)
         return 2
     except (KbError, kb_store.StoreCmdError, kb_cases.CaseCmdError, kb_read.ReadCmdError, kb_items.ItemCmdError,
-            kbconfig.KbConfigError, spg.StoreError) + kb_docset.ERRORS as exc:
+            kb_clip.ClipCmdError, kbconfig.KbConfigError, spg.StoreError) + kb_docset.ERRORS as exc:
         # StoreError 也要在这里收住:换 embedding 模型那道闸从索引深处抛上来,
         # 漏掉它就会给用户一整屏 traceback —— 看着像崩了,而它其实是在正确地拦着。
         print(f"错误:{exc}", file=sys.stderr)

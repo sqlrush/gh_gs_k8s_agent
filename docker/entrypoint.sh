@@ -91,6 +91,13 @@ OC=$!
 # 报告只读端口:大盘的数据口。不是就绪条件,起不来只影响大盘,不影响对话。
 $PODCTL serve-reports --dir "$GSDB_REPORTS_DIR" --port 4097 --kb-dir "$GSDB_KB_DIR" &
 REPORTS=$!
+# 网页剪藏接收(只在导入容器,模板给 KB_CLIP_RECEIVER=1):网关把管理员剪藏的网页转到 4095,落进知识库收件目录。
+# 同样不是就绪条件:起不来只影响剪藏,对话照常
+CLIPD=""
+if [ "${KB_CLIP_RECEIVER:-0}" = "1" ]; then
+  $PODCTL serve-clip --port 4095 &
+  CLIPD=$!
+fi
 # 定期回写。db 走 SQLite online backup(边写边拷也一致),其余文件按 mtime 增量。
 # 每轮先 checkpoint 把 WAL 合回主库,免得回写出去的那份把最近的提交落在 -wal 里。
 ( while sleep "$STATE_SYNC_SECONDS"; do
@@ -103,7 +110,7 @@ trap term TERM INT
 set +e
 wait "$OC"; RC=$?
 set -e
-kill "$REFRESHER" "$SYNCER" "$REPORTS" 2>/dev/null || true
+kill "$REFRESHER" "$SYNCER" "$REPORTS" $CLIPD 2>/dev/null || true
 # 收尾顺序不能改:合 WAL → 完整回写并清 dirty → 备份 → 释放独占。
 # 先释放独占的话,另一个 Pod 可能在我们还没写完时就开始加载。
 $PODCTL db-checkpoint --db "$DB"

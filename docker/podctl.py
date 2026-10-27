@@ -580,6 +580,9 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--dir", required=True)
     p.add_argument("--port", type=int, default=4097)
     p.add_argument("--kb-dir", default="", help="共享知识库目录;给了才有 /_kb/catalog.json")
+    # 网页剪藏接收(2026-10-27,只在导入容器):网关把管理员剪藏的网页转到这里,落进知识库收件目录。参数来自环境变量
+    p = sub.add_parser("serve-clip")
+    p.add_argument("--port", type=int, default=4095)
     return ap
 
 
@@ -618,6 +621,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         elif a.cmd == "serve-credproxy":
             import credproxy
             return credproxy.main()
+        elif a.cmd == "serve-clip":
+            import clipd
+            return clipd.main(a.port)
         elif a.cmd == "pool-steward":
             import poolsteward
             return poolsteward.serve()

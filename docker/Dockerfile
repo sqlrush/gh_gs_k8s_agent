@@ -42,7 +42,7 @@ COPY agent/ /opt/agent/src/
 RUN cd /opt/agent/src && bash install-opencode.sh --dest /opt/agent/config/opencode/skills --no-backup \
         --agents-md /opt/agent/config/opencode/AGENTS.md >/tmp/install.log 2>&1 || { cat /tmp/install.log; exit 1; } \
     && grep -E "installed" /tmp/install.log | tail -1 && rm -rf /opt/agent/src /tmp/install.log
-COPY docker/podctl.py docker/statesync.py docker/fdtree.py docker/poolsync.py docker/poolrun.py docker/slotrun.py docker/poolslot.py docker/poolsteward.py docker/poolauth.py docker/netcheck.py docker/credproxy.py docker/kbcatalog.py docker/kboutline.py docker/entrypoint.sh /opt/agent/
+COPY docker/podctl.py docker/statesync.py docker/fdtree.py docker/poolsync.py docker/poolrun.py docker/slotrun.py docker/poolslot.py docker/poolsteward.py docker/poolauth.py docker/netcheck.py docker/credproxy.py docker/clipd.py docker/kbcatalog.py docker/kboutline.py docker/entrypoint.sh /opt/agent/
 # 权限按镜像统一:构建目录里的文件可能是 0600(编辑器 / sed -i 重写过),槽位 uid 2000+ 读不到就起不来
 # (2026-10-25 测试环境:/opt/agent/kboutline.py 0600,报告端口反复崩、所有人的槽位 opencode_not_ready)
 RUN chmod 0755 /opt/agent/entrypoint.sh && chown -R agent:agent /opt/agent && chmod -R a+rX /opt/agent \

@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional, Tuple
 
 from . import identity as idt
-from . import pods, poolrouter, proxy
+from . import kbclip, pods, poolrouter, proxy
 from .diagnose import NotReady
 
 _MAX_BODY = 64 * 1024 * 1024        # 上传走网关的话,单请求上限;超过直接 413
@@ -250,7 +250,10 @@ class _Handler(BaseHTTPRequestHandler):
             # 不回细节:这是安全边界,错误信息会告诉试探者哪一步过了
             return self._text(403, "无法确认身份。请经统一认证入口访问。")
 
-        switch = SWITCH_PATHS.get(self.path.split("?", 1)[0].rstrip("/"))
+        bare = self.path.split("?", 1)[0]
+        if kbclip.handles(bare):
+            return kbclip.handle(self, who, bare)        # 网页剪藏的安装页 / 剪藏页 / 上传(只给知识库管理员)
+        switch = SWITCH_PATHS.get(bare.rstrip("/"))
         if switch is not None:
             return self._switch(who, switch)
 
