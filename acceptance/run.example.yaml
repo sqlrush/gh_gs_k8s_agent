@@ -1,0 +1,48 @@
+# 验收跑题的配置样例。复制到 ~/.acceptance/run.yaml 再按本机环境改(那份不进仓库:里面有端口、路径、密钥文件位置)。
+# 用法见 docs/智能体验收方案.md 第 8 节与 acceptance/README.md「跑一轮」。
+bank: v1
+out_dir: ~/.acceptance/runs                 # 每轮结果(回答原文、工具输出、报告)放这里,不进仓库
+
+names:                                      # 题目里的占位符
+  instance: og5                             # 验收实例的别名(部署时登记在 GRMP_INSTANCE_ALIASES)
+  alias: og5                                # 同一实例的另一个别名;没有第二个就填同一个
+  broken: og-std                            # 登记了、但中间件取不到数的别名(I3 用)
+
+user_portal: http://127.0.0.1:18092         # 普通用户的入口(模拟 SSO → 网关),诊断环境的题走这里
+
+admin:                                      # 知识库管理员:跑题脚本自己起一个带 kb-admin 角色的模拟 SSO
+  sso_sim: k8s/tools/sso-sim.py             # 仓库相对路径或绝对路径
+  port: 18095
+  gateway_port: 18093                       # 网关的端口转发(kubectl port-forward svc/gateway)
+  user: u9500
+  roles: kb-admin
+  trust_file: ~/.og5-daily/trust            # 网关信任凭据(0600 文件)
+
+kubectl:
+  context: orbstack
+  namespace: gaussdb-agent
+
+faultlab:
+  dir: ~/gh_skill/opencode_skill-main-v2-0729/tools/faultlab
+  python: ~/p2venv/bin/python               # 装了 psycopg2 的解释器
+  live_delay_s: 180                         # 故障窗口开始后多久问「现场」题(等现象成形)
+
+kb:
+  nas_path: /Users/Shared/agent-nas-k8s/kb  # 本机看到的共用知识库目录
+  pod_path: /nas/kb                         # 导入容器里看到的同一个目录
+  swap: true                                # 跑题期间换成验收知识库,结束原样还原
+  backup_dir: /Users/Shared/agent-nas-k8s/.acceptance-kb-backup
+  local_dir: ~/.acceptance/kb               # 验收知识库的本机副本(评分时核对引用用)
+
+mock_wiki_port: 18300                       # K2 用的模拟内网 Wiki(要在 agent-config 的 KB_CLIP_ORIGINS 里)
+
+judge:                                      # 裁判模型(OpenAI 兼容接口);不配就只出规则层分数,裁判项记「待裁判」
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-v4-pro
+  api_key_from: ~/.config/opencode/opencode.deepseek.jsonc   # opencode 配置文件(取 provider 的 apiKey),或只含密钥的文件
+  temperature: 0
+  concurrency: 6                            # 同时判几道题
+
+concurrency: 3
+question_timeout_s: 900
+old_days: 60                                # {old}:往前多少天(要超出保留期)

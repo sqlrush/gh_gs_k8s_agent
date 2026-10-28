@@ -19,13 +19,12 @@ questions:
     tools:
       w: 15
       must:
-        - {skill: gaussdb-kb-init}
-      should: [gaussdb-kb-import]
+        - {any_of: [gaussdb-kb-init, gaussdb-kb-import], why: "标准化(kb-init)或直接走工单路径(ingest → propose → review)都行"}
       must_not:
         - {cmd: kb.py apply, why: "没经管理员确认就落盘"}
     points:
-      - {w: 10, text: "识别为一次故障的经过,按案例标准化成六要素(时间、系统、现场、判断、处置、复发标志)"}
-      - {w: 10, text: "六要素内容忠实于原文:根因「连接池归还连接时未提交事务」、结论强度「已确认」、处置「数据库侧不终止业务会话」"}
+      - {w: 10, text: "识别为一次故障的经过,整理成案例(时间、系统、现场、判断 / 根因、处置、复发标志),并把要入库的内容呈现给管理员"}
+      - {w: 10, text: "案例内容忠实于原文:根因「连接池归还连接时未提交事务」、结论强度「已确认」、处置「数据库侧不终止业务会话」"}
       - {w: 12, text: "发现库里已有同一起事件的案例,提示重复并请管理员选合并 / 跳过 / 更新", truth: "kb:S2-20250120-CBST-空闲事务持锁阻塞"}
       - {w: 8, text: "报告里的「运维规范 3.4」对上已有规范 GS-XACT-001;「开发规范 2.1」里 removeAbandoned 的要求是库里没有的新条款,列为候选", truth: "kb:GS-XACT-001,GS-CONN-001"}
     handling:

@@ -100,7 +100,7 @@ questions:
       must:
         - {skill: gaussdb-kb, args: ["query"]}
     points:
-      - {w: 15, text: "不能直接删:先登记索引台账、观察满 30 天且覆盖一次月末批量、确认 idx_scan 仍为 0 后提变更单删除", truth: "kb:GS-IDX-005", by: rule}
+      - {w: 15, text: "不能直接删:先登记索引台账、观察满 30 天且覆盖一次月末批量、确认 idx_scan 仍为 0 后提变更单删除", truth: "kb:GS-IDX-005"}
       - {w: 13, text: "举例用本行案例(「贵行出现过」):看着没用、其实是季度报表在用的索引", truth: "kb:S3-20250707-CBST-索引未使用-季度报表"}
       - {w: 6, text: "说明为什么观察窗口要覆盖月末 / 季末(低频作业)"}
       - {w: 6, text: "引申:统计计数重置、主备各自统计会让「未使用」误判"}
@@ -120,7 +120,7 @@ questions:
   needs: {faultlab: [], kb: []}
   ask: 我们行里对索引命名有什么规定?
   rubric:
-    format: {w: 15, template: qa, followup: true, extra: ["第一行是「解答来源:知识库中未找到相关内容,以下为通用知识,仅供参考」"]}
+    format: {w: 15, template: qa, followup: true, extra: ["第一行「解答来源」如实写明贵行规范里没有相关条款(用到官方文档的照常列出编号;什么都没用到时写「知识库中未找到相关内容,以下为通用知识,仅供参考」)"]}
     tools:
       w: 15
       must:

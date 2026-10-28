@@ -8,7 +8,11 @@ acceptance/
   bank/v1/A-health.yaml … K-kbimport.yaml   题库 v1:11 个方面、48 题,每题一份评分标准
   fixtures/                                 题目要贴给智能体的材料与它们的真值(truth.yaml);make_fixtures.py 生成扫描件 PDF
   check_bank.py                             离线校验:分值、技能、知识库编号、真值、占位符、版式开关
-  tests/test_bank_units.py                  守卫:当前题库能过校验,校验本身真能抓出错
+  run.py                                    跑一轮:换验收知识库 → 造故障 → 问题 → 还原 → 评分 → 报告;也能单独评分、还原
+  run.example.yaml                          跑题配置样例(复制到 ~/.acceptance/run.yaml 再改)
+  runner/                                   跑题:配置、opencode 客户端、会话解析、faultlab 编排、知识库换装、夹具、问一道题
+  scoring/                                  评分:规则层、裁判层、真值说明、合分与门槛、HTML 报告
+  tests/                                    题库守卫、跑题与评分的单测(不连测试环境)
 ```
 
 ```bash
@@ -16,6 +20,22 @@ python3 acceptance/check_bank.py                    # 校验全部版本;有 ✗
 python3 acceptance/check_bank.py --bank v1 --list   # 列出题目
 python3 acceptance/fixtures/make_fixtures.py --out /tmp/acc-fixtures   # 生成 K3 的扫描件(要中文字体)
 ```
+
+## 跑一轮
+
+```bash
+cp acceptance/run.example.yaml ~/.acceptance/run.yaml && chmod 600 ~/.acceptance/run.yaml   # 第一次:按本机改
+python3 acceptance/run.py check                                   # 自检
+python3 acceptance/run.py run --label v1.4.2                      # 完整 48 题,约 50 分钟
+python3 acceptance/run.py run --smoke --label v1.4.2-smoke        # 冒烟 15 题
+python3 acceptance/run.py run --only F1,G2 --label try            # 指定几题
+python3 acceptance/run.py score <轮次> --baseline <基线轮次>       # 重新评分 / 与基线对比(加了人工改判后)
+python3 acceptance/run.py restore                                 # 中途中断时还原共用知识库
+python3 acceptance/run.py list                                    # 历次结果
+```
+
+结果在 `~/.acceptance/runs/<轮次>/`(`report.html` 是报告),不进仓库。准备工作、每一步做什么、看结果、人工改判、
+出问题怎么办,见方案第 8 节。
 
 ## 一道题的写法
 

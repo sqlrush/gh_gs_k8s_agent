@@ -37,7 +37,7 @@ gateway/     接入网关
 k8s/         base/ 部署清单;templates/ 网关按工号建 Pod 的模板;tools/ 现场工具(runtime-doctor、sso-sim、render-pool);local/ 本地测试集群覆盖
 scripts/     构建、离线打包、大盘样例数据(dash-samples.py)、测试集群与端到端脚本
 docs/        构建部署手册、前端对接接口说明、代码结构说明、智能体验收方案、api/ 机器可读的接口定义
-acceptance/  智能体版本验收题库:bank/v1/ 48 题评分标准、fixtures/ 夹具、check_bank.py 离线校验
+acceptance/  智能体版本验收:bank/v1/ 48 题评分标准、fixtures/ 夹具、run.py 跑题评分出报告、check_bank.py 离线校验
 ```
 
 前端代码约定放在 `frontend/`（由前端方建立与维护）。
