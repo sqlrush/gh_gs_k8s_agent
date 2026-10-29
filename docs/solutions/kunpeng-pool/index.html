@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GaussDB 智能体 · 基于鲲鹏的池化方案（技术分析稿）</title>
+<style>
+:root{--fg:#1b2430;--muted:#5a6475;--bd:#d9dfe8;--accent:#2f6fdb;--navy:#123a73;--bg:#f6f8fb;
+--p0:#c2410c;--p1:#2f6fdb;--p2:#64748b;--ok:#15803d}
+*{box-sizing:border-box}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;line-height:1.7;color:var(--fg);margin:0;background:var(--bg)}
+.wrap{max-width:1200px;margin:0 auto;padding:0 24px 80px}
+header{background:linear-gradient(120deg,#123a73,#2f6fdb 60%,#5b8def);color:#fff;padding:34px 0 26px;margin-bottom:22px}
+header h1{margin:0 0 6px;font-size:27px}
+header .meta{opacity:.92;font-size:14px}
+main{background:#fff;border:1px solid var(--bd);border-radius:12px;padding:10px 34px 40px}
+h2{font-size:1.4em;color:var(--navy);border-bottom:1px solid var(--bd);padding-bottom:.3em;margin-top:2em}
+h3{font-size:1.1em;margin-top:1.5em}
+p,li{font-size:15px}
+.muted{color:var(--muted)}
+code{background:#f3f5f9;padding:.1em .4em;border-radius:4px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.86em}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid var(--bd);padding:7px 9px;text-align:left;vertical-align:top}
+th{background:#eef3fb;font-weight:600;white-space:nowrap}
+tr:nth-child(even) td{background:#fafbfd}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}
+.card{border:1px solid var(--bd);border-radius:10px;padding:12px 14px;background:#fbfcfe}
+.card b{display:block;font-size:24px;color:var(--navy);font-variant-numeric:tabular-nums}
+.card span{font-size:13px;color:var(--muted)}
+.concl{border-left:4px solid var(--accent);background:#f3f7fe;padding:12px 18px;border-radius:0 8px 8px 0;margin:14px 0}
+.concl li{margin:.35em 0}
+/* 全链路分层图 */
+.stack{display:grid;grid-template-columns:140px 1fr 170px 270px;gap:0;border:1px solid var(--bd);border-radius:10px;overflow:hidden;margin:16px 0}
+.stack>div{padding:9px 12px;border-bottom:1px solid var(--bd)}
+.stack .lay{background:#eef3fb;font-weight:600;color:var(--navy);font-size:14px;display:flex;flex-direction:column;justify-content:center}
+.stack .lay small{font-weight:400;color:var(--muted);font-size:12px}
+.stack .comp{display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:#fff}
+.stack .hd{background:#123a73;color:#fff;font-weight:600;font-size:13px}
+.stack .time{background:#fff;font-size:12px;color:var(--muted);display:flex;flex-direction:column;justify-content:center;gap:3px}
+.stack .time b{font-size:16px;color:var(--navy);font-variant-numeric:tabular-nums}
+.stack .time b.big{font-size:22px;color:#c2410c}
+.tbar{background:#eef1f6;border-radius:3px;height:8px}.tbar i{display:block;height:8px;border-radius:3px;background:#2f6fdb}
+.stack .opt{background:#fbfaf6;font-size:12.5px;display:flex;flex-wrap:wrap;gap:5px;align-content:center}
+.box{border:1px solid #c9d8f2;background:#f5f8ff;border-radius:7px;padding:4px 8px;font-size:13px;line-height:1.45}
+.box em{font-style:normal;color:var(--muted);font-size:12px;display:block}
+.step{display:inline-block;background:var(--accent);color:#fff;border-radius:50%;width:1.55em;height:1.55em;line-height:1.55em;
+text-align:center;font-size:12px;margin-right:4px;font-weight:600}
+.arrow{color:#9fb3d6}
+.tag{display:inline-block;border-radius:10px;padding:1px 8px;font-size:12px;border:1px solid}
+.t-kp{color:#9a3412;border-color:#fdba74;background:#fff7ed}
+.t-fy{color:#1d4ed8;border-color:#93c5fd;background:#eff6ff}
+.t-oe{color:#166534;border-color:#86efac;background:#f0fdf4}
+.t-as{color:#7e22ce;border-color:#d8b4fe;background:#faf5ff}
+.t-we{color:#334155;border-color:#cbd5e1;background:#f8fafc}
+.pri{font-weight:700;white-space:nowrap}
+.pri.p0{color:var(--p0)}.pri.p1{color:var(--p1)}.pri.p2{color:var(--p2)}.pri.no{color:#94a3b8}
+/* 横条 */
+.bars{margin:10px 0 4px}
+.bar{display:grid;grid-template-columns:150px 1fr 200px;align-items:center;gap:10px;margin:5px 0;font-size:13px}
+.bar .track{background:#eef1f6;border-radius:4px;height:14px;position:relative}
+.bar .fill{background:#2f6fdb;height:14px;border-radius:0 4px 4px 0}
+.bar .v{font-variant-numeric:tabular-nums;color:var(--fg)}
+.split{display:flex;height:30px;border-radius:6px;overflow:hidden;margin:10px 0 4px;font-size:13px;color:#fff}
+.split div{display:flex;align-items:center;padding:0 10px;white-space:nowrap}
+.legend{font-size:12.5px;color:var(--muted)}
+.topo{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:14px 0}
+.node{border:1px solid var(--bd);border-radius:10px;padding:12px 14px;background:#fbfcfe}
+.node h4{margin:0 0 6px;color:var(--navy);font-size:14.5px}
+.node ul{margin:0;padding-left:1.2em;font-size:13.5px}
+.note{font-size:13px;color:var(--muted)}
+.filltable td.fill{background:#fffdf3;height:34px}
+@media print{body{background:#fff}main{border:0}}
+@media(max-width:900px){.cards,.topo{grid-template-columns:1fr 1fr}.stack{grid-template-columns:110px 1fr}.stack .opt{grid-column:1/3}}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+<h1>GaussDB 智能体 · 基于鲲鹏服务器的池化方案（技术分析稿）</h1>
+<div class="meta">全链路标注（含各环节时间占比）· 鲲鹏优势对比表 · 2026-10-28</div>
+</div></header>
+<div class="wrap"><main>
+<h2 id="s1">1　全链路：一次提问从浏览器到硬件</h2>
+<p class="note">时间占比：测试集群 48 道验收题实测，平均每题 51 秒（不含等用户回答的时间）。图中编号是一次提问依次经过的步骤，11–12 是模型多轮推理与流式输出，计入 L5。</p>
+<div class="stack">
+<div class="hd">层次</div><div class="hd">本系统组件（编号是提问经过的步骤）</div><div class="hd">时间占比</div><div class="hd">鲲鹏</div>
+<div class="lay">L1 用户与接入<small>行内门户 / SSO</small></div>
+<div class="comp"><span class="box"><span class="step">1</span>浏览器 / 门户前端<em>对话页、大盘；SSE 事件流</em></span><span class="arrow">→</span>
+<span class="box">行内 SSO 反向代理<em>认人后注入工号头 + 信任凭据</em></span><span class="arrow">→</span><span class="box">负载均衡 / Ingress<em>TLS 终结</em></span></div>
+<div class="time"><b>—</b><div class="tbar"><i style="width:0.0%"></i></div><small>计入 L2</small></div>
+<div class="opt"><span class="tag t-kp">鲲鹏 KAE 硬件卸载 TLS 加解密（RSA / SM3 / SM4）</span></div>
+
+<div class="lay">L2 接入网关<small>gaussdb-agent-gateway ×2</small></div>
+<div class="comp"><span class="box"><span class="step">2</span>认身份<em>gateway/identity.py</em></span><span class="arrow">→</span>
+<span class="box"><span class="step">3</span>分配槽位<em>poolalloc.py / poolrouter.py：新人、回来的人、满员等待页</em></span><span class="arrow">→</span>
+<span class="box"><span class="step">4</span>反向代理<em>proxy.py：HTTP + SSE 长连接</em></span><span class="box">后台清扫<em>poolsweeper.py：闲置转保留、腾挪</em></span></div>
+<div class="time"><b>0.04%</b><div class="tbar"><i style="width:1.5%"></i></div><small>1–4 步合计 · 约 6 ms/次请求</small></div>
+<div class="opt"><span class="tag t-kp">鲲鹏 64 物理核、无超线程：长连接并发稳</span><span class="tag t-kp">鲲鹏 NUMA 就近</span></div>
+
+<div class="lay">L3 池化集群<small>K8s / openFuyao</small></div>
+<div class="comp"><span class="box">池子 Pod × N（StatefulSet）<em>默认 16 Pod × 8 槽位 = 128 人；粘性保留</em></span>
+<span class="box">管家容器<em>docker/poolsteward.py：槽位载入 / 回写 / 腾挪，兼凭据代理</em></span>
+<span class="box">槽位容器 ×8<em>docker/slotrun.py → opencode serve；每槽位 request 768Mi / 100m，limit 2 核</em></span></div>
+<div class="time"><b>后台</b><div class="tbar"><i style="width:0.0%"></i></div><small>分配计入 L2；回写、腾挪不在提问的关键路径上</small></div>
+<div class="opt"><span class="tag t-kp">鲲鹏同功耗物理核更多：单机承载人数</span><span class="tag t-kp">鲲鹏 NUMA 绑定：每个池子 Pod 一个 NUMA 节点</span></div>
+
+<div class="lay">L4 容器内处理<small>opencode 1.18.27</small></div>
+<div class="comp"><span class="box"><span class="step">5</span>组装上下文<em>AGENTS.md、技能 SKILL.md、会话历史、回答模板</em></span>
+<span class="box">工具调度与权限<em>只读、白名单工具</em></span><span class="box"><span class="step">13</span>报告端口 4097<em>podctl serve-reports，大盘读取</em></span>
+<span class="box"><span class="step">14</span>状态回写 NAS<em>poolsync：会话、报告</em></span></div>
+<div class="time"><b>0.25%</b><div class="tbar"><i style="width:1.5%"></i></div><small>0.13 s/题（组装上下文与编排）</small></div>
+<div class="opt"><span class="tag t-kp">鲲鹏 arm64 原生镜像（已具备）</span><span class="tag t-kp">鲲鹏多核：多会话并行编排</span></div>
+
+<div class="lay">L5 模型推理<small>DeepSeek（OpenAI 兼容）</small></div>
+<div class="comp"><span class="box"><span class="step">6</span>调模型<em>opencode → 凭据代理（加模型 Key）→ 模型服务</em></span><span class="arrow">⇄</span>
+<span class="box"><span class="step">7</span>模型决定调哪个工具 / 输出回答<em>每题平均 9.5 轮；思考 + 工具决策</em></span>
+<span class="box"><span class="step">11</span>工具结果回灌，重复 6–10<em>上下文逐轮变长</em></span><span class="box"><span class="step">12</span>流式输出回答<em>版式模板、上色引用</em></span></div>
+<div class="time"><b class="big">84.7%</b><div class="tbar"><i style="width:100.0%"></i></div><small>43.3 s/题 · 拆解见第 2 节</small></div>
+<div class="opt"><span class="tag t-kp">推理服务器主机即鲲鹏（Atlas 800I A2：4 路鲲鹏 920）</span><span class="tag t-kp">鲲鹏主机内存做 KV Cache 第二级</span><span class="tag t-kp">鲲鹏会话缓存预取</span><span class="tag t-kp">鲲鹏分担 decode（sysHAX）</span><span class="tag t-kp">鲲鹏池化与推理同架构、同机房直连</span></div>
+
+<div class="lay">L6 技能执行<small>17 个诊断技能</small></div>
+<div class="comp"><span class="box"><span class="step">8</span>bash → python3 技能脚本<em>agent/skills/*/scripts：health、lockwait、sqltune、wdr…；每题 10.8 次，每次一个新进程</em></span></div>
+<div class="time"><b>3.4%</b><div class="tbar"><i style="width:4.0%"></i></div><small>1.75 s/题（技能进程启动）</small></div>
+<div class="opt"><span class="tag t-kp">鲲鹏多核：多人同时调工具不排队</span><span class="tag t-kp">鲲鹏毕昇编译器</span></div>
+
+<div class="lay">L7 数据访问<small>只读、白名单</small></div>
+<div class="comp"><span class="box"><span class="step">9</span>common/access.py<em>Unix 套接字</em></span><span class="arrow">→</span>
+<span class="box">凭据代理<em>docker/credproxy.py：中间件令牌、SM2 签名、工号</em></span><span class="arrow">→</span>
+<span class="box">GRMP 中间件<em>HTTPS；只执行登记过的 126 条 SQL</em></span><span class="arrow">→</span><span class="box">GaussDB 实例<em>客户生产库（只读诊断）</em></span></div>
+<div class="time"><b>10.3%</b><div class="tbar"><i style="width:12.2%"></i></div><small>5.27 s/题（中间件与库侧执行）</small></div>
+<div class="opt"><span class="tag t-kp">鲲鹏 KAE 卸载国密签名与加解密</span><span class="tag t-kp">鲲鹏 + openEuler 国密全栈</span></div>
+
+<div class="lay">L8 知识库检索<small>规范 / 案例 / 官方文档</small></div>
+<div class="comp"><span class="box"><span class="step">10</span>common/kb/query.py<em>BM25 倒排 + sqlite-vec 向量（约 4.3 万块）</em></span>
+<span class="box">查询向量<em>bge-m3 嵌入服务（OpenAI 兼容 /embeddings）</em></span><span class="box">L0 / L1 分层与引用核对<em>上色、出处编号</em></span></div>
+<div class="time"><b>1.2%</b><div class="tbar"><i style="width:1.5%"></i></div><small>0.63 s/题</small></div>
+<div class="opt"><span class="tag t-kp">鲲鹏 KRL / KVecTurbo 向量检索加速（NEON / SVE）</span></div>
+
+<div class="lay">L9 存储<small>NAS（NFS，RWX）</small></div>
+<div class="comp"><span class="box">users/&lt;工号&gt;/<em>会话、报告</em></span><span class="box">kb/<em>条目、索引 store.sqlite、官方文档集 6023 条</em></span></div>
+<div class="time"><b>—</b><div class="tbar"><i style="width:0.0%"></i></div><small>计入 L7、L8</small></div>
+<div class="opt"><span class="tag t-kp">鲲鹏服务器本地 NVMe 缓存只读索引</span></div>
+
+<div class="lay">L10 操作系统与运行时<small>节点 OS / 容器</small></div>
+<div class="comp"><span class="box">openEuler 内核<em>cgroup、调度、内存、NFS 客户端、TCP/TLS</em></span><span class="box">containerd / CNI</span><span class="box">kubelet<em>CPU / 拓扑管理器</em></span></div>
+<div class="time"><b>—</b><div class="tbar"><i style="width:0.0%"></i></div><small>承载以上各层</small></div>
+<div class="opt"><span class="tag t-kp">鲲鹏 + openEuler 原生调优（A-Tune、UADK、sysBoost）</span></div>
+
+<div class="lay">L11 硬件<small>鲲鹏 + 昇腾</small></div>
+<div class="comp"><span class="box">鲲鹏 920 CPU<em>多核、多 NUMA 节点；NEON（部分型号 SVE）；片上 KAE 加速器</em></span>
+<span class="box">内存<em>池子的主要占用</em></span><span class="box">网卡<em>业务 / 存储平面</em></span>
+<span class="box">昇腾 NPU<em>Atlas 800I A2 跑大模型；300I Duo 跑嵌入 / 重排</em></span><span class="box">存储<em>NAS</em></span></div>
+<div class="time"><b>—</b><div class="tbar"><i style="width:0.0%"></i></div><small>承载以上各层</small></div>
+<div class="opt"><span class="tag t-kp">鲲鹏 920：多核、多 NUMA、片上 KAE</span><span class="tag t-kp">鲲鹏主机 + 昇腾 NPU</span></div>
+</div>
+
+<h2 id="s2">2　模型推理 84.7%：拆解与鲲鹏加速</h2>
+<p class="note">拆解口径：测试集群 48 题共 454 轮模型调用（每题 9.5 轮，每轮平均 4.6 秒），按每轮的消息时间戳拆成「首 token 前」与「生成」两段；
+首 token 前再按每轮的新增 token 与命中缓存的 token 数做回归，分出固定开销、缓存前缀加载、新增 token 预填充。被测模型为公网 DeepSeek（已自带前缀缓存，命中 94%），私有化部署到鲲鹏 + 昇腾后需重测。</p>
+
+<div class="cards">
+<div class="card"><span>每轮送入</span><b>约 4 万 token</b><span>其中 3.7 万命中前缀缓存，新增约 2,500</span></div>
+<div class="card"><span>每轮生成</span><b>约 650 token</b><span>含思考、工具调用参数与回答</span></div>
+<div class="card"><span>首 token 前</span><b>1.27 s / 轮</b><span>固定开销 0.92 + 缓存加载 0.29 + 预填充 0.06</span></div>
+<div class="card"><span>生成</span><b>3.3 s / 轮</b><span>约 195 token/s</span></div>
+</div>
+
+<p><b>84.7% 由四段组成（占端到端时间）</b></p>
+<div class="split"><div style="width:72.3%;background:#1d4f9e">生成（decode）61.2%</div><div style="width:20.2%;background:#5b8def">固定开销 17.1%</div><div style="width:6.4%;background:#9dbcf3"></div><div style="width:1.1%;background:#d3e1fa"></div></div>
+<p class="legend">从左到右：生成 61.2% · 到推理服务的固定开销（往返、排队、调度）17.1% · 缓存前缀加载 5.4% · 新增 token 预填充 1.0%；合计 84.7%。</p>
+
+<table class="filltable">
+<tr><th>子环节</th><th class="num">占端到端</th><th class="num">每轮</th><th>在做什么</th><th>鲲鹏怎么加速</th><th style="width:11%">提升多少（待填）</th><th style="width:13%">可佐证的指标</th></tr>
+<tr><td><b>A　生成（decode）</b></td><td class="num"><b>61.2%</b></td><td class="num">3.3 s</td>
+<td>逐 token 生成思考、工具调用参数与回答，约 650 token / 轮；受显存带宽与并发组批大小限制</td>
+<td><ul>
+<li><b>KV Cache 卸载到鲲鹏主机内存</b>（MindIE KV 池化 / GMEM）：腾出昇腾显存，同一台推理服务器能组更大的并发批次，满额时排队更少、吞吐更高</li>
+<li><b>部分 decode 卸载到鲲鹏 CPU</b>（openEuler sysHAX）：鲲鹏与昇腾协同分担生成</li>
+<li><b>消除主机瓶颈</b>：每个 token 步的调度、采样在鲲鹏主机上完成，推理进程按 NUMA 亲和绑到离 NPU 最近的鲲鹏核</li>
+<li><b>鲲鹏 950</b>：SVE2 与 INT8 矩阵向量吞吐优化、内存带宽提升 2.25 倍，CPU 侧分担生成更强</li></ul></td>
+<td class="fill"></td><td class="note">每 token 时延；满额并发生成吞吐（token/s）</td></tr>
+<tr><td><b>B　固定开销</b></td><td class="num"><b>17.1%</b></td><td class="num">0.92 s</td>
+<td>每轮请求到推理服务的往返、排队、调度与组批，与 token 数无关；每题 9.5 轮，累积起来不小</td>
+<td><ul>
+<li><b>池化集群与推理服务器同架构、同机房</b>：Atlas 800I A2 主机就是 4 路鲲鹏 920，池子也在鲲鹏上，经 RoCE 直连（整机 8 × 200GE），去掉跨域与公网往返</li>
+<li><b>鲲鹏主机多核</b>负责请求接入、分词、组批调度，128 人并发时不排队</li></ul></td>
+<td class="fill"></td><td class="note">每轮固定开销；首 token 时延 P50 / P99</td></tr>
+<tr><td><b>C　缓存前缀加载</b></td><td class="num"><b>5.4%</b></td><td class="num">0.29 s</td>
+<td>复用前几轮已算过的 3.7 万 token 的 KV Cache（占送入的 94%）</td>
+<td><ul>
+<li><b>鲲鹏主机大内存做 KV Cache 第二级</b>（HBM → 鲲鹏 DDR → SSD；MindIE KV 池化、MemCache、UCM）：128 人并发时缓存不被挤出，命中率保持住</li>
+<li><b>会话缓存预取</b>（openEuler 智能记忆 + LMCache-Ascend）：工具执行的几秒里，预判下一轮要回来，提前把缓存从鲲鹏内存搬回显存</li></ul>
+<span class="note">公开数据：HBM + DRAM 分级缓存，命中率 17% → 48.8%、首 token 时延 3,058 → 2,071 ms（昇腾社区）；UCM 首 token 时延最多降 90%（华为）</span></td>
+<td class="fill"></td><td class="note">前缀缓存命中率；首 token 时延</td></tr>
+<tr><td><b>D　新增 token 预填充</b></td><td class="num"><b>1.0%</b></td><td class="num">0.06 s</td>
+<td>本轮新增的约 2,500 token（上一轮工具结果、用户新问题）</td>
+<td><ul><li><b>鲲鹏主机多核并行</b>做分词与上下文拼装，与昇腾预填充流水并行</li></ul></td>
+<td class="fill"></td><td class="note">每千 token 预填充时延</td></tr>
+<tr style="font-weight:600"><td>合计</td><td class="num">84.7%</td><td class="num">4.6 s</td><td colspan="2">每题 9.5 轮 × 4.6 秒 ≈ 43.3 秒</td><td class="fill"></td><td class="note">每题模型时间</td></tr>
+</table>
+
+<div class="concl"><ul>
+<li><b>为什么必须用鲲鹏主机内存：</b>每轮约 4 万 token 的上下文要靠前缀缓存复用。按 DeepSeek-V3 结构估算，每个 token 的 KV Cache 约 69 KB，
+128 人同时在线约 128 × 4 万 × 69 KB ≈ <b>350 GB</b>；一台 Atlas 800I A2 的 8 个昇腾模组显存合计 256 GB，且大部分要放模型权重。
+放不下的缓存一旦被挤出，每轮就要把约 4 万 token 整段重算——C 段的 0.29 秒会变成数秒。鲲鹏主机的 32 条内存插槽正好做这一级。</li>
+<li><b>收益最大的是 A 和 B：</b>生成（61.2%）靠「显存腾给更大的并发批次 + 鲲鹏分担」，固定开销（17.1%）靠「池化与推理同架构、同机房直连」。</li>
+</ul></div>
+
+<h2 id="s3">3　全链路中的鲲鹏步骤：比海光强在哪里（数值待填）</h2>
+<p class="note">只列全链路（第 1 节）里有鲲鹏参与的步骤，编号对应图中步骤；「好多少」一列留空待填，右列是可以拿来佐证的指标。</p>
+<table class="filltable">
+<tr><th>编号</th><th>步骤</th><th>鲲鹏在这一步做什么</th><th>鲲鹏比海光强在哪里</th><th style="width:14%">好多少（待填）</th><th style="width:16%">可佐证的指标</th></tr>
+<tr><td>1</td><td>发问（入口 TLS）</td><td>鲲鹏节点上的负载均衡 / Ingress 终结 TLS</td><td>片上 KAE 硬件卸载 RSA / SM3 / SM4 加解密，不占通用核：握手吞吐更高、CPU 更省</td><td class="fill"></td><td class="note">TLS 握手 / 秒；同吞吐下 CPU 占用</td></tr>
+<tr><td>2–4</td><td>认身份、分配槽位、反向代理</td><td>网关 2 副本跑在鲲鹏上</td><td>64 物理核、无超线程：每路长连接（SSE）不和超线程兄弟抢核，在线人数多时尾时延更稳</td><td class="fill"></td><td class="note">满额在线时网关 P99 时延</td></tr>
+<tr><td>3</td><td>池化承载</td><td>池子 Pod 与全部槽位跑在鲲鹏上</td><td>同功耗下物理核更多（7260：64 核 / 180 W），单机放得下更多槽位；NUMA 亲和把整个池子 Pod 绑在一个 NUMA 节点，访存就近</td><td class="fill"></td><td class="note">单机承载人数；每用户功耗</td></tr>
+<tr><td>5</td><td>组装上下文与编排</td><td>opencode 在鲲鹏上为每个会话组装上下文、调度工具</td><td>多核并行：几十个会话同时编排互不抢核</td><td class="fill"></td><td class="note">满额并发时编排时延</td></tr>
+<tr><td>6–7、11–12</td><td>模型推理</td><td>推理服务器的主机 CPU（Atlas 800I A2 = 4 路鲲鹏 920 + 昇腾）</td><td>推理与池化同一种架构、同一套 openEuler 与 openFuyao 集群：同机房 RoCE 直连，镜像与运维一套；请求预处理与调度在鲲鹏主机上完成</td><td class="fill"></td><td class="note">每轮推理往返时延；需维护的平台套数</td></tr>
+<tr><td>8</td><td>技能执行</td><td>每次工具调用的 python3 进程在鲲鹏上运行</td><td>物理核多：满额时多人同时调工具排队更少；毕昇编译器 + 字节码预编译进一步缩短启动</td><td class="fill"></td><td class="note">满额时工具调用排队时间；单次启动时间</td></tr>
+<tr><td>9</td><td>取数</td><td>凭据代理的 SM2 签名、HTTPS 在鲲鹏上完成</td><td>KAE 硬件卸载国密 SM3 / SM4 与非对称运算；openEuler 国密全栈（TLCP、KTLS SM4）原生支持</td><td class="fill"></td><td class="note">签名 / 秒；单次签名时延</td></tr>
+<tr><td>10</td><td>知识库检索</td><td>混合检索（BM25 + 向量）在鲲鹏上计算</td><td>KRL / KVecTurbo 检索算子按鲲鹏指令集深度优化（NEON / SVE），知识库越大优势越明显</td><td class="fill"></td><td class="note">每次检索时延；检索 QPS</td></tr>
+<tr><td>13–14</td><td>报告、回写与腾挪</td><td>管家在鲲鹏上并行写回各槽位状态</td><td>多核并行写回：停机、腾挪时 8 个槽位同时回写，完成更快</td><td class="fill"></td><td class="note">满 Pod 回写耗时</td></tr>
+<tr><td>整体</td><td>端到端</td><td>全链路</td><td>与昇腾一体：85% 时间所在的推理侧本来就在鲲鹏主机上，全链路一个架构</td><td class="fill"></td><td class="note">每题端到端 P50 / P99</td></tr>
+<tr><td>整体</td><td>能效</td><td>整机</td><td>同功耗物理核更多，每用户功耗更低</td><td class="fill"></td><td class="note">每用户功耗（W）</td></tr>
+<tr><td>整体</td><td>平台原生适配</td><td>openFuyao</td><td>KAE Operator、NUMA 亲和调度、NPU Operator 对鲲鹏 + 昇腾原生适配，开箱即用</td><td class="fill"></td><td class="note">可直接启用的加速组件数</td></tr>
+<tr><td>整体</td><td>自主可控</td><td>全栈</td><td>ARMv8 架构授权 + 自研处理器核；鲲鹏 + openEuler + openFuyao + 昇腾全栈国产</td><td class="fill"></td><td class="note">—</td></tr>
+</table>
+</main></div>
+</body>
+</html>
