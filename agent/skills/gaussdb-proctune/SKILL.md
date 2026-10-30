@@ -1,6 +1,6 @@
 ﻿---
 name: gaussdb-proctune
-version: 2.4.0
+version: 2.5.0
 description: "通过内置脚本对 OpenGauss/GaussDB 存储过程做深度调优和证据化验证。仅在用户要定位慢过程根因、分析并优化过程里的游标 SELECT、验证索引或改写是否真的有效、拿到可落地且带收益证明的过程优化建议时使用，包括“优化这个存储过程”“调一下这个过程”“看看游标 SQL 怎么优化”“这个过程有没有可验证的优化方案”“这个过程改哪里最值”“帮我验证这个优化思路有没有收益”等请求。触发后运行 scripts/proctune.py 和 scripts/verify.py，输出带证据链、可解释原因和已验证收益的过程调优结论；如果用户只是想看过程源码、找热点、判断是不是循环里查库，不要优先使用本 skill，应先走 gaussdb-procinfo。"
 allowed-tools: ["exec", "read"]
 compatibility: opencode

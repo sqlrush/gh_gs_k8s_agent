@@ -1207,3 +1207,17 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
                  WHERE rn = 1) a) b
  ORDER BY hour;
 ', '[{"key":"sid","value":"","type":"INTEGER","autoAcquire":false},{"key":"days","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.source_adm', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT owner, name, type, line, text
+FROM pg_catalog.adm_source
+WHERE lower(name) = lower(''{{name}}'')
+  AND lower(type) IN (''procedure'', ''function'', ''package body'')
+ORDER BY owner, type, line
+LIMIT 20001;
+', '[{"key":"name","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.source_adm', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT owner, name, type, line, text
+FROM pg_catalog.adm_source
+WHERE lower(name) = lower(''{{name}}'')
+  AND lower(type) IN (''procedure'', ''function'', ''package body'')
+ORDER BY owner, type, line
+LIMIT 20001;
+', '[{"key":"name","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());

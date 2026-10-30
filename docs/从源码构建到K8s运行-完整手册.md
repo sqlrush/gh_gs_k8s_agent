@@ -9,7 +9,7 @@
 >
 > **前端不在本仓库。** 本仓库是后端：网关 + 两个用户镜像。前端由前端方按《前端对接接口说明》（`docs/前端对接接口说明.md`）接入；
 > 前端没接好之前，用户镜像里 opencode 自带的网页可以直接用来对话与验收（5.11）。
-> 部署前还要让**中间件团队导入诊断脚本白名单**（全量 126 条，见 1.3 与 5.0）。
+> 部署前还要让**中间件团队导入诊断脚本白名单**（全量 128 条，见 1.3 与 5.0）。
 
 | 你要做的 | 章节 | 大约用时 |
 |---|---|---|
@@ -124,7 +124,7 @@ flowchart TB
 | 中间件**接口路径前缀**（形如 `/xxx/grmp/diagnostic/agent`） | 中间件团队 | 5.5 |
 | 中间件要求签名时：Appkey 与 SM2 私钥 | 中间件团队 | 5.4、5.5 |
 | 第一个要开通的工号，及该工号的中间件令牌 | 中间件团队 | 5.9 |
-| **诊断脚本白名单已导入**（全量 126 条） | 中间件团队 | 5.0 |
+| **诊断脚本白名单已导入**（全量 128 条） | 中间件团队 | 5.0 |
 
 ---
 
@@ -308,12 +308,13 @@ flowchart TD
 
 | 情况 | 用哪份 | 条数 |
 |---|---|---|
-| 第一次部署 | `scripts.sql`（全量） | 126 |
-| 已导入过 123 条（v1.3.1 / v1.3.2） | 先 `scripts-delta-20261024.sql`（更新 12，带每条的修改原因与导入后自检），再 `scripts-delta-20261026.sql`（新增 3） | 更新 12、新增 3 |
-| 已导入过 20261024 增量 | `scripts-delta-20261026.sql`（回答模板化：SQL 优化的现状与趋势） | 新增 3 |
-| 更早的版本（118 条 / 105 条） | 先 `scripts-delta-20261022.sql`（新增 5）；105 条的最先导 `scripts-delta-20261018.sql`（新增 13、更新 9）；再导上面两份 | 见《部署上线方案》第 7 章 |
+| 第一次部署 | `scripts.sql`（全量） | 128 |
+| 已导入过 126 条（v1.4.0 ~ v1.4.2） | `scripts-delta-20261030.sql`（存储过程源码的 ADM_SOURCE 兜底，带用途说明与导入后自检） | 新增 2 |
+| 已导入过 123 条（v1.3.1 / v1.3.2） | 先 `scripts-delta-20261024.sql`（更新 12，带每条的修改原因与导入后自检），再 `scripts-delta-20261026.sql`（新增 3），最后 `scripts-delta-20261030.sql`（新增 2） | 更新 12、新增 5 |
+| 已导入过 20261024 增量 | `scripts-delta-20261026.sql`（回答模板化：SQL 优化的现状与趋势），再 `scripts-delta-20261030.sql` | 新增 3、再新增 2 |
+| 更早的版本（118 条 / 105 条） | 先 `scripts-delta-20261022.sql`（新增 5）；105 条的最先导 `scripts-delta-20261018.sql`（新增 13、更新 9）；再导上面三份 | 见《部署上线方案》第 7 章 |
 
-导完核对：`SELECT count(*) FROM grmp.script_config WHERE scene = 'AGENT';` 应为 126（20261024 增量文件末尾另有按正文 md5 的自检）。没导 20261026 那 3 条时其余功能不受影响，只是 SQL 优化回答的第一段写「现状数据暂不可得」。
+导完核对：`SELECT count(*) FROM grmp.script_config WHERE scene = 'AGENT';` 应为 128（20261024 增量文件末尾另有按正文 md5 的自检）。没导 20261026 那 3 条时其余功能不受影响，只是 SQL 优化回答的第一段写「现状数据暂不可得」。没导 20261030 那 2 条时，pg_proc 取得到源码的存储过程照常分析，只是对象隔离下取不到源码时报告写「中间件里还没有登记这条脚本」。
 
 ### 5.1 清单指向镜像仓库
 
@@ -388,7 +389,7 @@ kubectl apply -k k8s/base
 > service/gateway created
 > persistentvolumeclaim/nas created
 > deployment.apps/gateway created
-> job.batch/kbstd-install-v1-4-2 created
+> job.batch/kbstd-install-v1-4-3 created
 > networkpolicy.networking.k8s.io/frontend-policy created
 > networkpolicy.networking.k8s.io/gateway-policy created
 > networkpolicy.networking.k8s.io/kb-import-policy created
@@ -402,7 +403,7 @@ kubectl -n gaussdb-agent get pods
 ```
 
 > PVC `nas` 是 `Bound`。两个 `gateway` Pod 是 `CrashLoopBackOff` 或 `Error`：**正常**。还没建信任凭据，网关按设计拒绝启动，5.8 之后就好；
-> 它能起来再退出，说明节点已经能从你的镜像仓库拉镜像。`kbstd-install-v1-4-2-…` 是 `Completed`：官方文档集已装进知识库（5.7）；
+> 它能起来再退出，说明节点已经能从你的镜像仓库拉镜像。`kbstd-install-v1-4-3-…` 是 `Completed`：官方文档集已装进知识库（5.7）；
 > NAS 还没接好时它会失败重试，接好后自己就过。
 >
 > 卡在 `ImagePullBackOff` / `ErrImagePull`：节点拉不到镜像，检查 `REG` 与仓库权限（私有仓库要配 `imagePullSecrets` 或节点级凭据）。
@@ -593,12 +594,12 @@ kubectl -n gaussdb-agent exec deploy/kb-import-<管理员工号> -c opencode -- 
 > 导入容器要在运行（管理员登录进导入容器一次即可，5.11；首次实测 10 秒建好）。知识库管理员：SSO 传的角色含 `gateway-config` 的 `KB_ADMIN_ROLES`（默认 `kb-admin`），
 > 或把工号登记进 ConfigMap `agent-roles` 的 `kb-admins`。不配 embedding 时检索走词法 + 图，不影响使用。
 
-**官方文档集随部署自动装上。** 5.3 的 `apply -k` 建了一次性 Job `kbstd-install-v1-4-2`：它从标准知识库镜像里取出包，
+**官方文档集随部署自动装上。** 5.3 的 `apply -k` 建了一次性 Job `kbstd-install-v1-4-3`：它从标准知识库镜像里取出包，
 用导入镜像里的 `kb.py docset install` 装进 NAS 的 `kb/docsets/`（逐个文件核对 sha256，同版本跳过，不碰贵方自己的知识，不要任何网络），
 装完重建 L0 / L1。核对：
 
 ```bash
-kubectl -n gaussdb-agent logs job/kbstd-install-v1-4-2
+kubectl -n gaussdb-agent logs job/kbstd-install-v1-4-3
 ```
 
 > ```
@@ -607,7 +608,7 @@ kubectl -n gaussdb-agent logs job/kbstd-install-v1-4-2
 > ```
 > 再 apply 一次是 `[skipped] G25132C 已是这个版本…,不动`。`ImagePullBackOff` 是没推标准知识库镜像或 5.1 没改到 `kbstd-install.yaml`；
 > 日志是权限错误、Job 最终 `Failed`：NAS 的 `kb/` 不是 uid 1000 可写，改好后
-> `kubectl -n gaussdb-agent delete job kbstd-install-v1-4-2 && kubectl apply -f k8s/base/kbstd-install.yaml` 重跑。
+> `kubectl -n gaussdb-agent delete job kbstd-install-v1-4-3 && kubectl apply -f k8s/base/kbstd-install.yaml` 重跑。
 > 之后在对话里问一个参数的默认值，回答里能引用 `PD-G25132C-…` 并按产品文档上青色。
 
 ### 5.8 启动网关

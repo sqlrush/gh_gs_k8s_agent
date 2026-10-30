@@ -5,11 +5,11 @@
 #   · 装之前逐个文件核对包里记的 sha256,对不上就不换,原有的照旧可用;装完重建 L0 / L1。
 # **Job 名带版本号**:Job 的 Pod 模板不可改,同名对象换镜像再 apply 会报 field is immutable;换版本就是新对象。
 # 7 天后自动删掉;之后再 apply -k 会重跑一遍,同版本跳过。看结果:
-#   kubectl -n gaussdb-agent logs job/kbstd-install-v1-4-2
+#   kubectl -n gaussdb-agent logs job/kbstd-install-v1-4-3
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: kbstd-install-v1-4-2
+  name: kbstd-install-v1-4-3
   namespace: gaussdb-agent
   labels: {app: gaussdb-kbstd}
 spec:
@@ -26,7 +26,7 @@ spec:
       initContainers:
         # 标准知识库镜像里只有包:取出来放到两个容器共用的临时盘上
         - name: unpack
-          image: gaussdb-agent-kbstd:agent-v1.4.2-oc1.18.27
+          image: gaussdb-agent-kbstd:agent-v1.4.3-oc1.18.27
           imagePullPolicy: IfNotPresent
           command: ["sh", "-c", "cp /kbstd/kb-std-*.tar.gz /packs/ && ls -l /packs"]
           securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
@@ -38,7 +38,7 @@ spec:
       containers:
         # 用导入镜像里的 kb.py 装(与知识库管理员手工 `kb.py docset install` 是同一段代码)
         - name: install
-          image: gaussdb-agent-kb-import:agent-v1.4.2-oc1.18.27
+          image: gaussdb-agent-kb-import:agent-v1.4.3-oc1.18.27
           imagePullPolicy: IfNotPresent
           command: ["python3", "/opt/agent/config/opencode/skills/gaussdb-kb-import/scripts/kb.py",
                     "docset", "install", "/packs", "--kb", "/nas/kb"]

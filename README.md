@@ -7,10 +7,11 @@ GaussDB 数据库智能体的**后端**：把 opencode 与 GaussDB / openGauss �
 
 | 文档 | 给谁 | 内容 |
 |---|---|---|
-| [docs/部署上线方案-v1.4.2.md](docs/部署上线方案-v1.4.2.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/deploy/v1.4.2/)） | 项目经理 / 各方团队 | **从拉代码到部署上线的完整方案**（agent-v1.4.2）：系统组成与安全设计、各方分工与检查单、构建、白名单导入、部署、开通、验收、固定池化、知识库、统一认证与前端、内网网页剪藏、官方文档集随部署自动装上、从 v1.4.1 / v1.4.0 / v1.3.x 升级、回滚、运维，附全部 126 条白名单脚本 |
+| [docs/部署上线方案-v1.4.3.md](docs/部署上线方案-v1.4.3.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/deploy/v1.4.3/)） | 项目经理 / 各方团队 | **从拉代码到部署上线的完整方案**（agent-v1.4.3）：系统组成与安全设计、各方分工与检查单、构建（或直接拉我方发布的镜像）、白名单导入、部署、开通、验收、固定池化、知识库、统一认证与前端、内网网页剪藏、官方文档集随部署自动装上、存储过程源码的 ADM_SOURCE 兜底、从 v1.4.2 / v1.4.1 / v1.4.0 / v1.3.x 升级、回滚、运维，附全部 128 条白名单脚本 |
+| [docs/部署上线方案-v1.4.2.md](docs/部署上线方案-v1.4.2.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/deploy/v1.4.2/)） | 留档 | 上一版（agent-v1.4.2）的部署上线方案 |
 | [docs/部署上线方案-v1.4.1.md](docs/部署上线方案-v1.4.1.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/deploy/v1.4.1/)） | 留档 | 上一版（agent-v1.4.1）的部署上线方案 |
 | [docs/部署上线方案-v1.4.0.md](docs/部署上线方案-v1.4.0.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/deploy/v1.4.0/)） | 留档 | 上一版（agent-v1.4.0）的部署上线方案 |
-| [docs/delivery/白名单脚本清单.md](docs/delivery/白名单脚本清单.md) | 中间件团队 | 126 条诊断脚本的用途、参数与 SQL 全文；全量 `scripts.sql` 与 4 份升级增量都在 `docs/delivery/` |
+| [docs/delivery/白名单脚本清单.md](docs/delivery/白名单脚本清单.md) | 中间件团队 | 128 条诊断脚本的用途、参数与 SQL 全文；全量 `scripts.sql` 与 5 份升级增量都在 `docs/delivery/` |
 | [docs/从源码构建到K8s运行-完整手册.md](docs/从源码构建到K8s运行-完整手册.md) | 实施 / 运维 / 开发 | 从拉代码、构建 3 个镜像、推仓库，到部署进 K8s、开通工号、对话里跑通健康检查；可选的固定池化。每步带实测输出 |
 | [docs/前端对接接口说明.md](docs/前端对接接口说明.md) | 前端 | 接入后端的全部接口（v1.1）：身份与网关行为、对话接口与事件流、报告接口、大盘链接格式、回答正文的渲染与版式、联调清单 |
 | [docs/智能体验收方案.md](docs/智能体验收方案.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/acceptance/)） | 后端 / 项目经理 | **每次升级智能体怎么验收**：11 个方面 48 道题、每题的评分标准（版式、工具、要点、处置、引用、禁止项）、三层评分、失分归因到工具 / 提示词 / 模型、发版门槛；题库在 [acceptance/](acceptance/) |
