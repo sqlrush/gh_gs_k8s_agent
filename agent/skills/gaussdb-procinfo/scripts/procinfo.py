@@ -32,6 +32,7 @@ import common  # noqa: E402
 from common import access  # noqa: E402
 from common import cli  # noqa: E402
 from common import proc_locate  # noqa: E402
+from common import proc_source  # noqa: E402
 from common import procname  # noqa: E402
 import procanalyze as pa  # noqa: E402
 import render  # noqa: E402
@@ -80,6 +81,8 @@ class ProcEvidence:
 
 KEY_GUCS_SCRIPT = "procinfo.key_gucs"
 PROC_DEF_SCRIPT = "procinfo.proc_def"
+# pg_proc 取不到(对象隔离)时按 ADM_SOURCE 兜底取源码(common/proc_source.py);需执行账号有 ADM_SOURCE 读权限。
+SOURCE_ADM_SCRIPT = "procinfo.source_adm"
 # 过程找不到时代为排查用的三条脚本(common/proc_locate.py 按前缀拼名;这里写全名是给交付闸门看的——
 # 白名单里每条脚本都要能在 skill 源码里按全名搜到):
 LOCATE_SCRIPTS = ("procinfo.locate_context", "procinfo.locate_schema", "procinfo.locate_search")
@@ -92,10 +95,13 @@ def collect_gucs(runner) -> list[GUC]:
 
 def fetch_proc_def(runner, qualified: str) -> pa.ProcDef:
     """经统一入口取数。名字支持 schema.package.proc(包内过程);同名过程不止一个时拒绝,不猜
-    (common/procname.py)。走中间件还是直连由连接的 driver 决定，这里不感知。"""
-    r = procname.lookup(runner, PROC_DEF_SCRIPT, qualified)
-    d = pa.analyze(r["nspname"], r["proname"], r["lanname"], r["prosrc"], r["args"])
-    return dataclasses.replace(d, package=str(r.get("package", "") or ""))
+    (common/procname.py)。走中间件还是直连由连接的 driver 决定，这里不感知。
+
+    pg_proc 取不到(对象隔离下联表 0 行)或过程体为空时,按 ADM_SOURCE 兜底(common/proc_source.py);
+    出处写进 ProcDef.origin / origin_note,报告里照实标出。"""
+    r = proc_source.resolve(runner, PROC_DEF_SCRIPT, SOURCE_ADM_SCRIPT, qualified)
+    d = pa.analyze(r.schema, r.name, r.lang, r.body, r.args)
+    return dataclasses.replace(d, package=r.package, origin=r.origin, origin_note=r.note, context=r.context)
 
 
 def proc_collect(runner, qualified: str) -> ProcEvidence:
@@ -117,6 +123,20 @@ def _arg_string(args: list) -> str:
     return ", ".join(f"{a.name} {a.type}" for a in args)
 
 
+def _source_lines(d: pa.ProcDef) -> list:
+    """源码不是照常从 pg_proc 取到的,照实标出出处 —— 读报告的人要知道行号对应哪里、为什么跟 pg_proc 不一样。"""
+    if d.origin == "pg_proc" and not d.origin_note:
+        return []
+    return [f"- Source: `{'ADM_SOURCE' if d.origin == 'adm_source' else d.origin}` — {d.origin_note}"]
+
+
+def _context_block(d: pa.ProcDef) -> str:
+    if not d.context.strip():
+        return ""
+    return ("\n## Package Declarations\n\n> 包级声明(变量、常量、类型、游标):过程体里引用的包级对象在这里定义,"
+            "取自 ADM_SOURCE 的包体。\n\n" + render.code_block("", d.context))
+
+
 def proc_info_report(pe: ProcEvidence) -> str:
     d = pe.proc
     b = ["# Proc Info（只读诊断）\n\n## Procedure Source\n",
@@ -124,8 +144,9 @@ def proc_info_report(pe: ProcEvidence) -> str:
          + ("（包内过程）" if getattr(d, "package", "") else ""),
          f"- Language: `{d.lang}`",
          "- Args: `" + _arg_string(d.args) + "`",
+         *_source_lines(d),
          f"- Rollback-safe: {str(d.rollback_safe).lower()}\n"]
-    out = "\n".join(b) + "\n" + render.code_block("", d.body)
+    out = "\n".join(b) + "\n" + render.code_block("", d.body) + _context_block(d)
 
     out += "\n## Structural Findings\n\n"
     if not pe.structure:
@@ -155,7 +176,8 @@ def _to_jsonable(pe: ProcEvidence) -> dict:
     return {
         "proc": {"schema": p.schema, "package": getattr(p, "package", ""), "name": p.name, "lang": p.lang,
                  "args": [a.__dict__ for a in p.args], "vars": p.vars,
-                 "rollback_safe": p.rollback_safe},
+                 "rollback_safe": p.rollback_safe,
+                 "source": {"origin": p.origin, "note": p.origin_note, "package_decls": p.context}},
         "structure": [f.__dict__ for f in pe.structure],
         "embedded": [e.__dict__ for e in pe.embedded],
         "runtime_note": pe.runtime_note,

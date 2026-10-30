@@ -36,6 +36,9 @@ class ProcDef:
     vars: dict
     rollback_safe: bool
     package: str = ""      # 所属包(gs_package.pkgname);独立过程为空串
+    origin: str = "pg_proc"    # 源码出处:pg_proc | adm_source(pg_proc 取不到时的兜底,common/proc_source.py)
+    origin_note: str = ""      # 出处说明(从哪个对象、第几行取的);pg_proc 正常取到时为空
+    context: str = ""          # 包级声明原文(只有从 ADM_SOURCE 的包体切出过程时有)
 
 
 @dataclass

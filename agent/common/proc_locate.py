@@ -15,6 +15,7 @@ GaussDB 505 是否连 pg_proc 也藏,没有真机不能断言——那种情况�
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -240,7 +241,20 @@ def _hits_line(ref: ProcRef, loc: Locate) -> str:
     return "- 近似名搜索:" + ";".join(x for x in ("、".join(procs), "、".join(pkgs)) if x)
 
 
-def render(ref: ProcRef, tried: Sequence[str], loc: Locate, v: Verdict) -> str:
+def with_adm(v: Verdict, loc: Locate, adm_denied: bool) -> Verdict:
+    """ADM_SOURCE 兜底因为没有读权限而失败时,在问题清单与 DBA 处理里补上授权一项 —— 授不授由客户 DBA 决定。"""
+    if not adm_denied:
+        return v
+    acct = loc.user or "<中间件执行账号>"
+    return dataclasses.replace(
+        v,
+        questions=v.questions + (
+            "执行账号 %s 没有 ADM_SOURCE 的读权限。是否请 DBA 授权?授权后本命令直接从 ADM_SOURCE 取源码,"
+            "不受对象隔离影响(ADM_SOURCE 能看到全库的过程定义,授不授由贵方决定)。" % acct,),
+        actions=v.actions + ("GRANT SELECT ON pg_catalog.adm_source TO %s;" % acct,))
+
+
+def render(ref: ProcRef, tried: Sequence[str], loc: Locate, v: Verdict, adm: str = "") -> str:
     full = qualified(ref.schema, ref.package, ref.name)
     ctx = ("库 %s,账号 %s;实例上的库:%s" % (loc.db, loc.user, "、".join(loc.databases) or "(未取到)")
            if loc.db else "(未取到)")
@@ -248,6 +262,8 @@ def render(ref: ProcRef, tried: Sequence[str], loc: Locate, v: Verdict) -> str:
     lines = ["# 过程未找到:%s" % full, "",
              "脚本按 %s 查过,当前库的 pg_proc 里没有这一行。已代为排查:" % tried_text, "",
              "- 当前连接:%s" % ctx, _schema_line(ref, loc), _hits_line(ref, loc)]
+    if adm:
+        lines.append("- ADM_SOURCE 兜底:%s" % adm)
     if loc.skipped:
         lines.append("- 未能排查:" + ";".join(loc.skipped))
     lines += ["", "**结论**:%s" % v.summary, "", "请用户协助回答(按编号答复即可):"]
@@ -259,7 +275,8 @@ def render(ref: ProcRef, tried: Sequence[str], loc: Locate, v: Verdict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def to_json(ref: ProcRef, tried: Sequence[str], loc: Locate, v: Verdict) -> Dict[str, Any]:
+def to_json(ref: ProcRef, tried: Sequence[str], loc: Locate, v: Verdict,
+            adm: str = "", adm_denied: bool = False) -> Dict[str, Any]:
     return {"not_found": {
         "proc": qualified(ref.schema, ref.package, ref.name),
         "tried": list(tried),
@@ -267,6 +284,7 @@ def to_json(ref: ProcRef, tried: Sequence[str], loc: Locate, v: Verdict) -> Dict
         "schema": {"name": ref.schema, "seen": loc.schema_seen, "usage": loc.schema_usage},
         "hits": [asdict(h) for h in loc.hits],
         "skipped": list(loc.skipped),
+        "adm_source": {"note": adm, "denied": adm_denied},
         "verdict": v.code, "summary": v.summary,
         "questions": list(v.questions), "actions": list(v.actions),
     }}
@@ -275,10 +293,12 @@ def to_json(ref: ProcRef, tried: Sequence[str], loc: Locate, v: Verdict) -> Dict
 def report(runner, prefix: str, exc, fmt: str = "markdown") -> str:
     """skill 收到 procname.NotFound 时调用:排查 + 判定 + 渲染,一次给全。"""
     loc = probe(runner, prefix, exc.ref)
-    v = classify(exc.ref, loc)
+    adm, denied = getattr(exc, "adm", ""), getattr(exc, "adm_denied", False)
+    v = with_adm(classify(exc.ref, loc), loc, denied)
     if fmt == "json":
-        return json.dumps(to_json(exc.ref, exc.tried, loc, v), ensure_ascii=False, indent=2)
-    return render(exc.ref, exc.tried, loc, v)
+        return json.dumps(to_json(exc.ref, exc.tried, loc, v, adm, denied), ensure_ascii=False, indent=2)
+    return render(exc.ref, exc.tried, loc, v, adm)
 
 
-__all__ = ["CONTEXT", "SCHEMA", "SEARCH", "Hit", "Locate", "Verdict", "probe", "classify", "render", "to_json", "report"]
+__all__ = ["CONTEXT", "SCHEMA", "SEARCH", "Hit", "Locate", "Verdict", "probe", "classify", "with_adm", "render",
+           "to_json", "report"]

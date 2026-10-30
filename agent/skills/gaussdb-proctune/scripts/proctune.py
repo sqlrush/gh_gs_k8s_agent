@@ -49,6 +49,7 @@ from common import access  # noqa: E402
 from common import cli  # noqa: E402
 from common import kbsection  # noqa: E402
 from common import proc_locate  # noqa: E402
+from common import proc_source  # noqa: E402
 from common import procname  # noqa: E402
 from common.grmp.hints import ensure_hint  # noqa: E402
 from common.sqlrefs import extract_table_refs  # noqa: E402
@@ -65,6 +66,8 @@ for parent in _HERE.parents:
 
 # SQL 已迁到 scripts/registry/proctune/ —— 两条路径共用同一份定义
 PROC_DEF_SCRIPT = "proctune.proc_def"
+# pg_proc 取不到(对象隔离)时按 ADM_SOURCE 兜底取源码(common/proc_source.py);需执行账号有 ADM_SOURCE 读权限。
+SOURCE_ADM_SCRIPT = "proctune.source_adm"
 # 过程找不到时代为排查用的三条脚本(common/proc_locate.py 按前缀拼名;全名写在这里是给交付闸门看的)。
 LOCATE_SCRIPTS = ("proctune.locate_context", "proctune.locate_schema", "proctune.locate_search")
 
@@ -137,14 +140,16 @@ def fetch_proc_def(runner, qualified: str) -> pa.ProcDef:
     **系统自带的过程在这里就挡住**(2026-09-21 策略):判定用的是查回来的 `nspname`,
     不是用户输入的那串 —— 用户可能不带 schema,由 search_path 解析到系统 schema 上去。
     挡在这里,collect 与 tune-cursor 两条路各一次调用,都覆盖到。
+
+    pg_proc 取不到(对象隔离下联表 0 行)或过程体为空时,按 ADM_SOURCE 兜底(common/proc_source.py);
+    出处写进 ProcDef.origin / origin_note,报告里照实标出。
     """
-    r = procname.lookup(runner, PROC_DEF_SCRIPT, qualified)
-    v = sysprocs.verdict(r["nspname"], r["proname"], str(r.get("package", "") or ""))
+    r = proc_source.resolve(runner, PROC_DEF_SCRIPT, SOURCE_ADM_SCRIPT, qualified)
+    v = sysprocs.verdict(r.schema, r.name, r.package)
     if v.is_system:
         raise sysprocs.SystemProcSkipped(v)
-    # 协议把 NULL 渲染成空串，原来那句 `x if x is not None else ""` 的效果由入口保证，这里不必再兜。
-    d = pa.analyze(r["nspname"], r["proname"], r["lanname"], r["prosrc"], r["args"])
-    return dataclasses.replace(d, package=str(r.get("package", "") or ""))
+    d = pa.analyze(r.schema, r.name, r.lang, r.body, r.args)
+    return dataclasses.replace(d, package=r.package, origin=r.origin, origin_note=r.note, context=r.context)
 
 
 def proc_collect(runner, qualified: str) -> ProcEvidence:
@@ -314,6 +319,20 @@ def _arg_string(args: list) -> str:
     return ", ".join(f"{a.name} {a.type}" for a in args)
 
 
+def _source_lines(d: pa.ProcDef) -> list:
+    """源码不是照常从 pg_proc 取到的,照实标出出处 —— 读报告的人要知道行号对应哪里、为什么跟 pg_proc 不一样。"""
+    if d.origin == "pg_proc" and not d.origin_note:
+        return []
+    return [f"- Source: `{'ADM_SOURCE' if d.origin == 'adm_source' else d.origin}` — {d.origin_note}"]
+
+
+def _context_block(d: pa.ProcDef) -> str:
+    if not d.context.strip():
+        return ""
+    return ("\n## Package Declarations\n\n> 包级声明(变量、常量、类型、游标):过程体里引用的包级对象在这里定义,"
+            "取自 ADM_SOURCE 的包体。\n\n" + render.code_block("", d.context))
+
+
 def proc_collect_report(pe: ProcEvidence) -> str:
     d = pe.proc
     b = ["# Proc Collect\n\n## Procedure Source\n",
@@ -321,8 +340,9 @@ def proc_collect_report(pe: ProcEvidence) -> str:
          + ("（包内过程）" if getattr(d, "package", "") else ""),
          f"- Language: `{d.lang}`",
          "- Args: `" + _arg_string(d.args) + "`",
+         *_source_lines(d),
          f"- Rollback-safe: {str(d.rollback_safe).lower()}\n"]
-    out = "\n".join(b) + "\n" + render.code_block("", d.body)
+    out = "\n".join(b) + "\n" + render.code_block("", d.body) + _context_block(d)
 
     out += "\n## Structural Findings\n\n"
     if not pe.structure:
@@ -369,6 +389,8 @@ def _verified_index_block(indexes: list, note: str) -> str:
 def cursor_tune_report(tr: CursorTuneResult) -> str:
     p = tr.proc
     out = f"# Cursor Tune  (proc: `{procname.qualified(p.schema, getattr(p, 'package', ''), p.name)}`, lang: {p.lang})\n"
+    if _source_lines(p):
+        out += "\n" + _source_lines(p)[0] + "\n"
     if not tr.cursors:
         out += "\n没有可处理的只读游标 SELECT。见 `## Skipped Cursors`。\n"
     for ce in tr.cursors:
@@ -408,7 +430,8 @@ def _evidence_dict(ev: Evidence) -> dict:
 def _proc_dict(p: pa.ProcDef) -> dict:
     return {"schema": p.schema, "package": getattr(p, "package", ""), "name": p.name, "lang": p.lang,
             "args": [a.__dict__ for a in p.args], "vars": p.vars,
-            "rollback_safe": p.rollback_safe}
+            "rollback_safe": p.rollback_safe,
+            "source": {"origin": p.origin, "note": p.origin_note, "package_decls": p.context}}
 
 
 def _collect_json(pe: ProcEvidence) -> str:

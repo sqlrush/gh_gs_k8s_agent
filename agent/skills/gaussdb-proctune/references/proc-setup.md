@@ -35,6 +35,7 @@
 | `no connection named 'xxx'` | 连接名未配置 | 见「二、配置连接」，核对 `$GSDB_HOME/config.yaml` |
 | 连接失败（退出码 2） | host/port/凭据错或库不可达 | 跑一次 `proctune.py collect` 验证；确认网络与账号；或用 `GSDB_PASSWORD`（旧 `GDAA_PASSWORD` 仍兼容） |
 | 权限不足（退出码 3） | 账号缺 `pg_get_functiondef` / `dbe_perf` / `gs_index_advise` / hypopg 权限 | 用有相应读取/调优权限的账号 |
+| 「过程未找到」报告里写「ADM_SOURCE 兜底:没取到 —— 执行账号没有 ADM_SOURCE 的读权限」 | 库开了对象隔离，执行账号查不到 pg_proc，又没有 ADM_SOURCE 的读权限 | 由 DBA 决定：`GRANT SELECT ON pg_catalog.adm_source TO <执行账号>;`，或按报告里的 USAGE / EXECUTE 授权；授权后重跑 |
 | `## Runtime Attribution` 为空或标「不可用」 | 未开 `track_stmt_stat_level` 捕获嵌套语句 | 见「三、开启运行时归因」；不开则按纯静态分析进行 |
 | `## Verified Index Candidates` 显示无候选 | gs_index_advise 未发现，或合成值下无收益 | 用 `--bind <var=value>` 传真实值重验；或仅作未验证思路呈现 |
 | 索引验证报「不可用」 | 实例未启用 hypopg / `enable_hypo_index` | 确认 OpenGauss 版本支持并启用；不支持则索引验证降级，命令仍成功 |

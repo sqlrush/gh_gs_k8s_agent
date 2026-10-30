@@ -59,6 +59,13 @@ metadata:
    （要换库就让用户重新 login 到那个库；要授权就让 DBA 执行报告里的 GRANT 命令）。**不要自己另写 SQL 去查目录、不要猜名字、
    不要拿别的过程代替**，也**不要解释成「GaussDB 不支持包 / 包子程序不在 pg_proc」**，那不是事实。
 
+   **pg_proc 取不到源码时脚本会自动改查 ADM_SOURCE**：开了对象隔离（ENABLE PRIVATE OBJECT）的库，执行账号查 pg_proc 可能 0 行；
+   脚本接着按 ADM_SOURCE（管理员视角的过程定义视图）取。这时 `## Procedure Source` 里多一行 `- Source: ADM_SOURCE — …`，写明从哪个对象、
+   第几行取的：包内过程是从包体里切出来的，**过程体第 1 行就是说明里写的包体那一行**，发现里的行号按过程体算，告诉用户时换算成
+   包体行号；`## Package Declarations` 是包级声明，过程体里引用的包级变量、常量与游标在那里。
+   ADM_SOURCE 也取不到时，「过程未找到」报告里多一行「ADM_SOURCE 兜底」写明原因；原因是没有读权限时，问题清单与 DBA 处理里
+   有授权一项——**原样转达，授不授由用户和 DBA 决定**，不要劝、不要自己换账号重试。
+
    产 `## Procedure Source`、`## Structural Findings`、`## Embedded Statements`、`## Runtime Attribution`、`## Key Parameters (GUC)`。
 
 3. **解读与呈现。**

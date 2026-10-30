@@ -29,12 +29,18 @@ class ProcRef:
 
 class NotFound(ValueError):
     """按名字查不到过程。带上 ref 与 tried(按什么查过),skill 用它们代为排查(common/proc_locate.py):
-    连的库对不对、执行账号有没有权限、过程本身在不在——而不是只给用户一句「找不到」。"""
+    连的库对不对、执行账号有没有权限、过程本身在不在——而不是只给用户一句「找不到」。
 
-    def __init__(self, ref: ProcRef, tried: Tuple[str, ...], message: str):
+    adm / adm_denied:pg_proc 查不到后又按 ADM_SOURCE 兜底查过(common/proc_source.py)的结果说明,
+    以及失败是不是因为执行账号没有 ADM_SOURCE 的读权限 —— 是的话排查报告给出授权语句,由 DBA 决定。"""
+
+    def __init__(self, ref: ProcRef, tried: Tuple[str, ...], message: str,
+                 adm: str = "", adm_denied: bool = False):
         super().__init__(message)
         self.ref = ref
         self.tried = tuple(tried)
+        self.adm = adm
+        self.adm_denied = adm_denied
 
 
 def _ident(part: str, what: str) -> str:
