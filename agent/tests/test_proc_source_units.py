@@ -243,6 +243,15 @@ def test_empty_prosrc_falls_back_to_adm():
     assert res.origin == "adm_source" and "源码为空" in res.note
 
 
+def test_names_read_back_from_the_database_are_checked_before_they_reach_the_template():
+    """过程体为空那一路的包名来自 pg_proc 的查询结果;带引号的名字不能原样进 String 参数位(中间件按文本替换)。"""
+    r = Runner(pg=[{"nspname": "gmag", "proname": "proc_x", "lanname": "plpgsql", "prosrc": "",
+                    "args": "", "package": "pk'); select 1; --"}])
+    res = _resolve(r, "gmag.proc_x")
+    assert res.origin == "pg_proc" and "不是未加引号的合法标识符" in res.note
+    assert all(not c[0].endswith(".source_adm") for c in r.calls)
+
+
 def test_too_many_lines_is_refused_not_truncated():
     rows = [{"owner": "gmag", "name": "big", "type": "procedure", "line": i, "text": "NULL;"}
             for i in range(1, ps.MAX_LINES + 2)]

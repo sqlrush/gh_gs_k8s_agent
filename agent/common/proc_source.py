@@ -195,6 +195,10 @@ def _reason(exc: Exception) -> str:
 
 
 def _query(runner, script: str, name: str) -> List[Dict[str, Any]]:
+    # 名字进的是白名单模板的 String 参数位,中间件按文本替换 —— 只放行合法标识符。用户给的名字在 procname 里校验过,
+    # 但「pg_proc 里过程体为空」那一路的包名是从数据库读回来的,同样要过这一关
+    if not procname.IDENT_RE.match(name or ""):
+        raise Unavailable("名字 %r 不是未加引号的合法标识符,不按 ADM_SOURCE 查" % (name,))
     try:
         rows = runner.run(script, {"name": name})
     except QueryError as exc:
