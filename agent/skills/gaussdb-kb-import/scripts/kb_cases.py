@@ -29,6 +29,7 @@ from common.kb import ingest as kbingest
 from common.kb import lock as kblock
 from common.kb.atomic import write_text_atomic
 from common.kb import store_graph as sg
+from common.kb import supersede as kbsup
 from common.kb import text as kbtext
 
 WORK_BATCH = 8
@@ -158,97 +159,13 @@ CANDIDATE_TEMPLATE = {
         "src": {"kind": "symptom", "name": "<现象>"}, "rel": "caused_by|handled_by|involves|references|depends_on",
         "dst": {"kind": "rootcause", "name": "<根因>"}, "quote": "<原文片段>", "confidence": 0.8,
     }],
+    # 工作单 prior_handlings 里与本单同一根因的处置,逐条判断(见 rules);没有同根因的就留空数组
+    "judgments": [{"prior": "<旧案例 ID / 本批更早工单的 id>", "action": "<旧处置,照抄 prior_handlings>",
+                   "verdict": "取代|并存", "reason": "<为什么>", "quote": "<本单原文片段>"}],
 }
 
-# 写图/写向量之前要定的转化策略——问的是"这批材料怎么变成向量和图",不是元数据缺省值。
-# 答案写进 strategies/tickets.yaml(key: 答案原文),之后每次 propose 都会把它塞进工作单约束模型抽取。
-STRATEGY_QUESTIONS = [
-    {"key": "target", "q": "这批材料沉淀成什么?",
-     "options": ["案例(现象→根因→处置,进向量 + 图)", "规范条款(进 rules/,只进向量)", "两者都有(报告里的规范引用也抽成条款)"],
-     "default": "案例"},
-    {"key": "chain", "q": "图里每单抽几条因果链?",
-     "options": ["一单一条主链(现象→根因→处置)", "允许多条(次要因素也建 caused_by 边,置信度打折)"],
-     "default": "一单一条主链"},
-    {"key": "relations", "q": "除因果链外还抽哪些关系进图?(可多选)",
-     "options": ["案例→涉及对象(表 / GUC / 等待事件 / 错误码)", "案例→引用条款", "对象→对象依赖(只在材料明确写了时)"],
-     "default": "涉及对象 + 引用条款"},
-    {"key": "signals", "q": "复发标志(各 skill 按发现匹配案例靠它)从哪取?",
-     "options": ["材料里的告警代码 / 等待事件 / GUC 名(优先)", "现象描述里的关键短语", "两者都要"],
-     "default": "两者都要"},
-    {"key": "merge", "q": "现象 / 根因与库里已有节点同义时?",
-     "options": ["合并到已有节点(canonical),让多个案例支持同一条链", "各自新建"],
-     "default": "合并"},
-    {"key": "vector", "q": "哪些小节进向量?",
-     "options": ["现场 / 判断 / 处置 / 复发标志全部", "只现场 + 复发标志(入口更准,但处置文本不可语义召回)"],
-     "default": "全部"},
-    {"key": "confidence", "q": "置信度口径?",
-     "options": ["结论强度 已确认=1.0 / 推测=0.6 / 待验证=0.3;用户在选择列表接受的边=1.0;模型自报封顶 0.9"],
-     "default": "按此口径"},
-    {"key": "defaults", "q": "缺省元数据(材料没写时)?",
-     "options": ["engine=gaussdb · severity=S3 · 系统名原样 · 对象名保留 schema 前缀"],
-     "default": "按此缺省"},
-]
-
-
-def load_strategy(kb: pathlib.Path) -> Dict[str, str]:
-    path = kb / "strategies" / "tickets.yaml"
-    if not path.is_file():
-        return {}
-    try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError:
-        return {}
-    return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
-
-
-def strategy_rules(strategy: Dict[str, str]) -> List[str]:
-    """把策略答案翻成给模型的抽取约束(字符串匹配,答案是原文)。"""
-    rules: List[str] = []
-    if "条款" in strategy.get("target", "") and "案例" not in strategy.get("target", ""):
-        rules.append("这批材料只沉淀成规范条款:不写 case/edges,把每条可判定要求写成候选条款")
-    if "多条" in strategy.get("chain", ""):
-        rules.append("允许多条因果链:次要因素各建一条 caused_by 边,confidence 比主链低 0.2")
-    else:
-        rules.append("每单只抽一条主链:现象 —caused_by→ 根因 —handled_by→ 处置;次要因素写进 secondary_factors,不建边")
-    rel = strategy.get("relations", "")
-    if rel and "对象" not in rel:
-        rules.append("不抽 涉及对象(involves)关系")
-    if rel and "条款" not in rel:
-        rules.append("不抽 引用条款(references)关系")
-    if "依赖" in rel:
-        rules.append("材料明确写了对象依赖(A 依赖 B / A 下游是 B)时抽 depends_on 边,没写不猜")
-    sig = strategy.get("signals", "")
-    if "告警" in sig and "短语" not in sig:
-        rules.append("signals 只取材料里的告警代码 / 等待事件 / GUC 名,不写现象短语")
-    elif "短语" in sig and "告警" not in sig:
-        rules.append("signals 取现象描述里的关键短语")
-    else:
-        rules.append("signals 同时取告警代码 / 等待事件 / GUC 名 和 现象关键短语,告警代码写在前面")
-    if "新建" in strategy.get("merge", ""):
-        rules.append("现象 / 根因不与已有节点合并,各自新建(known_entities 只作参考)")
-    else:
-        rules.append("现象 / 根因与 known_entities 里的同义节点合并:直接用已有的名字")
-    if "只现场" in strategy.get("vector", ""):
-        rules.append("向量只索引 现场 与 复发标志 两节(judge/处置 仍写进案例文件)")
-    return rules
-
-
-def write_default_strategy(kb: pathlib.Path) -> pathlib.Path:
-    """用户说「全按默认」时由脚本代写 strategies/tickets.yaml(key: 默认答案),模型不用手写 yaml。"""
-    path = kb / "strategies" / "tickets.yaml"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = {q["key"]: q["default"] for q in STRATEGY_QUESTIONS}
-    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    return path
-
-
-def print_strategy_questions() -> None:
-    print("首次导入工单:写图/写向量之前先和用户确认转化策略——策略未确认,不出工作单。逐题问,每题带选项与默认:")
-    for i, q in enumerate(STRATEGY_QUESTIONS, 1):
-        print(f"  {i}. [{q['key']}] {q['q']}")
-        for opt in q["options"]:
-            print(f"       - {opt}")
-        print(f"       默认:{q['default']}")
+from kb_strategy import (STRATEGY_QUESTIONS, load_strategy, print_strategy_questions,  # noqa: E402,F401
+                         strategy_rules, write_default_strategy)
 
 
 def _known_entities(kb: pathlib.Path, limit: int = 60) -> List[str]:
@@ -258,7 +175,11 @@ def _known_entities(kb: pathlib.Path, limit: int = 60) -> List[str]:
     for ref in gf.nodes_of(triples).values():
         if ref.kind in ("object", "guc", "wait_event", "error", "symptom", "rootcause", "action") and ref.id not in ids:
             ids.append(ref.id)
-    return ids[:limit]
+    # 现象 / 根因排前面且不受上限:它们是归一(同一现象 / 同一根因)与「取代」判断的锚点,截掉了模型就看不到
+    anchors = [i for i in ids if i.split(":", 1)[0] in ("symptom", "rootcause")]
+    anchor_set = set(anchors)
+    rest = [i for i in ids if i not in anchor_set]
+    return anchors + rest[:max(0, limit - len(anchors))]
 
 
 def cmd_propose(args: argparse.Namespace, kb: pathlib.Path) -> int:
@@ -294,11 +215,16 @@ def cmd_propose(args: argparse.Namespace, kb: pathlib.Path) -> int:
         shutil.rmtree(work_dir)
     work_dir.mkdir(parents=True)
     known = _known_entities(kb)
+    handlings = kbsup.current_handlings(gf.load_triples(kb)[0])
     base_rules = [
         "每个 quotes/entities/edges 的 quote 必须是原文里逐字出现的片段(review 会逐条核对,对不上的整项作废)",
         "拿不准的字段留空,不要编;conclusion 宁可写 推测",
         "objects/entities 用原文的叫法;known_entities 里有同一个东西就用它的名字",
         "edges 只写原文能支撑的 现象→根因(caused_by)、根因→处置(handled_by);confidence 是你的把握(0.5–0.9)",
+        "prior_handlings 是本行现行的 根因→处置。本单的根因与其中某条是同一个根因时(名字照抄它的根因),"
+        "对那条处置写一条 judgments:同一个方案、策略变了(同一参数改了值、同一种做法换了步骤或阈值)→ 取代;"
+        "不同的方案(另一个参数、另一种手段)→ 并存;理由一句话 + 本单原文摘录。本批里更早的工单与本单同根因时也要判,"
+        "prior 写那单的工单 id。谁取代谁由脚本按日期定,漏判 review 会报 [error]",
     ]
     for n, path in enumerate(batch, 1):
         text = path.read_text(encoding="utf-8")
@@ -313,6 +239,7 @@ def cmd_propose(args: argparse.Namespace, kb: pathlib.Path) -> int:
         _write_json(work_dir / f"{n:03d}.json", {
             "item_id": _item_id(path), "file": str(path.relative_to(kb)), "text": text,
             "candidate_template": CANDIDATE_TEMPLATE, "known_entities": known,
+            "prior_handlings": kbsup.for_work_order(handlings, text),   # 本行现行的 根因→处置(判断取代 / 并存用)
             "known": settled,                           # 标准化材料的已定字段;普通材料为 {}
             "strategy": strategy,                       # 用户确认过的转化策略(首次为空:先确认再填候选)
             "rules": rules,
@@ -392,6 +319,9 @@ def review_candidates(kb: pathlib.Path, slug: str, candidates: List[Dict[str, An
     aliases, _ = gf.load_canonical(kb)
     known = _known_entities(kb, limit=500)
     confirmed_causes = _confirmed_causes(kb)
+    priors = kbsup.current_handlings(gf.load_triples(kb)[0]) + kbsup.batch_handlings(candidates, aliases)
+    batch_names = {str(c.get("item_id") or ""): case_id_for(c["case"]) for c in candidates
+                   if isinstance(c, dict) and isinstance(c.get("case"), dict)}
     entries: List[Dict[str, Any]] = []
     errors: List[str] = []
     n = 0
@@ -466,7 +396,8 @@ def review_candidates(kb: pathlib.Path, slug: str, candidates: List[Dict[str, An
                             "text": f"[实体] {kind} {ent['name']}" + ("" if q_ok else " ⚠ 摘录未回指"),
                             "quote": ent.get("quote", ""), "default": "accept" if q_ok else "reject",
                             "payload": {"kind": kind, "name": ent["name"]}})
-            for cid2, ratio in _similar_entities(str(ent["name"]), known, aliases):
+            # 只和同类节点比:不分类型时 GUC 名会被建议并进含它的处置节点(2026-11-02 实测 max_active_statements ≈ action:将…调整为 50)
+            for cid2, ratio in _similar_entities(str(ent["name"]), [k for k in known if k.startswith(kind + ":")], aliases):
                 n += 1
                 entries.append({"n": n, "item_id": item_id, "kind": "merge", "case_id": cid,
                                 "text": f"[归一] 「{ent['name']}」≈ {cid2} ? 相似度 {ratio}",
@@ -487,7 +418,41 @@ def review_candidates(kb: pathlib.Path, slug: str, candidates: List[Dict[str, An
                             "quote": ed.get("quote", ""), "default": "ask",
                             "payload": {"src": src, "rel": rel, "dst": dst,
                                         "confidence": float(ed.get("confidence") or 0.7)}})
+        merges = _node_merges(cand, known, aliases)
+        for name, kind, into, ratio in merges:
+            n += 1
+            entries.append({"n": n, "item_id": item_id, "kind": "merge", "case_id": cid,
+                            "text": f"[归一] {kind}「{name}」≈ {into} ? 相似度 {ratio}",
+                            "quote": "", "default": "ask", "payload": {"name": name, "kind": kind, "into": into}})
+        judgments, jerr = kbsup.check_judgments(cand, ci, text, priors, aliases, quote_found,
+                                                {into for _n, k, into, _r in merges if k == "rootcause"})
+        errors += [f"候选 {item_id}:{e}" for e in jerr]
+        for j in judgments:
+            n += 1
+            entries.append(kbsup.review_entry(n, item_id, cid, j, batch_names))
     return entries, errors
+
+
+def _node_merges(cand: Dict[str, Any], known: Sequence[str], aliases: Dict[str, str]
+                 ) -> List[Tuple[str, str, str, float]]:
+    """边上的现象 / 根因名与库里同类节点很像、又没在别名表里 → [归一] 候选 (名, kind, 已有节点, 相似度)。
+    现象 / 根因只出现在 edges 里,上面按 entities 做的检查够不着它们——不查,「高CPU」与「CPU使用率高」一类
+    换个写法就静默另起一个节点,两边的案例互相看不到(2026-11-02 实测)。"""
+    out: List[Tuple[str, str, str, float]] = []
+    seen = set()
+    for ed in cand.get("edges") or []:
+        if not isinstance(ed, dict):
+            continue
+        for ref in (ed.get("src"), ed.get("dst")):
+            ref = ref if isinstance(ref, dict) else {}
+            kind, name = str(ref.get("kind") or ""), str(ref.get("name") or "")
+            if kind not in ("symptom", "rootcause") or not name or (kind, kbtext.normalize(name)) in seen:
+                continue
+            seen.add((kind, kbtext.normalize(name)))
+            mine = gf.canonical_id(kind, name, aliases)
+            same_kind = [k for k in known if k.startswith(kind + ":") and k != mine]
+            out += [(name, kind, into, r) for into, r in _similar_entities(name, same_kind, aliases)]
+    return out
 
 
 def _confirmed_causes(kb: pathlib.Path) -> Dict[str, set]:
@@ -529,9 +494,11 @@ def _source_of(item_path: pathlib.Path) -> str:
 def render_review(slug: str, entries: List[Dict[str, Any]], errors: List[str]) -> str:
     cases = sorted({e["case_id"] for e in entries})
     n_edges = sum(1 for e in entries if e["kind"] == "edge")
-    lines = [f"# 导入确认:{slug}({len(cases)} 案例 / {len(entries)} 项待定 / 其中 {n_edges} 条边无默认)",
+    n_sup = sum(1 for e in entries if e["kind"] == "supersede")
+    lines = [f"# 导入确认:{slug}({len(cases)} 案例 / {len(entries)} 项待定 / 其中 {n_edges} 条边"
+             + (f"、{n_sup} 条取代" if n_sup else "") + "无默认)",
              "回复格式:`接受 1-9,12` / `拒绝 10` / `改 3: severity=S2` / `全部接受(边除外)`;"
-             "边不答 = 保留为候选(不进「本行历史路径」)", ""]
+             "边不答 = 保留为候选(不进「本行历史路径」);取代不答 = 不取代(旧处置照旧是现行做法)", ""]
     for e in errors:
         lines.append(f"- [error] {e}")
     if errors:
@@ -731,6 +698,8 @@ def _apply_locked(args: argparse.Namespace, kb: pathlib.Path) -> int:
         except OSError:
             pass
 
+    # 取代要在写本批图文件之前做:被取代的旧边可能就在同名批次的 graph/<slug>.yaml 里(下面会读它再追加)
+    triples_out, sup_lines = _apply_supersedes(kb, entries, dec, written_cases, triples_out, alias_map)
     if canonical:
         write_text_atomic(aliases_path, yaml.safe_dump(canonical, allow_unicode=True, sort_keys=True))
     if triples_out:
@@ -747,10 +716,35 @@ def _apply_locked(args: argparse.Namespace, kb: pathlib.Path) -> int:
     n_edges_cand = sum(1 for t in triples_out if t["status"] == "candidate")
     print(f"写入案例     : {len(written_cases)} 份 → cases/" + ("(" + "、".join(written_cases[:5]) + ")" if written_cases else ""))
     print(f"写入三元组   : {len(triples_out)} 条 → graph/{args.slug}.yaml(已确认边 {n_edges_ok},候选边 {n_edges_cand} 不进路径)")
+    for line in sup_lines:
+        print(line)
     remaining = list((inbox / "items").glob("*.md")) if (inbox / "items").is_dir() else []
     print(f"剩余工单     : {len(remaining)} 单" + ("(继续 propose)" if remaining else "(本批完成)"))
     print("Next: python3 kb.py validate && python3 kb.py index")
     return 0
+
+
+def _apply_supersedes(kb: pathlib.Path, entries: List[Dict[str, Any]], dec: Dict[int, Tuple[str, Optional[str]]],
+                      written: List[str], triples_out: List[Dict[str, Any]], aliases: Dict[str, str]
+                      ) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """用户接受的 [取代]:本批的边直接在 triples_out 上标,库里已有的去改 graph/*.yaml。返回 (新 triples_out, 输出行)。"""
+    payloads = [e["payload"] for e in entries if e["kind"] == "supersede" and dec[e["n"]][0] == "accept"]
+    if not payloads:
+        return triples_out, []
+    item2cid = {e["item_id"]: e["case_id"] for e in entries if e["kind"] == "case"}
+    accepted: Dict[str, set] = {}
+    for t in triples_out:
+        if t["rel"] == "handled_by" and t["status"] == "accepted":
+            aid = t["dst"].get("canonical") or gf.canonical_id(t["dst"]["kind"], t["dst"]["name"], aliases)
+            accepted.setdefault(t["case"], set()).add(aid)
+    marks, skipped = kbsup.plan_marks(payloads, item2cid, written, accepted)
+    rows, hit = kbsup.mark_rows(triples_out, marks, aliases)
+    changed, missing = kbsup.mark_in_files(kb, {k: v for k, v in marks.items() if k not in hit}, aliases)
+    lines = [f"取代         : {len(marks) - len(missing)} 条旧处置标为已被取代(旧案例保留可追溯,不再进路径)"
+             + (f" → {'、'.join(changed)}" if changed else "")]
+    lines += [f"[warn ] {msg}" for msg in skipped]
+    lines += [f"[warn ] 取代没找到旧处置边:案例 {c} 的 {a}" for c, a in missing]
+    return rows, lines
 
 
 # ---------------------------------------------------------------- parser wiring

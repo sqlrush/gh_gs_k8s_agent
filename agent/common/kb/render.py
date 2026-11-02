@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
+from . import supersede as kbsup
 from .query import FindingRefs, KbStatus, QueryResult, Ref
 
 SECTION_TITLE = "## 客户知识库参照"
@@ -44,6 +45,9 @@ def _case_line(r: Ref) -> str:
     action = (r.sections.get("处置") or "").strip().replace("\n", " ")
     action = action[:120] + ("…" if len(action) > 120 else "")
     head = f"- **历史相似** {r.short_id}(结论强度:{conclusion}" + (f",{when}" if when else "") + ")"
+    gone = meta.get("superseded") or []
+    if gone:                          # 旧做法留着可追溯,但要一眼看出它已不是现行做法
+        head += f"〔{kbsup.note(gone)}〕"
     return head + (f":处置 = {action}" if action else f":{r.snippet[:100]}")
 
 

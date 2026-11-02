@@ -26,6 +26,7 @@ from . import cases as kbcases
 from . import graphfiles as gf
 from . import store_graph as sg
 from . import store as spg
+from . import supersede as kbsup
 from . import text as kbtext
 from .embed import Embedder
 
@@ -176,7 +177,10 @@ def md_docs(kb: pathlib.Path, sub: str, kind: str) -> List[Tuple[spg.DocRow, Lis
     return out
 
 
-def case_docs(cases: Sequence[kbcases.Case], kb: pathlib.Path) -> List[Tuple[spg.DocRow, List[spg.ChunkRow]]]:
+def case_docs(cases: Sequence[kbcases.Case], kb: pathlib.Path,
+              superseded: Optional[Dict[str, Dict[str, object]]] = None) -> List[Tuple[spg.DocRow, List[spg.ChunkRow]]]:
+    """superseded:supersede.superseded_info 的结果(案例 ID → 被取代的处置);检索与渲染据此标「已被取代」。"""
+    info_by_case = superseded or {}
     out = []
     for c in cases:
         signals = list(c.signals) + ([c.section("复发标志")] if c.section("复发标志") else [])
@@ -200,8 +204,9 @@ def case_docs(cases: Sequence[kbcases.Case], kb: pathlib.Path) -> List[Tuple[spg
                                "confidence": c.confidence, "severity": c.severity, "engine": c.engine,
                                "objects": list(c.objects), "signals": list(c.signals), "rules": list(c.rules),
                                "primary_factor": c.primary_factor, "file": str(c.path.relative_to(kb)),
-                               "topics": list(c.topics)},
-                         content_hash=c.content_hash)
+                               "topics": list(c.topics), **_superseded_meta(info_by_case.get(c.id))},
+                         content_hash=c.content_hash + (f":{kbsup.info_hash(info_by_case[c.id])}"
+                                                        if c.id in info_by_case else ""))
         out.append((doc, chunks))
     return out
 
@@ -281,7 +286,19 @@ def raw_docs(kb: pathlib.Path) -> List[Tuple[spg.DocRow, List[spg.ChunkRow]]]:
 
 def build_docs(kb: pathlib.Path, cases: Sequence[kbcases.Case]) -> List[Tuple[spg.DocRow, List[spg.ChunkRow]]]:
     return (rule_docs(kb) + md_docs(kb, "guides", "guide") + md_docs(kb, "errata", "errata")
-            + case_docs(cases, kb) + raw_docs(kb) + typed_docs(kb))
+            + case_docs(cases, kb, _superseded_by_case(kb)) + raw_docs(kb) + typed_docs(kb))
+
+
+def _superseded_by_case(kb: pathlib.Path) -> Dict[str, Dict[str, object]]:
+    try:
+        triples, _ = gf.load_triples(kb)
+    except Exception:                                     # noqa: BLE001  图坏了由 validate 报,索引照建
+        return {}
+    return kbsup.superseded_info(triples)
+
+
+def _superseded_meta(info: Optional[Dict[str, object]]) -> Dict[str, object]:
+    return {"superseded": list(info["superseded"]), "current": info["current"]} if info else {}
 
 
 # ---------------------------------------------------------------- graph assembly (pure)

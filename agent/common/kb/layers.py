@@ -14,11 +14,12 @@ import datetime
 import pathlib
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 from . import catalog as kbcat
 from . import docnav
 from . import graphfiles as gf
+from . import supersede as kbsup
 from . import topics as kbtopics
 from . import types as kbtypes
 from .atomic import write_text_atomic
@@ -49,6 +50,7 @@ class TopicView:
     causes: Tuple[Cause, ...]
     lookalikes: Tuple[str, ...]     # 同一现象、不止一种根因的现象名
     synonyms: Tuple[str, ...]
+    superseded: Tuple[Tuple[str, str, bool], ...] = ()   # (案例 ID, 「已被取代」说明, 处置是否全被取代)
 
 
 # ---------------------------------------------------------------- 候选原因(图谱)
@@ -102,8 +104,11 @@ def topic_view(cat: kbcat.Catalog, triples: Sequence[gf.Triple], slug: str) -> T
     for e in entries:
         if e.type == kbtypes.CASE:
             sigs += [s for s in (e.meta.get("signals") or []) if len(s) <= 20]
+    gone = kbsup.superseded_info(triples)
     return TopicView(topic=topic, entries=entries, causes=tuple(causes), lookalikes=lookalikes,
-                     synonyms=tuple(dict.fromkeys(sigs))[:24])
+                     synonyms=tuple(dict.fromkeys(sigs))[:24],
+                     superseded=tuple((cid, kbsup.note(v["superseded"]), not v["current"])
+                                      for cid, v in sorted(gone.items())))
 
 
 # ---------------------------------------------------------------- 渲染
@@ -126,28 +131,31 @@ def _date_key(s: str) -> int:
     return int(digits) if digits else 0
 
 
-def _sorted_entries(entries: Sequence[kbcat.Entry]) -> List[kbcat.Entry]:
-    """类型按展示顺序;案例里已确认的在前、近期的在前,其余按 ID。"""
+def _sorted_entries(entries: Sequence[kbcat.Entry], demote: FrozenSet[str] = frozenset()) -> List[kbcat.Entry]:
+    """类型按展示顺序;案例里处置全被取代的排后,其余已确认的在前、近期的在前,其余按 ID。"""
     order = {t: i for i, t in enumerate(kbtypes.DISPLAY_ORDER)}
 
     def key(e: kbcat.Entry):
         if e.type == kbtypes.CASE:
-            return (order.get(e.type, 99), _CONF_ORDER.get(e.verification, 9), -_date_key(e.as_of), e.id)
-        return (order.get(e.type, 99), 0, 0, e.id)
+            return (order.get(e.type, 99), e.id in demote, _CONF_ORDER.get(e.verification, 9),
+                    -_date_key(e.as_of), e.id)
+        return (order.get(e.type, 99), False, 0, 0, e.id)
     return sorted(entries, key=key)
 
 
-def _entry_block(entries: Sequence[kbcat.Entry], caps: Optional[Dict[str, int]]) -> Tuple[List[str], int]:
+def _entry_block(entries: Sequence[kbcat.Entry], caps: Optional[Dict[str, int]],
+                 superseded: Sequence[Tuple[str, str, bool]] = ()) -> Tuple[List[str], int]:
     lines: List[str] = []
     hidden = 0
     shown: Dict[str, int] = {}
-    for e in _sorted_entries(entries):
+    notes = {cid: text for cid, text, _full in superseded}
+    for e in _sorted_entries(entries, frozenset(cid for cid, _t, full in superseded if full)):
         cap = None if caps is None else caps.get(e.type, _DEFAULT_CAP)
         if cap is not None and shown.get(e.type, 0) >= cap:
             hidden += 1
             continue
         shown[e.type] = shown.get(e.type, 0) + 1
-        lines.append(entry_line(e))
+        lines.append(entry_line(e, notes.get(e.id, "")))
     return lines, hidden
 
 
@@ -181,7 +189,7 @@ def render_l1(view: TopicView, version: str, show_all: bool = False) -> str:
         "## 读法", "要引用哪条先 `kb.py show <ID>`(处置步骤、审批、版本结论不许只凭这里的摘要写);"
                  "核对原文 `kb.py evidence <ID>`。"]
     def build(caps: Optional[Dict[str, int]], causes: List[str]) -> str:
-        lines, hidden = _entry_block(own, caps)
+        lines, hidden = _entry_block(own, caps, view.superseded)
         tail = [f"(其余 {hidden} 条:`kb.py topic {t.slug} --all`)"] if hidden else []
         return "\n".join(head + causes + ["## 相关条目(摘要)", ""] + (lines or ["(暂无)"]) + tail + [""] + foot) + "\n"
 

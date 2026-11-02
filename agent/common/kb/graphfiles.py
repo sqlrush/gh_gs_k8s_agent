@@ -3,6 +3,7 @@
 三元组是图的真相;Neo4j 里的节点/边由它重建。每条边:
     src {kind, name[, canonical]} —rel→ dst {kind, name[, canonical]}
     confidence(0..1)· source(出处,必填)· case(案例 ID)· valid_from / valid_to · status
+    · superseded_by(可选:handled_by 边的处置被哪个案例取代,与 valid_to 一起写,见 supersede.py)
 status:accepted(用户在选择列表里接受)| candidate(模型提出,未确认)| rejected。
 只有 accepted 且 confidence=1.0 的边进「本行历史路径」;candidate 只作"未确认"参照;rejected 不入库。
 
@@ -49,6 +50,7 @@ class Triple:
     valid_to: str = ""
     status: str = "accepted"
     file: str = ""
+    superseded_by: str = ""     # 处置被哪个案例取代(配 valid_to,见 supersede.py)
 
     @property
     def in_path(self) -> bool:
@@ -167,7 +169,8 @@ def parse_triples(data, aliases: Dict[str, str], file: str) -> Tuple[List[Triple
             continue
         out.append(Triple(src=src, rel=rel, dst=dst, confidence=confidence, source=source,
                           case_id=str(raw.get("case") or "").strip(), valid_from=vf, valid_to=vt,
-                          status=status, file=file))
+                          status=status, file=file,
+                          superseded_by=str(raw.get("superseded_by") or "").strip()))
     return out, errors
 
 

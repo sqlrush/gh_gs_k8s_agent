@@ -57,6 +57,16 @@ def _edge_valid(e: sg.EdgeRow, today: str, min_confidence: float) -> bool:
             and (not e.valid_from or e.valid_from <= today))
 
 
+def chain_cases(c1: Sequence[str], c2: Sequence[str]) -> List[str]:
+    """「N 案例支持」:同一个案例自己的 现象→根因 与 根因→处置 都在,才算支持这条链(两边案例取交集)。
+    同一根因下几种处置,各自只算自己那几单——并集会让每种处置都显示「全部案例支持」(2026-11-02 实测:
+    参数调 100 / 改 50 / 换参数三单,三条路径都写「3 案例支持」)。交集为空(手写的边没有案例、
+    跨案例拼出的链)时退回并集,保持原样。"""
+    first = set(c1)
+    both = [c for c in c2 if c in first]
+    return both or list(dict.fromkeys(list(c1) + list(c2)))
+
+
 class FileGraph:
     """graph/*.yaml + 案例自带边 组成的内存图;接口对齐 GraphStore 的检索侧。"""
 
@@ -102,13 +112,15 @@ class FileGraph:
                     if a is None or a.kind != "action":
                         continue
                     key = (s.id, r.id, a.id)
-                    cur = agg.get(key) or {"s": s, "r": r, "a": a, "s1": [], "s2": [], "cases": [], "minc": 1.0}
+                    cur = agg.get(key) or {"s": s, "r": r, "a": a, "s1": [], "s2": [], "c1": [], "c2": [], "minc": 1.0}
                     cur = {**cur,
                            "s1": list(dict.fromkeys(cur["s1"] + [e1.source])),
                            "s2": list(dict.fromkeys(cur["s2"] + [e2.source])),
-                           "cases": list(dict.fromkeys(cur["cases"] + [c for c in (e1.case_id, e2.case_id) if c])),
+                           "c1": list(dict.fromkeys(cur["c1"] + ([e1.case_id] if e1.case_id else []))),
+                           "c2": list(dict.fromkeys(cur["c2"] + ([e2.case_id] if e2.case_id else []))),
                            "minc": min(cur["minc"], e1.confidence, e2.confidence)}
                     agg[key] = cur
+        agg = {k: {**v, "cases": chain_cases(v["c1"], v["c2"])} for k, v in agg.items()}
         ranked = sorted(agg.items(), key=lambda kv: (-len(kv[1]["cases"]), kv[0][0], kv[0][1], kv[0][2]))
         return [sg.PathHit(symptom_id=v["s"].id, symptom=v["s"].name, rootcause_id=v["r"].id, rootcause=v["r"].name,
                            action_id=v["a"].id, action=v["a"].name, cases=tuple(v["cases"]),

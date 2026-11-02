@@ -44,6 +44,9 @@ symptom:cache_low: [缓存命中率低, "缓存命中率低,报表时段 blks_re
   source: cases/S2-20250224-CBST-偶现单条update慢.md#判断   # 出处必填
   case: S2-20250224-CBST-偶现单条update慢
   valid_from: 2025-02-24     # 可空;valid_to 过期的边不进路径
+  # 处置(handled_by)被取代时 apply 加这两项,旧案例与这条边都保留:
+  # valid_to: 2025-10-20     # 从这天起不再是现行做法(取代它的案例的日期)
+  # superseded_by: S2-20251020-CORE-CPU冲高活跃语句再次堆积
 ```
 
 边的身份是 `(src, rel, dst, source)`:同一条因果被两份材料各自佐证时是两条边,「N 案例支持」数的就是它。
@@ -52,6 +55,8 @@ symptom:cache_low: [缓存命中率低, "缓存命中率低,报表时段 blks_re
 
 `(:Symptom)-[:CAUSED_BY]->(:RootCause)-[:HANDLED_BY]->(:Action)`,只走 **`status: accepted` 且 `confidence ≥ 1.0`**、
 在生效期内的边,按 现象/根因/处置 三元组聚合,来源合并、案例去重计数。Neo4j 与图文件两种模式同一口径。
+「N 案例支持」只数**这条链自己的案例**(同一案例的 现象→根因 与 根因→处置 都在,两边取交集;交集为空才退回并集)——
+同一根因下几种处置各算各的。被取代的处置(`valid_to` 已到)不进路径;`validate` 会核对 `superseded_by` 指向的案例存在。
 
 candidate 边永远不出现在「本行历史路径」里——**手工把它的 `confidence` 改成 1.0 也不会**:路径看的是 status,
 置信度只是第二道条件。候选边要进路径,得**用户确认**后把 `status` 改成 `accepted`(confidence 记 1.0)——

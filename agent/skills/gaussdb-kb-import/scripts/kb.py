@@ -713,6 +713,8 @@ def validate_cases_and_graph(kb: pathlib.Path, findings: list) -> None:
     triples, tri_findings = gf.load_triples(kb, case_ids=[c.id for c in cases])
     findings.extend(tri_findings)
     validate_symptom_reachability(triples, findings)
+    from common.kb import supersede as kbsup
+    findings.extend(kbsup.graph_findings(triples, {c.id for c in cases}))
 
 
 def validate_typed(kb: pathlib.Path, findings: list) -> None:

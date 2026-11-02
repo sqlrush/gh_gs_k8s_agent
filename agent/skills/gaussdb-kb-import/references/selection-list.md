@@ -27,6 +27,9 @@
 | 候选缺 `quotes.现场`,或结论 `已确认` 却缺 `quotes.primary_factor` | 整单 `[error]`,不进列表 | 补摘录,或把结论改成 `推测`,再跑 review |
 | `[归一] 「X」≈ 某已有实体?` | 无默认 | 接受 = 记进 canonical.yaml,以后同名自动归一 |
 | `[边]` | **无默认** | 接受 = confidence 1.0 进「本行历史路径」;拒绝 = 不入图;不答 = candidate(可检索,不进路径) |
+| `[归一] 现象 / 根因「X」≈ 某已有节点?` | 无默认 | 边上的现象 / 根因名与已有的很像:接受 = 记进 canonical.yaml,两边的案例才互相看得到;相似的根因也要判取代 / 并存 |
+| `[取代] 「新处置」(案例,日期)取代「旧处置」(案例,日期)` | **无默认** | 接受 = 旧处置边标 `valid_to` + `superseded_by`,退出路径、检索与专题页标「已被取代」,**旧案例不删**;不答 = 不取代 |
+| `[并存] 与「旧处置」是不同方案` | 接受(只是告知) | 不改任何东西;用户认为其实是同一方案,让模型把 verdict 改成 取代 再 review |
 
 ## 把回答变成 apply 参数
 
@@ -35,7 +38,8 @@
 - 「全部接受,边也接受」→ `kb.py apply q1 --all-but-edges --accept 7,8`
 - 「1-6 接受,7 接受,8 不对」→ `kb.py apply q1 --accept 1-7 --reject 8`
 - 「级别改成 S1,其余按建议」→ `kb.py apply q1 --all-but-edges --edit 2:S1`
-- 「先不管边」→ `kb.py apply q1 --all-but-edges`(边留候选)
+- 「先不管边」→ `kb.py apply q1 --all-but-edges`(边留候选;`[取代]` 也不生效)
+- 「9 那条取代接受」→ 在 `--accept` 里带上 9(取代必须点名)
 - 用户不答就不要替他答;清单里有 `[error]` 时 apply 会拒绝,先修候选再 review。
 
 `apply` 之后:`kb.py validate` → `kb.py index`。处理完的工单会从 `items/` 移走;`health` 会显示还剩几单。

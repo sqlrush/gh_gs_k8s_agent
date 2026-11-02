@@ -24,6 +24,7 @@ from . import config as kbconfig
 from . import store_files as sf
 from . import store_graph as sg
 from . import store as spg
+from . import supersede as kbsup
 from . import store_sqlite as ssq
 from . import text as kbtext
 from .embed import Embedder, EmbedError
@@ -533,7 +534,10 @@ class KbSession:
             by_kind[k].sort(key=lambda p: (-p[0], p[1].doc_id))
 
         clauses = self._refs(by_kind.get("rule", []), th.clause, th.top_clause)
-        cases = self._refs(by_kind.get("case", []), th.case, th.top_case, with_sections=True)
+        # 处置全部被取代的案例排到后面(先过门槛再排,门槛判断不受影响):旧做法仍可追溯,但不能排在现行做法前面
+        case_pool = sorted((p for p in by_kind.get("case", []) if p[0] >= th.case),
+                           key=lambda p: kbsup.fully_superseded(p[1].meta or {}))
+        cases = self._refs(case_pool, th.case, th.top_case, with_sections=True)
         raws = self._refs(by_kind.get("raw", []), th.chunk, th.top_raw)
         # 修正(errata)排在指南前面:库内优先级 修正 > 条款 > 指南,检索结果的顺序要和契约一致
         errata_first = sorted(by_kind.get("guide", []) + by_kind.get("errata", []),
@@ -700,7 +704,8 @@ def result_to_dict(result: QueryResult) -> Dict[str, Any]:
             "key": it.key, "label": it.label,
             "clauses": [{"id": r.id, "title": r.title, "score": r.score, "source": r.source} for r in it.clauses],
             "cases": [{"id": r.id, "title": r.title, "score": r.score, "source": r.source,
-                       "conclusion": r.meta.get("conclusion"), "action": r.sections.get("处置", "")} for r in it.cases],
+                       "conclusion": r.meta.get("conclusion"), "action": r.sections.get("处置", ""),
+                       "superseded": list(r.meta.get("superseded") or [])} for r in it.cases],
             "paths": [dict(p.__dict__) for p in it.paths],
             "raws": [{"id": r.id, "title": r.title, "score": r.score} for r in it.raws],
             "typed": [{"id": r.id, "kind": r.kind, "title": r.title, "score": r.score,

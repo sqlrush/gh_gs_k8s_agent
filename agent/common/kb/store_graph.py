@@ -257,16 +257,19 @@ class GraphStore:
         valid = (_CONFIRMED + " AND ({e}.valid_to IS NULL OR {e}.valid_to > $today) "
                  "AND ({e}.valid_from IS NULL OR {e}.valid_from <= $today)")
         # 「N 案例支持」= 佐证**这条链**的边来自哪些案例(边上的 case_id),不是所有出现过该现象的案例——
-        # 同一现象下两条不同根因的路径,支持数必须不一样。
+        # 同一现象下两条不同根因的路径,支持数必须不一样;同一根因下几种处置也各算各的:
+        # 两边案例取交集(同一案例自己的整条链),交集为空才退回并集——与 store_files.chain_cases 同一口径。
         rows = self.run(
             "MATCH (s:Symptom)-[e1:CAUSED_BY]->(r:RootCause)-[e2:HANDLED_BY]->(a:Action) "
             "WHERE s.id IN $ids AND " + valid.format(e="e1") + " AND " + valid.format(e="e2") + " "
             "WITH s, r, a, collect(DISTINCT e1.source) AS s1, collect(DISTINCT e2.source) AS s2, "
-            "     collect(DISTINCT e1.case_id) + collect(DISTINCT e2.case_id) AS cs, "
+            "     [c IN collect(DISTINCT e1.case_id) WHERE c IS NOT NULL AND c <> ''] AS c1, "
+            "     [c IN collect(DISTINCT e2.case_id) WHERE c IS NOT NULL AND c <> ''] AS c2, "
             "     min(CASE WHEN e1.confidence < e2.confidence THEN e1.confidence ELSE e2.confidence END) AS minc "
+            "WITH s, r, a, s1, s2, minc, c1, c2, [c IN c2 WHERE c IN c1] AS both "
             "RETURN s.id AS sid, s.name AS sname, r.id AS rid, r.name AS rname, "
             "       a.id AS aid, a.name AS aname, "
-            "       [c IN cs WHERE c IS NOT NULL AND c <> ''] AS cases, s1 + s2 AS sources, minc "
+            "       CASE WHEN size(both) > 0 THEN both ELSE c1 + c2 END AS cases, s1 + s2 AS sources, minc "
             "ORDER BY size(cases) DESC, sid, rid, aid LIMIT $limit",
             {"ids": list(symptom_ids), "min": float(min_confidence), "today": today, "limit": int(limit),
              "accepted": PATH_STATUS})
