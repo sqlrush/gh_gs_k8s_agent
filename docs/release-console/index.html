@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>发版台使用手册 · GaussDB 智能体（agent-v1.4.4）</title>
+<style>
+:root{--ink:#0f172a;--ink2:#334155;--muted:#64748b;--line:#e2e8f0;--bg:#f6f8fb;--card:#fff;--blue:#2563eb;--blue-bg:#eff6ff;
+--green:#047857;--green-bg:#ecfdf5;--amber:#b45309;--amber-bg:#fffbeb;--red:#b91c1c;--red-bg:#fef2f2;--side:#0f172a}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:16px}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.75 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",sans-serif}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+header.top{background:linear-gradient(120deg,#1e3a8a,#2563eb 60%,#3b82f6);color:#fff;padding:34px 0 30px}
+header.top .wrap{max-width:1240px;margin:0 auto;padding:0 28px}
+header.top h1{margin:0 0 6px;font-size:30px;letter-spacing:.5px}
+header.top p{margin:0;opacity:.9;font-size:14px}
+.layout{max-width:1240px;margin:0 auto;padding:24px 28px 80px;display:grid;grid-template-columns:240px 1fr;gap:28px}
+nav.toc{position:sticky;top:16px;align-self:start;max-height:calc(100vh - 32px);overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 14px 18px;font-size:13.5px}
+nav.toc b{display:block;margin:0 0 8px;color:var(--ink2)}
+nav.toc a{display:block;color:var(--ink2);padding:3px 6px;border-radius:6px}
+nav.toc a:hover{background:var(--blue-bg);text-decoration:none}
+nav.toc a.sub{padding-left:20px;color:var(--muted);font-size:13px}
+main{min-width:0}
+section.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px 30px;margin-bottom:22px}
+h2{margin:0 0 14px;font-size:22px;padding-bottom:8px;border-bottom:2px solid var(--blue-bg)}
+h3{margin:26px 0 10px;font-size:17.5px}
+h4{margin:18px 0 6px;font-size:15.5px}
+p{margin:8px 0}
+code{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:13px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:5px;padding:1px 5px}
+pre{background:#0b1220;color:#d6e2ff;border-radius:10px;padding:14px 16px;overflow:auto;font:13px/1.6 "SF Mono",Menlo,Consolas,monospace;margin:10px 0}
+pre code{background:none;border:0;padding:0;color:inherit}
+pre .c{color:#7f93b8}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#f8fafc;color:var(--ink2);font-weight:600}
+td code{white-space:nowrap}
+figure{margin:16px 0 22px}
+figure a{display:block}
+figure img{width:100%;height:auto;border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 22px rgba(15,23,42,.08);background:#fff}
+figcaption{margin-top:8px;font-size:13.5px;color:var(--muted)}
+figcaption b{color:var(--ink2)}
+.tip,.warn,.note{border-radius:10px;padding:12px 16px;margin:12px 0;font-size:14.5px}
+.tip{background:var(--green-bg);border:1px solid #a7f3d0}
+.warn{background:var(--amber-bg);border:1px solid #fde68a}
+.note{background:var(--blue-bg);border:1px solid #bfdbfe}
+.tip b:first-child,.warn b:first-child,.note b:first-child{margin-right:4px}
+.steps{counter-reset:s;list-style:none;padding:0;margin:10px 0}
+.steps>li{counter-increment:s;position:relative;padding:4px 0 4px 40px;margin:6px 0}
+.steps>li:before{content:counter(s);position:absolute;left:0;top:4px;width:26px;height:26px;border-radius:50%;background:var(--blue);color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.badge{display:inline-block;font-size:12px;border-radius:999px;padding:1px 9px;margin-left:4px;vertical-align:1px}
+.b-ok{background:var(--green-bg);color:var(--green)}.b-warn{background:var(--amber-bg);color:var(--amber)}.b-bad{background:var(--red-bg);color:var(--red)}
+footer{color:var(--muted);font-size:13px;text-align:center;margin-top:30px}
+@media (max-width:960px){.layout{grid-template-columns:1fr}nav.toc{position:static;max-height:none}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <h1>发版台使用手册</h1>
+  <p>GaussDB 智能体 · 部署与发布 · 适用 <code style="background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.3);color:#fff">agent-v1.4.4</code> 起 · 本页的截图都来自测试环境的真实操作 · 点任一截图看原尺寸</p>
+</div></header>
+
+<div class="layout">
+<nav class="toc">
+  <b>目录</b>
+  <a href="#s1">1. 发版台是什么</a>
+  <a href="#s2">2. 准备</a>
+  <a class="sub" href="#s2-1">跳板机要求</a>
+  <a class="sub" href="#s2-2">kubeconfig 权限</a>
+  <a class="sub" href="#s2-3">发布包目录</a>
+  <a href="#s3">3. 启动与停止</a>
+  <a href="#s4">4. 界面一览</a>
+  <a href="#s5">5. 资源配置</a>
+  <a href="#s6">6. 发布前资源扫描</a>
+  <a href="#s7">7. 升级计划</a>
+  <a href="#s8">8. 执行发布</a>
+  <a class="sub" href="#s8-1">流程与实时日志</a>
+  <a class="sub" href="#s8-2">变更预览 · 确认</a>
+  <a class="sub" href="#s8-3">白名单核对</a>
+  <a class="sub" href="#s8-4">池子在线替换</a>
+  <a class="sub" href="#s8-5">导入环境与标准包</a>
+  <a class="sub" href="#s8-6">冒烟验证</a>
+  <a class="sub" href="#s8-7">完成与发布报告</a>
+  <a href="#s9">9. 暂停、续跑与回滚</a>
+  <a href="#s10">10. 发布包与操作记录</a>
+  <a href="#s11">11. 安全</a>
+  <a href="#s12">12. 常见问题</a>
+  <a href="#s13">13. 相关文档</a>
+</nav>
+
+<main>
+
+<section class="card" id="s1">
+<h2>1. 发版台是什么</h2>
+<p>发版台是跑在<b>跳板机</b>上的独立程序（一个容器，<b>不进 K8s</b>），随离线包发出。它把离线包里的版本部署到集群：
+<b>首次部署、升级、回滚走同一套流程</b>，运维只需要在两处做判断——看变更预览后确认，以及白名单没登记齐时等白名单团队补上。</p>
+<table>
+<tr><th style="width:24%">做法</th><th>说明</th></tr>
+<tr><td>扫描先行</td><td>发布前逐项检查镜像仓库、K8s 权限、NAS、模型、中间件、白名单、统一认证、集群余量，<b>全部可用才能开始</b>；每项写明不通过的原因与该找谁。</td></tr>
+<tr><td>改集群前先确认</td><td>渲染出的清单与集群现状做差异，运维看过点「确认并继续」之前，集群一处都不改。</td></tr>
+<tr><td>不停服务</td><td>固定池化逐个槽位替换：等这个人不忙 → 把他的状态写回 NAS → 换镜像（每槽位约 3 秒），他下一句话自动恢复。</td></tr>
+<tr><td>真实验证</td><td>最后用冒烟工号经网关登录、做一次真实对话、出一份只读诊断报告、做一次知识库检索。</td></tr>
+<tr><td>白名单只核对</td><td>白名单仍由白名单团队手工执行；发版台按名字、正文 md5、参数逐条核对。</td></tr>
+<tr><td>可续跑、可回滚</td><td>每一步都能重复执行；失败停在那一步，处理后从这一步续跑，或回滚到上一版。</td></tr>
+</table>
+<div class="note"><b>本仓库形态说明</b>本仓库（联合仓库）不含大盘前端。截图来自带前端的部署形态，变更预览与「网关滚动更新」里会出现 <code>frontend</code>；
+本仓库的部署里没有这一项，其余完全相同。</div>
+</section>
+
+<section class="card" id="s2">
+<h2>2. 准备</h2>
+<h3 id="s2-1">2.1 跳板机要求</h3>
+<table>
+<tr><th style="width:18%">项</th><th>要求</th></tr>
+<tr><td>系统</td><td>Linux x86_64 或 aarch64，装有 docker（能 <code>docker load</code>、<code>docker run</code>）</td></tr>
+<tr><td>集群访问</td><td>一份 kubeconfig，能访问目标命名空间（权限见 2.2）；用<b>令牌或证书</b>方式认证——exec 认证插件（云厂商的登录程序）在容器里没有</td></tr>
+<tr><td>网络</td><td>能到 K8s API 与内网镜像仓库；白名单用「只读账号」方式时还要能到中间件库</td></tr>
+<tr><td>磁盘</td><td>放得下离线包（每个版本约 1 GB）；状态目录很小</td></tr>
+</table>
+<h3 id="s2-2">2.2 kubeconfig 需要的权限（命名空间内）</h3>
+<p>ConfigMap 读 / 改，Secret 读 / 建，Deployment 改与删，StatefulSet 改，Pod 改与删，<code>pods/exec</code>、<code>pods/portforward</code>，
+Job 建与删，NetworkPolicy 改。首次部署另需建命名空间（没有权限就请平台团队先建好命名空间与 PV）。资源扫描的「Kubernetes」一项会逐条核对，缺哪条写哪条。</p>
+<h3 id="s2-3">2.3 发布包目录</h3>
+<p>把每个版本的离线包<b>整个目录拷进</b>同一个「发布包目录」（如 <code>/data/releases/</code>）。<b>拷文件，不要用链接</b>：发版台在容器里只看得到这个目录，
+链到别处的文件看不到（发布包页会标红说明）。</p>
+<pre><code>/data/releases/
+  gaussdb-agent-v1.4.3-oc1.18.27/         <span class="c"># 上一版的包留着:回滚要用</span>
+  gaussdb-agent-v1.4.4-oc1.18.27/
+    gaussdb-agent-v1.4.4-oc1.18.27-amd64.tar.gz(.sha256)    <span class="c"># 业务镜像</span>
+    gaussdb-agent-v1.4.4-oc1.18.27-k8s.tar.gz(.sha256)      <span class="c"># 清单与文档</span>
+    release.yaml(.sha256)                                   <span class="c"># 版本说明:镜像 digest、白名单全量、各版本的变化</span>
+    gaussdb-agent-release-v1.4.4-oc1.18.27-amd64.tar.gz     <span class="c"># 发版台自己</span>
+    release-console.sh                                      <span class="c"># 启动脚本</span></code></pre>
+<div class="note"><b>GHCR 上的发版台镜像</b><code>ghcr.io/sqlrush/gaussdb-agent-release</code> 也发布了，但发版台要从离线包里取业务镜像推进内网仓库、读 <code>release.yaml</code>，
+所以<b>离线包不能省</b>；按本手册用包里的 <code>release-console.sh</code> 起即可。</div>
+</section>
+
+<section class="card" id="s3">
+<h2>3. 启动与停止</h2>
+<ol class="steps">
+<li>运行目标版本包目录里的启动脚本：
+<pre><code>$ /data/releases/gaussdb-agent-v1.4.4-oc1.18.27/release-console.sh
+导入发版台镜像 gaussdb-agent-release-v1.4.4-oc1.18.27-amd64.tar.gz …
+发版台已启动:http://127.0.0.1:8090/   (别的机器上看:ssh -L 8090:127.0.0.1:8090 &lt;这台跳板机&gt;)
+  发布包目录 /data/releases · 状态 /home/ops/gaussdb-release-state · kubeconfig /home/ops/.kube/config</code></pre>
+脚本先核对发版台镜像的 sha256（拷坏了不导入），再导入、启动。</li>
+<li>发版台<b>只听跳板机本机</b>，不做登录。在自己电脑上看：
+<pre><code>ssh -L 8090:127.0.0.1:8090 &lt;跳板机&gt;      <span class="c"># 然后浏览器打开 http://127.0.0.1:8090/</span></code></pre></li>
+</ol>
+<table>
+<tr><th style="width:22%">选项</th><th style="width:26%">默认</th><th>说明</th></tr>
+<tr><td><code>--releases &lt;目录&gt;</code></td><td>本包目录的上一级</td><td>发布包目录（容器里只读）</td></tr>
+<tr><td><code>--state &lt;目录&gt;</code></td><td><code>~/gaussdb-release-state</code></td><td>配置版本、发布记录、日志、渲染出的清单。<b>状态目录决定管哪个环境</b>；换发版台版本时用同一个</td></tr>
+<tr><td><code>--kubeconfig &lt;文件&gt;</code></td><td><code>$KUBECONFIG</code> 或 <code>~/.kube/config</code></td><td>它引用的证书文件在别的目录也会一起挂进去</td></tr>
+<tr><td><code>--port &lt;端口&gt;</code></td><td>8090</td><td></td></tr>
+<tr><td><code>--kubectl &lt;文件&gt;</code></td><td>镜像自带 v1.31</td><td>集群与 1.31 相差超过一个小版本时扫描标黄（6.2），换成集群配套的 kubectl（静态二进制）</td></tr>
+<tr><td><code>--ca &lt;文件&gt;</code></td><td>—</td><td>内网镜像仓库的 CA 证书；资源配置里「CA 证书」填同一路径</td></tr>
+<tr><td><code>--force</code></td><td>—</td><td>有发布正在执行也替换发版台（那一步被中断，重启后停在原处等续跑）</td></tr>
+</table>
+<p>其他命令：<code>release-console.sh stop</code> 停；<code>release-console.sh logs</code> 看日志。</p>
+<div class="tip"><b>换发版台版本</b>在新版本的包目录里运行它的 <code>release-console.sh</code>，状态目录不变：同一版本已在运行时只打印地址；
+有发布正在执行时不替换（等它停在确认关卡或做完）。目录与文件按跳板机上的原路径挂进容器，界面和日志里看到的路径就是跳板机上的路径。
+跳板机重启后发版台自动起来，正在执行的发布停在原处、标「被中断」，在界面上选续跑或回滚。</div>
+</section>
+
+<section class="card" id="s4">
+<h2>4. 界面一览</h2>
+<p>左侧六个页面：<b>总览</b>（当前版本、池子、最近的发布、集群架构）、<b>发布</b>（扫描、计划、流程、关卡、实时日志、集群大盘）、<b>发布包</b>、<b>资源配置</b>、
+<b>历史与回滚</b>、<b>操作记录</b>。页面每 1.5 秒自动刷新；地址 <code>#release/&lt;步号&gt;</code> 直接打开某一步的明细。</p>
+<figure><a href="img/01-overview.png"><img src="img/01-overview.png" alt="总览" loading="lazy"></a>
+<figcaption><b>图 1 总览。</b>当前版本 v1.4.4；诊断容器池 3 个 Pod × 3 个槽位，「在用 0/9」；集群架构里绿边 = 已是目标版本，
+黄色 = 保留中（用户暂时离开，状态在 NAS 上），蓝色 = 在用。<b>大盘不显示工号。</b></figcaption></figure>
+</section>
+
+<section class="card" id="s5">
+<h2>5. 资源配置</h2>
+<p>「资源配置」页按页签分组，一次配好，之后每次发布前自动逐项扫描。每次保存是一个<b>配置版本</b>，发布记录里写着用的是哪一版。</p>
+<table>
+<tr><th style="width:18%">页签</th><th>填什么</th></tr>
+<tr><td>Kubernetes</td><td>命名空间（默认 <code>gaussdb-agent</code>）、kubeconfig 里的 context、节点架构（留空 = 自动识别）</td></tr>
+<tr><td>镜像仓库</td><td>方式：<b>推送</b>（发版台把包里的镜像推进内网仓库，默认）或<b>预载</b>（镜像已由平台载进每个节点）；仓库前缀、账号、口令、CA 证书 / 不校验证书 / 明文 HTTP</td></tr>
+<tr><td>模型</td><td>地址（OpenAI 兼容，以 <code>/v1</code> 结尾）、模型 ID、API Key、是否支持图片输入</td></tr>
+<tr><td>中间件</td><td>地址、端口、接口路径前缀（不回显）、Appkey、签名方式、<b>实例别名</b>（<code>别名=IP/库名</code>，一行一个）、SM2 私钥</td></tr>
+<tr><td>网络策略</td><td>中间件、模型、K8s API、上游的网段与端口——只填集群外的；集群内的规则随版本</td></tr>
+<tr><td>白名单核对</td><td>方式：<b>导出文件</b>或<b>只读账号</b>（见 8.3）</td></tr>
+<tr><td>统一认证与冒烟</td><td>工号与角色的请求头名、信任凭据、冒烟工号（要已开通中间件令牌）、做诊断用的实例别名</td></tr>
+<tr><td>池子与网关</td><td>运行模式、Pod 数 × 槽位数（只在首次部署时用；升级保留集群现有规模）、拉取策略</td></tr>
+</table>
+<div class="grid2">
+<figure><a href="img/17-config-reg.png"><img src="img/17-config-reg.png" alt="镜像仓库" loading="lazy"></a><figcaption><b>图 2 镜像仓库。</b>推送方式要填仓库前缀；口令只能设置 / 更换，不能查看。</figcaption></figure>
+<figure><a href="img/18-config-grmp.png"><img src="img/18-config-grmp.png" alt="中间件" loading="lazy"></a><figcaption><b>图 3 中间件。</b>路径前缀写进集群后只显示「●●●」；实例别名给冒烟的诊断用。（Appkey 为截图隐去）</figcaption></figure>
+<figure><a href="img/19-config-net.png"><img src="img/19-config-net.png" alt="网络策略" loading="lazy"></a><figcaption><b>图 4 网络策略。</b>格式「网段,网段 | 端口,端口」。升级时集群里现有的外部规则原样沿用。</figcaption></figure>
+<figure><a href="img/20-config-wl.png"><img src="img/20-config-wl.png" alt="白名单核对" loading="lazy"></a><figcaption><b>图 5 白名单核对。</b>页面上给出导出用的 SELECT，白名单团队照着导出 CSV 上传即可。</figcaption></figure>
+</div>
+<div class="note"><b>升级时配置怎么迁移</b>ConfigMap 按「<b>集群现值</b> + 新版本新增项的默认值 + 资源配置里填的」迁移：现场改过的值（如知识库管理员名单）原样保留，
+资源配置里没填的项不会覆盖集群。<b>密钥</b>：写进集群 Secret 的（模型 API Key、信任凭据等）发版台只留指纹；发版台自己要用的（镜像仓库口令、白名单只读账号口令）
+存在状态目录（权限 0600）。</div>
+</section>
+
+<section class="card" id="s6">
+<h2>6. 发布前资源扫描</h2>
+<p>「发布」页点「扫描资源」。<b>全部可用（黄色提示可以）且在 1 小时内</b>才能开始发布。模型、中间件、NAS 三项借池子的管家容器在集群里测，密钥不出容器；
+首次部署还没有池子时这三项标黄，由冒烟验证核对。</p>
+<h3>6.1 九项检查</h3>
+<table>
+<tr><th style="width:15%">项</th><th style="width:38%">核对什么</th><th>不通过时</th></tr>
+<tr><td>发布包目录</td><td>发现哪些包、目标包的 sha256</td><td>拷坏了重新拷；链接换成真文件</td></tr>
+<tr><td>内网镜像仓库</td><td>握手与认证（推送权限在入库时核对）</td><td>地址、账号口令、CA 证书</td></tr>
+<tr><td>Kubernetes</td><td>命名空间、2.2 的权限、节点架构、kubectl 与集群的版本差</td><td>缺哪条权限请平台团队授；版本差大用 <code>--kubectl</code></td></tr>
+<tr><td>NAS</td><td>在集群里以 uid 1000 写一个探针文件、剩余空间</td><td>请存储团队把 <code>users/</code> 的属主改为 1000</td></tr>
+<tr><td>模型服务</td><td>在集群里发一句最短的对话（与智能体同一个接口、同一个模型 ID）</td><td>401/403 = API Key；400/404 = 模型 ID 或地址；402 = 余额；<b>503/429 = 服务方忙，稍后再扫</b></td></tr>
+<tr><td>中间件</td><td>在集群里连中间件端口；接口路径前缀已设置</td><td>查网络策略的中间件网段；签名在冒烟时核对</td></tr>
+<tr><td>白名单核对</td><td>导出文件已上传；或只读账号连得上、读到几条</td><td>见 8.3</td></tr>
+<tr><td>统一认证</td><td>信任凭据、冒烟工号的中间件令牌</td><td>请平台开通冒烟工号</td></tr>
+<tr><td>集群余量</td><td>可分配内存</td><td>按槽位在线替换不额外占用</td></tr>
+</table>
+<h3>6.2 黄色提示的例子</h3>
+<figure><a href="img/21-scan-warn.png"><img src="img/21-scan-warn.png" alt="扫描标黄" loading="lazy"></a>
+<figcaption><b>图 6 扫描标黄。</b>发版台自带的 kubectl 1.31 与集群 1.36 相差 5 个小版本，「Kubernetes」一项标黄并写明处理办法（启动时用 <code>--kubectl</code> 换成集群配套的）；
+黄色不挡发布，红色挡。</figcaption></figure>
+</section>
+
+<section class="card" id="s7">
+<h2>7. 升级计划</h2>
+<p>「发布」页上方选目标版本（默认是比当前新的最新一个），扫描通过后显示<b>本次计划</b>与地铁线：12 个步骤分「准备 / 确认 / 替换 / 验证」四段，
+跳过的步骤写明原因（例如回滚时白名单、知识库标准包不动）。</p>
+<figure><a href="img/12-plan.png"><img src="img/12-plan.png" alt="升级计划" loading="lazy"></a>
+<figcaption><b>图 7 准备就绪。</b>扫描 9/9 可用；计划「升级 · agent-v1.4.3 → agent-v1.4.4 · 池子按槽位在线替换」；地铁线下方写明需要人参与的地方——
+变更预览确认、白名单未通过时、请求长时间不结束时。点「开始发布」开跑。</figcaption></figure>
+<table>
+<tr><th style="width:6%">#</th><th style="width:17%">步骤</th><th>做什么</th></tr>
+<tr><td>1</td><td>读包与校验</td><td>核 sha256、读 release.yaml、核对包里每个镜像的 digest</td></tr>
+<tr><td>2</td><td>生成升级计划</td><td>识别集群当前版本（网关、用户镜像标签、池子三处），累计中间各版本的变化（跳版本升级时一起做）</td></tr>
+<tr><td>3</td><td>镜像入库</td><td>推进内网仓库，已有的层跳过，推完回读 digest；集群里的镜像<b>按 digest 钉住</b></td></tr>
+<tr><td>4</td><td>配置迁移</td><td>按第 5 章迁移配置、渲染清单、生成与集群的差异</td></tr>
+<tr><td>5</td><td><b>变更预览 · 确认</b></td><td>停下来等运维看差异后确认（8.2），确认前不改集群</td></tr>
+<tr><td>6</td><td>白名单核对</td><td>逐条核对，没齐就停下等补登记（8.3）</td></tr>
+<tr><td>7</td><td>网关滚动更新</td><td>应用配置与清单，网关滚动更新并等就绪</td></tr>
+<tr><td>8</td><td>池子在线替换</td><td>逐个槽位替换（8.4）；目标版本没声明可与当前版本混跑时，改为逐个 Pod 整体替换（其余 Pod 照常服务）</td></tr>
+<tr><td>9</td><td>导入环境</td><td>版本要求时删掉旧的知识库导入容器（NAS 数据不动）</td></tr>
+<tr><td>10</td><td>知识库标准包</td><td>跑一次安装 Job（同版本跳过）</td></tr>
+<tr><td>11</td><td>冒烟验证</td><td>模拟登录、真实对话、诊断报告、知识库检索（8.6）</td></tr>
+<tr><td>12</td><td>完成</td><td>记下当前版本与配置版本，生成发布报告</td></tr>
+</table>
+</section>
+
+<section class="card" id="s8">
+<h2>8. 执行发布</h2>
+
+<h3 id="s8-1">8.1 流程与实时日志</h3>
+<figure><a href="img/16-release-done.png"><img src="img/16-release-done.png" alt="发布完成" loading="lazy"></a>
+<figcaption><b>图 8 发布页全貌（一次升级做完）。</b>上：版本、进度、暂停 / 续跑 / 回滚按钮；中：扫描结果与地铁线（每步的用时）；下左：集群架构大盘（网关副本、池子每个槽位的状态与版本）；
+下右：实时日志（全部步骤）。点地铁线上任一步进入这一步的明细。</figcaption></figure>
+
+<h3 id="s8-2">8.2 变更预览 · 确认（关卡）</h3>
+<p>渲染出的清单与集群现状做 <code>kubectl diff</code>，只留对象名与真正变化的行。<b>敏感值不显示</b>，Secret 与网关为用户建的容器不在这里。
+一次性的标准包 Job 不进差异，在末尾单独列一行。</p>
+<div class="grid2">
+<figure><a href="img/10-gate-review.png"><img src="img/10-gate-review.png" alt="确认关卡" loading="lazy"></a><figcaption><b>图 9 停在关卡上。</b>地铁线第 5 步变橙「需要处理」，下方给出「查看变更并确认」。</figcaption></figure>
+<figure><a href="img/11-step-review.png"><img src="img/11-step-review.png" alt="变更预览" loading="lazy"></a><figcaption><b>图 10 变更预览明细。</b>红色是集群里现在的，绿色是要改成的；镜像写成「标签@digest」。右上「取消发布 / 确认并继续」。</figcaption></figure>
+</div>
+<div class="warn"><b>确认前看什么</b>① 只有本版本该变的对象（镜像、版本说明里列的配置项）；② 知识库管理员名单（<code>agent-roles</code>）、出网地址等现场改过的值<b>没有</b>出现在减号行里；
+③ 没有意外的删除。看不懂的差异先「取消发布」再问我方，取消不会改动集群。</div>
+
+<h3 id="s8-3">8.3 白名单核对</h3>
+<p>把本版本应有的每个脚本（名字、正文 md5、参数）与中间件库 <code>grmp.script_config</code> 里 <code>scene='AGENT'</code> 的登记逐条比对，分六类：
+已登记且一致 / 未登记 / 正文不一致 / 参数不一致 / 重名 / 未生效。中间件里多出来的、本版本不需要的脚本只列出，不算失败。</p>
+<div class="grid2">
+<figure><a href="img/13-gate-whitelist.png"><img src="img/13-gate-whitelist.png" alt="白名单关卡" loading="lazy"></a><figcaption><b>图 11 白名单没齐。</b>第 6 步停下：「未通过：未登记 2 条」，可以导出未成功清单发给白名单团队。</figcaption></figure>
+<figure><a href="img/14-step-whitelist.png"><img src="img/14-step-whitelist.png" alt="白名单明细" loading="lazy"></a><figcaption><b>图 12 核对明细。</b>应有 128、一致 126、未登记 2，逐条列出脚本名。补登记后点「已补登记，重新核对」。</figcaption></figure>
+</div>
+<table>
+<tr><th style="width:18%">方式</th><th>怎么做</th></tr>
+<tr><td>导出文件</td><td>白名单团队执行资源配置页给出的 SELECT，结果存成 CSV，在「资源配置 · 白名单核对」上传；补登记后重新导出、上传，再点「已补登记，重新核对」。</td></tr>
+<tr><td>只读账号</td><td>发版台直接连中间件库查（只读会话、30 秒语句超时）。账号只需 schema <code>grmp</code> 的 USAGE 与这张表的 SELECT。
+<b>GaussDB 默认的 sha256 认证标准客户端不认</b>：只读账号要在 <code>password_encryption_type</code> 为 0 或 1 时创建、pg_hba 对跳板机用 md5；做不到就用导出文件。
+连不上时扫描会写明是认证方式、口令、pg_hba、库名、权限还是网络。</td></tr>
+</table>
+
+<h3 id="s8-4">8.4 池子在线替换</h3>
+<p>每个槽位：<b>在用的先等不忙</b>（距上次回答结束 ≥ 10 秒）→ <b>转保留</b>（他的会话与文件写回 NAS）→ <b>腾挪并换这个容器的镜像</b> → 核验新容器（新容器 ID、握手、空盘）→ 空闲（新版本）。
+管家最后换，且等本 Pod 所有槽位都不忙；换管家时在用的人被转保留，下一句自动恢复。</p>
+<div class="grid2">
+<figure><a href="img/15-pool-running.png"><img src="img/15-pool-running.png" alt="替换进行中" loading="lazy"></a><figcaption><b>图 13 替换进行中。</b>槽位 0 正在转保留（黄色），日志里是写回 NAS 的结果；槽位 1 与管家还是旧版本。</figcaption></figure>
+<figure><a href="img/03-step-pool.png"><img src="img/03-step-pool.png" alt="替换完成" loading="lazy"></a><figcaption><b>图 14 替换完成。</b>两个槽位与管家都是新版本，这一步用时 9 秒；日志里每个槽位换到的镜像都带 digest。</figcaption></figure>
+</div>
+<div class="warn"><b>一直「等不忙」</b>有人正在等一个很长的回答。等满 30 分钟交给运维选择：「继续等待」，或「强制转保留」（先把他的数据写回 NAS，这次回答会中断）。</div>
+
+<h3 id="s8-5">8.5 导入环境与知识库标准包</h3>
+<p>版本要求时（版本说明「升级前先看」会写），第 9 步删掉现有的知识库导入容器（<code>role=kb-import</code>），NAS 上的数据不动，管理员下次进入导入环境时按新版本重建。
+第 10 步跑本版本的标准包安装 Job（Job 名带版本号，如 <code>kbstd-install-v1-4-4</code>）：内容相同的跳过；同名 Job 已在而镜像不同时删掉重跑；旧版本的 Job 删掉。</p>
+
+<h3 id="s8-6">8.6 冒烟验证</h3>
+<p>经网关走用户的真实路径：① 冒烟工号模拟登录（不带信任凭据必须被拒）；② 一次真实对话；③ 一份只读诊断报告；④ 一次知识库检索。</p>
+<figure><a href="img/04-step-smoke.png"><img src="img/04-step-smoke.png" alt="冒烟" loading="lazy"></a>
+<figcaption><b>图 15 冒烟失败后续跑。</b>这一次第一遍时模型服务方过载（日志里红色的 <code>Service is too busy</code>），冒烟停下；服务方恢复后从这一步续跑，4 项全部通过（尝试 2 次）。</figcaption></figure>
+
+<h3 id="s8-7">8.7 完成与发布报告</h3>
+<figure><a href="img/05-report.png"><img src="img/05-report.png" alt="发布报告" loading="lazy"></a>
+<figcaption><b>图 16 发布报告。</b>完成页点「发布报告」：类型、版本、配置版本、总用时与各步用时。这是测试环境的一次真实升级：总用时 2 分 2 秒，其中变更预览等运维确认 30 秒、3 个 Pod × 3 个槽位在线替换 34 秒、冒烟 42 秒。</figcaption></figure>
+</section>
+
+<section class="card" id="s9">
+<h2>9. 暂停、续跑与回滚</h2>
+<table>
+<tr><th style="width:16%">操作</th><th>说明</th></tr>
+<tr><td>暂停</td><td>在两步之间生效（长等待里也能停下）；停下后点「续跑」接着来。</td></tr>
+<tr><td>失败</td><td>停在那一步，日志里写着原因；处理后点「从这一步续跑」——每一步都能重复执行，只补做没做完的部分。</td></tr>
+<tr><td>取消</td><td>在确认关卡上点「取消发布」：集群没有改动。</td></tr>
+<tr><td>回滚</td><td>以上一个版本为目标再走一遍：镜像已在仓库，白名单、导入环境、知识库标准包不动；资源配置用当前的，集群里现场改过的配置值照样保留。
+在「发布」页点「回滚」并选比当前旧的版本（它的离线包要还在发布包目录里）。</td></tr>
+<tr><td>发版台重启</td><td>正在执行的步骤标「被中断」、整次发布停在「暂停」；停在关卡上的照旧停在关卡上。</td></tr>
+</table>
+<figure><a href="img/08-history.png"><img src="img/08-history.png" alt="历史与回滚" loading="lazy"></a>
+<figcaption><b>图 17 历史与回滚。</b>每次发布的类型（首次部署 / 升级 / 回滚）、版本、结果、开始时间与用时；点「查看」看那次发布的每一步与日志。回滚也是一次发布，走同一套流程。</figcaption></figure>
+</section>
+
+<section class="card" id="s10">
+<h2>10. 发布包与操作记录</h2>
+<div class="grid2">
+<figure><a href="img/06-packages.png"><img src="img/06-packages.png" alt="发布包" loading="lazy"></a><figcaption><b>图 18 发布包。</b>发布包目录里的每个版本：架构、状态（缺文件、链接看不到等会标出来）、白名单条数、本版本提醒（不自动做的事，如按需授权），「预览计划」看从当前版本到它要做哪些步骤。</figcaption></figure>
+<figure><a href="img/09-audit.png"><img src="img/09-audit.png" alt="操作记录" loading="lazy"></a><figcaption><b>图 19 操作记录。</b>谁在什么时候做了什么：开始发布、每个关卡的选择、上传导出文件、改配置（只记配置项名，不记密钥的值）。</figcaption></figure>
+</div>
+</section>
+
+<section class="card" id="s11">
+<h2>11. 安全</h2>
+<ul>
+<li>不做登录，只听跳板机本机；别的机器经 ssh 转发访问。</li>
+<li>以启动它的跳板机用户身份运行（不是 root）；状态目录权限 0700、库文件 0600；日志与界面不出现密钥值，写进集群的密钥只留指纹。</li>
+<li>对集群的改动全部经过「变更预览 · 确认」；不 <code>apply -k</code>，不删命名空间、PV。网关为用户建的诊断容器不动；知识库导入容器只在版本要求时删除（NAS 数据不动）。</li>
+<li>推进内网仓库的镜像按 digest 钉住：同一标签换过内容时，节点不会接着用缓存的旧镜像。</li>
+</ul>
+</section>
+
+<section class="card" id="s12">
+<h2>12. 常见问题</h2>
+<table>
+<tr><th style="width:34%">现象</th><th>原因与处理</th></tr>
+<tr><td>启动脚本说「没有本机架构的发版台镜像」</td><td>包目录里缺 <code>gaussdb-agent-release-*-&lt;架构&gt;.tar.gz</code>，重新拷包</td></tr>
+<tr><td>启动脚本说「sha256 对不上」</td><td>包拷坏了，重新拷</td></tr>
+<tr><td>扫描「Kubernetes」失败，日志里是 exec / plugin</td><td>kubeconfig 用了 exec 认证插件，换成令牌或证书方式的 kubeconfig</td></tr>
+<tr><td>扫描「Kubernetes」标黄，说相差几个小版本</td><td><code>release-console.sh --kubectl &lt;集群配套的 kubectl&gt;</code> 重启</td></tr>
+<tr><td>发布包在列表里标红「是链接，看不到」</td><td>发布包目录里用了指向别处的链接，拷真文件进来</td></tr>
+<tr><td>扫描「模型服务」标黄 503 / 429</td><td>模型服务方忙，稍后再扫；这时发布，冒烟会停下等续跑</td></tr>
+<tr><td>白名单只读账号报「认证方式标准客户端不支持」</td><td>GaussDB 的 sha256 认证：请 DBA 按 md5 建只读账号，或改用导出文件</td></tr>
+<tr><td>池子替换一直「等不忙」</td><td>有人正在等回答；30 分钟后可选「继续等待」或「强制转保留」</td></tr>
+<tr><td>冒烟「真实对话」失败，原文是 Service is too busy</td><td>模型服务方过载，稍后从冒烟这一步续跑</td></tr>
+<tr><td>需要我方协助</td><td>把<b>状态目录</b>打包发来（不含密钥值）</td></tr>
+</table>
+</section>
+
+<section class="card" id="s13">
+<h2>13. 相关文档</h2>
+<ul>
+<li><a href="../deploy/v1.4.4/">部署上线方案 v1.4.4</a>：第 14 章「升级」（推荐用发版台，也有手工做法）、第 15 章「回滚」</li>
+<li><a href="https://github.com/sqlrush/gh_gs_k8s_agent/blob/main/docs/发版台-运维手册.md">发版台运维手册（markdown 版）</a></li>
+<li><a href="https://github.com/sqlrush/gh_gs_k8s_agent/blob/main/docs/代码结构说明.md">代码结构说明</a>：<code>release/</code> 一节逐个文件说明</li>
+</ul>
+</section>
+
+<footer>发版台使用手册 · gh_gs_k8s_agent · 截图于 2026-11-03 在测试环境（OrbStack 单节点 K8s）实际操作时截取，Appkey 等为截图隐去</footer>
+</main>
+</div>
+</body>
+</html>

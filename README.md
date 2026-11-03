@@ -8,7 +8,8 @@ GaussDB 数据库智能体的**后端**：把 opencode 与 GaussDB / openGauss �
 | 文档 | 给谁 | 内容 |
 |---|---|---|
 | [docs/部署上线方案-v1.4.4.md](docs/部署上线方案-v1.4.4.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/deploy/v1.4.4/)） | 项目经理 / 各方团队 | **从拉代码到部署上线的完整方案**（agent-v1.4.4）：系统组成与安全设计、各方分工与检查单、构建（或直接拉我方发布的镜像）、白名单导入、部署、开通、验收、固定池化、知识库、统一认证与前端、**发版台**（跳板机上一条命令起：资源扫描、变更预览确认、按槽位在线替换、冒烟验证）、知识库处置的「取代」、从 v1.4.3 / v1.4.2 / v1.4.1 / v1.4.0 / v1.3.x 升级、回滚、运维，附全部 128 条白名单脚本 |
-| [docs/发版台-运维手册.md](docs/发版台-运维手册.md) | 运维 | 发版台的跳板机要求、启动、资源配置、扫描、发布 / 续跑 / 回滚、白名单核对两种方式、常见问题 |
+| [发版台使用手册（带截图，在线查看）](https://sqlrush.github.io/gh_gs_k8s_agent/release-console/)（源 [docs/release-console/](docs/release-console/)） | 运维 | **发版台怎么用，每一步配界面截图**：准备与启动、资源配置、资源扫描、升级计划、变更预览确认、白名单核对、池子在线替换、冒烟、发布报告、暂停 / 续跑 / 回滚、常见问题 |
+| [docs/发版台-运维手册.md](docs/发版台-运维手册.md) | 运维 | 同上的文字版：跳板机要求、启动、资源配置、扫描、发布 / 续跑 / 回滚、白名单核对两种方式、常见问题 |
 | [docs/部署上线方案-v1.4.3.md](docs/部署上线方案-v1.4.3.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/deploy/v1.4.3/)） | 留档 | 上一版（agent-v1.4.3）的部署上线方案 |
 | [docs/部署上线方案-v1.4.2.md](docs/部署上线方案-v1.4.2.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/deploy/v1.4.2/)） | 留档 | 上一版（agent-v1.4.2）的部署上线方案 |
 | [docs/部署上线方案-v1.4.1.md](docs/部署上线方案-v1.4.1.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/deploy/v1.4.1/)） | 留档 | 上一版（agent-v1.4.1）的部署上线方案 |
