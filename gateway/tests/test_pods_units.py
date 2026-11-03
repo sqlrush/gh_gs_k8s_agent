@@ -341,3 +341,14 @@ def test_retire_deletes_one_container_and_nothing_else():
     _mgr(k).retire("u2001", pods.KIND_KB_IMPORT)
     assert sorted(k.deleted) == [("deployments", "kb-import-u2001"), ("services", "kb-import-u2001")], \
         "闲置回收不能删口令和平台签发的 grmp-token"
+
+
+# --- 命名空间:网关在哪个命名空间,用户容器就建在哪个 -----------------------------------------------
+
+@pytest.mark.parametrize("kind", ["runtime", "kb-import"])
+def test_user_pods_go_to_the_gateways_namespace_not_the_one_written_in_the_template(kind):
+    """模板里写死了 namespace: gaussdb-agent;网关部署在别的命名空间时,按它建用户容器会被 apiserver 拒(400 the namespace of the
+    provided object does not match)—— 按需模式的用户与知识库管理员的导入环境全都进不去(2026-11-03 演练命名空间 gaussdb-rel 实测)。"""
+    mgr = _mgr(FakeKube(), namespace="gaussdb-rel")
+    docs = mgr._render(kind, "u1234")
+    assert docs and all(d["metadata"]["namespace"] == "gaussdb-rel" for d in docs)

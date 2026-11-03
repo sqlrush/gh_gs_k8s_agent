@@ -11,6 +11,7 @@ import json
 import os
 import pathlib
 import sys
+import time
 
 _HERE = pathlib.Path(__file__).resolve()
 sys.path.insert(0, str(_HERE.parent))           # 兄弟模块 kb_cite
@@ -210,6 +211,21 @@ def _docsets_summary(kb: pathlib.Path) -> list:
     return out
 
 
+def _share_health(kb: pathlib.Path, d: dict) -> None:
+    """知识库可写(导入环境)时,状态另写一份到共享知识库 index/health.json。
+
+    个人报告在导入环境写进 admins/<工号>/reports,而大盘只读诊断环境那份 —— 知识库管理员照大盘的提示「在会话里查一次」
+    却看不到(2026-11-03 客户反馈,测试环境复现)。报告服务在本人那份缺失或更旧时读这一份。状态本来就是共享知识库的
+    (索引、文档集、收件目录、缺口都在知识库目录里),不该按人和环境分开存。写失败只 warn。"""
+    from common.kb import atomic
+    try:
+        # 与个人那份同样隐去说明文字里的路径与地址(大盘没有模型那道输出自检,红线第 5 条)
+        atomic.write_text_atomic(kb / "index" / "health.json",
+                                 json.dumps(reports._redact_prose(d), ensure_ascii=False, indent=2))
+    except OSError as exc:
+        print("[warn] 共享状态报告没写成(大盘可能看不到这次的状态):%s" % exc, file=sys.stderr)
+
+
 def cmd_health(args: argparse.Namespace) -> int:
     kb = kbconfig.resolve_kb_dir(args.kb)
     if not kb.is_dir():
@@ -221,7 +237,7 @@ def cmd_health(args: argparse.Namespace) -> int:
     finally:
         sess.close()
     readonly = not os.access(kb, os.W_OK)
-    d = health_dict(kb, status, file_warnings, readonly)
+    d = dict(health_dict(kb, status, file_warnings, readonly), at=round(time.time(), 3))
     if getattr(args, "json", False):
         print(json.dumps(d, ensure_ascii=False, indent=2))
     else:
@@ -265,6 +281,8 @@ def cmd_health(args: argparse.Namespace) -> int:
             print(f"[error] 知识库未接入:{status.reason}")
     # 每次覆盖 kb/health.json:大盘知识库页读它;失败只 warn,不改退出码
     reports.announce("kb", reports.archive("kb", d, name="health"), "")   # 标准错误:大盘知识库页的直达链接
+    if not readonly:
+        _share_health(kb, d)
     if not status.attached:
         return 2
     return 2 if d["pending"] else 0

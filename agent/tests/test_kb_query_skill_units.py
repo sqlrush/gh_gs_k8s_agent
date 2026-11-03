@@ -114,3 +114,32 @@ def test_health_says_read_only_when_kb_dir_is_not_writable(tmp_path, capsys):
 def test_health_has_no_read_only_line_when_writable(tmp_path, capsys):
     _load(_Q, "kb").main(["health", "--kb", str(_kb(tmp_path))])
     assert "知识库只读" not in capsys.readouterr().out
+
+
+def test_health_in_a_writable_kb_also_writes_the_shared_copy(tmp_path, monkeypatch):
+    """导入环境(知识库可写)里查状态:个人报告写进 admins/<工号>/reports,大盘读的是诊断环境那份 —— 管理员照着大盘的提示
+    「在会话里查一次」却看不到(2026-11-03 客户反馈,测试环境复现)。所以可写时另写一份到共享知识库 index/health.json。"""
+    import json
+    monkeypatch.setenv("GSDB_REPORTS_DIR", str(tmp_path / "admin-reports"))
+    kb = _kb(tmp_path)
+    _load(_Q, "kb").main(["health", "--kb", str(kb)])
+    shared = json.loads((kb / "index" / "health.json").read_text(encoding="utf-8"))
+    personal = json.loads((tmp_path / "admin-reports" / "kb" / "health.json").read_text(encoding="utf-8"))
+    assert shared["readonly"] is False and shared["at"] > 0 and shared == personal
+
+
+def test_health_in_a_read_only_kb_writes_no_shared_copy(tmp_path, monkeypatch):
+    import os
+    if os.geteuid() == 0:
+        pytest.skip("root 不受目录权限约束")
+    monkeypatch.setenv("GSDB_REPORTS_DIR", str(tmp_path / "reports"))
+    kb = _kb(tmp_path)
+    (kb / "index").mkdir()
+    kb.chmod(0o500)
+    (kb / "index").chmod(0o500)
+    try:
+        _load(_Q, "kb").main(["health", "--kb", str(kb)])
+    finally:
+        (kb / "index").chmod(0o700)
+        kb.chmod(0o700)
+    assert not (kb / "index" / "health.json").exists() and (tmp_path / "reports" / "kb" / "health.json").is_file()

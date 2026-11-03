@@ -575,3 +575,48 @@ def test_no_aliases_means_no_alias_keys():
     import yaml
     cfg = yaml.safe_load(podctl.render_gdaa_config({"GRMP_API_HOST": "grmp.internal", "GRMP_INSTANCE_ALIASES": "  "}))
     assert "instance_aliases" not in cfg and "instance_aliases_errors" not in cfg
+
+
+def _kb_health_server(tmp_path, personal=None, shared=None, kb_dir=True):
+    root = tmp_path / "reports"
+    (root / "kb").mkdir(parents=True)
+    kb = tmp_path / "kb"
+    (kb / "index").mkdir(parents=True)
+    for path, (obj, mtime) in ((root / "kb" / "health.json", personal or (None, 0)), (kb / "index" / "health.json", shared or (None, 0))):
+        if obj is not None:
+            path.write_text(json.dumps(obj), encoding="utf-8")
+            os.utime(path, (mtime, mtime))
+    srv = podctl.make_reports_server(root, 0, kb_dir=kb if kb_dir else None)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, kb
+
+
+def test_kb_health_falls_back_to_the_shared_copy(tmp_path):
+    """管理员在导入环境查的状态写在共享知识库 index/health.json;本人诊断环境里没有时,大盘读到共享那份。"""
+    srv, kb = _kb_health_server(tmp_path, shared=({"readonly": False, "at": 2, "pending": []}, 2000))
+    try:
+        st, h, body = _get(srv.server_address[1], "/kb/health.json")
+        d = json.loads(body)
+        assert st == 200 and h["cache-control"] == "no-store" and d["source"] == "shared" and d["at"] == 2
+        assert d["readonly"] is (not os.access(kb, os.W_OK)), "可写与否按报告服务自己所在的环境说,不照抄导入环境的"
+    finally:
+        srv.shutdown(); srv.server_close()
+
+
+@pytest.mark.parametrize("personal_t,shared_t,want", [(3000, 2000, "personal"), (1000, 2000, "shared")])
+def test_kb_health_serves_whichever_is_newer(tmp_path, personal_t, shared_t, want):
+    srv, _kb = _kb_health_server(tmp_path, personal=({"at": personal_t}, personal_t), shared=({"at": shared_t}, shared_t))
+    try:
+        assert json.loads(_get(srv.server_address[1], "/kb/health.json")[2])["source"] == want
+    finally:
+        srv.shutdown(); srv.server_close()
+
+
+def test_kb_health_is_404_when_neither_exists_and_personal_only_without_kb_dir(tmp_path):
+    srv, _kb = _kb_health_server(tmp_path)
+    bare, _k = _kb_health_server(tmp_path / "b", personal=({"at": 1}, 1000), kb_dir=False)
+    try:
+        assert _get(srv.server_address[1], "/kb/health.json")[0] == 404
+        assert json.loads(_get(bare.server_address[1], "/kb/health.json")[2]) == {"at": 1}, "没给 kb_dir 时照旧原样给文件"
+    finally:
+        srv.shutdown(); bare.shutdown()

@@ -141,7 +141,12 @@ class Manager:
             IMAGE=self.image_for(kind),
             IMAGE_PULL_POLICY=self.pull_policy,
             SUBPATH_ROOT="admins" if kind == KIND_KB_IMPORT else "users")
-        return _split_yaml_docs(rendered)
+        docs = _split_yaml_docs(rendered)
+        # 模板里写的是 gaussdb-agent;网关部署在别的命名空间时按它建会被 apiserver 拒(400),按需用户与导入环境全进不去
+        # (2026-11-03 演练命名空间实测)。一律落在网关自己的命名空间
+        for d in docs:
+            d.setdefault("metadata", {})["namespace"] = self.namespace
+        return docs
 
     def image_for(self, kind: str) -> str:
         name = "gaussdb-agent-%s:%s" % (kind, self.image_tag)

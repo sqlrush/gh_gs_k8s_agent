@@ -419,6 +419,7 @@ def make_reports_server(root: pathlib.Path, port: int, user_id: str = "", kb_dir
     但不共用端口 —— opencode 的 API 有口令,这个端口的鉴权靠网关只把本人的请求路由过来。
     唯一不是文件的路径是 /whoami.json:回 GSDB_USER_ID(平台按 Pod 注入),大盘侧栏显示工号用。
     不从目录里读 —— 目录里的东西用户自己能改,工号不能让他改。
+    /kb/health.json 给了 kb_dir 时也不是原样给文件:本人那份与共享知识库 index/health.json 取较新的(见 _kb_health)。
     另一条不是文件的路径是 /_kb/catalog.json:大盘知识库页签的目录,由 kbcatalog 从共享知识库现读现算
     (只读案例 / 现行条款 / 已确认的边,不读收件目录与原件)。没给 kb_dir 就没有这条路。
     「目录」页签按渐进式披露一层层取(kboutline,2026-10-25):/_kb/outline.json(L0 + L1)、
@@ -469,6 +470,8 @@ def make_reports_server(root: pathlib.Path, port: int, user_id: str = "", kb_dir
                 self.end_headers()
                 self.wfile.write(data)
                 return
+            if rel == "kb/health.json" and kb_dir is not None:
+                return self._kb_health()
             if rel == "whoami.json":
                 data = json.dumps({"user_id": user_id}).encode("utf-8")
                 self.send_response(200)
@@ -489,6 +492,35 @@ def make_reports_server(root: pathlib.Path, port: int, user_id: str = "", kb_dir
                 return self._status(404)
             self.send_response(200)
             self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _kb_health(self):
+            """知识库状态:本人那份与共享知识库 index/health.json 取较新的(2026-11-03)。
+
+            管理员在导入环境查的状态,本人那份写进了 admins/<工号>/reports,诊断环境这里读不到;共享那份由导入环境的
+            kb.py health 写。共享那份的「可写」是导入环境的,这里按本端口所在环境改写(诊断环境的知识库是只读挂载)。"""
+            cands = []
+            for src, path in (("personal", root / "kb" / "health.json"), ("shared", pathlib.Path(kb_dir) / "index" / "health.json")):
+                try:
+                    cands.append((path.stat().st_mtime, src, path))
+                except OSError:
+                    pass
+            if not cands:
+                return self._status(404)
+            _mtime, src, path = max(cands)
+            try:
+                obj = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return self._status(404)
+            if src == "shared":
+                obj["readonly"] = not os.access(str(kb_dir), os.W_OK)
+            obj["source"] = src
+            data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", _REPORT_TYPES[".json"])
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
