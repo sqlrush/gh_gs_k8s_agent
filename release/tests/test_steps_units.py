@@ -8,12 +8,14 @@ import tarfile
 import time
 
 import pytest
+import yaml
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_ROOT))
 
 from release import steps, whitelist  # noqa: E402
 from release.engine import Engine, StepFailed  # noqa: E402
+from release.kube import Result  # noqa: E402
 from release.package import Package  # noqa: E402
 from release.store import Store  # noqa: E402
 
@@ -145,3 +147,54 @@ def test_pushed_images_are_pinned_by_digest_preloaded_ones_are_not():
     cfg = {"registry.prefix": "reg.x/ns/"}
     assert steps.render_runtime_image(cfg, "agent-v1.4.4-oc1.18.27", d) == "reg.x/ns/gaussdb-agent-runtime:agent-v1.4.4-oc1.18.27@" + d
     assert steps.render_runtime_image({}, "agent-v1.4.4-oc1.18.27") == "gaussdb-agent-runtime:agent-v1.4.4-oc1.18.27"
+
+
+def _job(name, image):
+    return {"apiVersion": "batch/v1", "kind": "Job", "metadata": {"name": name, "labels": {"app": "gaussdb-kbstd"}},
+            "spec": {"template": {"spec": {"initContainers": [{"name": "fetch", "image": image}],
+                                           "containers": [{"name": "install", "image": "kb-import:" + image.split(":", 1)[1]}]}}}}
+
+
+class JobKube(FakeKube):
+    def __init__(self, existing=None):
+        super().__init__()
+        self.jobs, self.calls = dict(existing or {}), []
+
+    def get(self, kind, name, namespaced=True):
+        return self.jobs.get(name) if kind == "job" else super().get(kind, name, namespaced)
+
+    def delete(self, kind, name="", selector="", wait=True):
+        self.calls.append(("delete", name)); self.jobs.pop(name, None)
+
+    def apply(self, manifest):
+        for d in yaml.safe_load_all(manifest):
+            if d["metadata"]["name"] in self.jobs and steps.job_images(self.jobs[d["metadata"]["name"]]) != steps.job_images(d):
+                raise RuntimeError("field is immutable")
+            self.jobs[d["metadata"]["name"]] = d; self.calls.append(("apply", d["metadata"]["name"]))
+
+    def run(self, args, **kw):
+        return Result(0, "", "")
+
+    def logs(self, target, container="", tail=200):
+        return "[skipped] G25132C 已是这个版本"
+
+    def list(self, kind, selector="", namespaced=True):
+        return list(self.jobs.values()) if kind == "jobs" else super().list(kind, selector, namespaced)
+
+
+@pytest.mark.parametrize("old_image, deleted", [("kbstd:v4@sha256:old", True), ("kbstd:v4@sha256:new", False)])
+def test_kbstd_job_with_the_same_name_but_other_images_is_recreated(tmp_path, old_image, deleted):
+    """Job 模板改不了:同一版本的 Job 已在(上次同版本、演练包、手工 apply)而镜像不同时,apply 会报 field is immutable ——
+    2026-11-03 真 v1.4.4 演练撞上。删掉重跑;镜像相同就照旧 apply(安装内容相同会跳过)。"""
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(yaml.safe_dump(_job("kbstd-install-v1-4-4", "kbstd:v4@sha256:new")), encoding="utf-8")
+    kube = JobKube({"kbstd-install-v1-4-4": _job("kbstd-install-v1-4-4", old_image)})
+    store = Store(tmp_path / "e.db")
+    svc = steps.Services(store=store, kube=kube, releases=tmp_path, state=tmp_path)
+    eng = Engine(store, {"prep": lambda ctx: ctx.share(rendered=str(rendered)), "kbstd": steps.step_kbstd},
+                 services={"svc": svc}, sleep=lambda _s: None, poll_s=0.01)
+    rid = eng.start("upgrade", "v3", "v4", [{"id": "prep", "subs": ["a"]}, {"id": "kbstd", "subs": ["a", "b", "c"]}], {"to_tag": "t"}, None)
+    eng.wait()
+    assert store.run(rid)["status"] == "done", store.run(rid)["error"]
+    assert (("delete", "kbstd-install-v1-4-4") in kube.calls) == deleted
+    assert ("apply", "kbstd-install-v1-4-4") in kube.calls

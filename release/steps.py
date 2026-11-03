@@ -216,7 +216,12 @@ def step_config(ctx: Ctx) -> None:
         pool_file = str(run_dir / "pool.yaml")
     ctx.sub(3, "done", "%d 个对象" % len(out.docs))
     ctx.sub(4, "running")
-    diff = kube.diff(out.yaml()) if "Namespace/" + kube.namespace in existing else "(命名空间还不存在:全部新建)"
+    # 一次性 Job 不进差异:模板建好就改不了,同名、模板不同时 kubectl diff 本身就报错(在「知识库标准包」一步删掉重跑)
+    rest = [d for d in out.docs if d.get("kind") != "Job"]
+    jobs = ["== Job %s:在「知识库标准包」一步新建(同名已有、镜像不同就删掉重跑;内容相同的安装会跳过)" % d["metadata"]["name"]
+            for d in out.docs if d.get("kind") == "Job"]
+    diff = (kube.diff(yaml.safe_dump_all(rest, allow_unicode=True, sort_keys=False)) if "Namespace/" + kube.namespace in existing
+            else "(命名空间还不存在:全部新建)") + "".join("\n" + j for j in jobs)
     (run_dir / "diff.txt").write_text(_mask_cm_values(clean_diff(diff)), encoding="utf-8")
     vid = svc.store.save_config(cfg, "发布 #%d 渲染(%s)" % (ctx.run_id, ctx.plan["to_v"]))
     svc.store.update_run(ctx.run_id, config_version=vid)
@@ -453,6 +458,10 @@ def step_kbstd(ctx: Ctx) -> None:
     if not jobs:
         raise StepFailed("目标版本的清单里没有知识库标准包安装 Job")
     name = jobs[0]["metadata"]["name"]
+    have = kube.get("job", name)
+    if have is not None and job_images(have) != job_images(jobs[0]):
+        kube.delete("job", name)                    # Job 模板改不了:同名旧的(上次同一版本、或手工 apply 的)删掉重跑
+        ctx.log("Job %s 已存在但镜像不同,删掉重跑(内容相同的安装会跳过)" % name, "w")
     kube.apply(yaml.safe_dump_all(jobs, allow_unicode=True, sort_keys=False))
     ctx.sub(0, "done", name)
     ctx.sub(1, "running")
@@ -473,6 +482,11 @@ def step_kbstd(ctx: Ctx) -> None:
             ctx.log("删除旧的 Job %s" % old)
     ctx.sub(2, "done", "同版本跳过" if verdict == "[skipped]" else "已安装")
     ctx.detail(("同版本跳过" if verdict == "[skipped]" else "已安装") + " · Completed")
+
+
+def job_images(job: dict) -> List[str]:
+    pod = ((job.get("spec") or {}).get("template") or {}).get("spec") or {}
+    return [c.get("image", "") for c in list(pod.get("initContainers") or []) + list(pod.get("containers") or [])]
 
 
 def step_smoke(ctx: Ctx) -> None:
