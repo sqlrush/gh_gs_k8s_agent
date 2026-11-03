@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>发版台 · GaussDB 智能体</title>
+<link rel="stylesheet" href="/web/style.css">
+<style>
+.pkgsel{min-width:260px}
+.diffv{max-height:520px;overflow:auto}.diffv span{display:block;white-space:pre-wrap}.diffv span.h{margin-top:8px}
+.cfgrow{display:grid;grid-template-columns:200px 1fr;gap:8px 14px;align-items:center;margin-bottom:8px}
+.cfgrow label{color:var(--ink2);font-size:13px}.cfgrow label small{display:block;color:var(--muted);font-size:11px;font-family:ui-monospace,Menlo,monospace}
+.cfgrow input,.cfgrow select,.cfgrow textarea{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:6px 10px;font:inherit;font-size:13px;background:#fff}
+.cfgrow textarea{min-height:60px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.err-box{border:1.5px solid #fca5a5;background:#fef2f2;border-radius:10px;padding:10px 12px;margin:8px 0;color:#991b1b;font-size:13px}
+.note-box{border:1.5px solid #fcd34d;background:#fffbeb;border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px}
+.empty-state{color:var(--muted);padding:30px;text-align:center}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="logo"><b>发版台</b><span>GaussDB 智能体 · 部署与发布</span></div>
+    <nav class="nav" id="nav">
+      <button data-page="overview"><span class="ic">◧</span>总览</button>
+      <button data-page="release"><span class="ic">▶</span>发布<span class="dot" id="navdot"></span></button>
+      <button data-page="packages"><span class="ic">▤</span>发布包</button>
+      <button data-page="config"><span class="ic">⚙</span>资源配置</button>
+      <button data-page="history"><span class="ic">↺</span>历史与回滚</button>
+      <button data-page="audit"><span class="ic">☰</span>操作记录</button>
+    </nav>
+    <div class="side-foot">发版台 · 独立程序 · 运行在跳板机<br>封闭环境使用 · 不需要登录</div>
+  </aside>
+  <div class="main">
+    <header class="top">
+      <h2 id="ptitle">发布</h2>
+      <span class="pill p-gray" id="envpill">命名空间 —</span>
+      <span class="pill p-gray" id="curver">当前 —</span>
+      <span class="spacer"></span>
+      <div class="local"><i></i><span id="hostinfo">本机访问</span></div>
+    </header>
+
+    <section class="page" id="page-overview"><div id="ov"></div></section>
+
+    <section class="page" id="page-release">
+      <div class="card">
+        <div class="relhead">
+          <span class="ver" id="rfrom">—</span><span class="arrow">→</span><span class="ver" style="color:#047857" id="rto">—</span>
+          <span class="pill p-gray" id="rstatus">未开始</span>
+          <div class="prog"><i id="rprog"></i></div>
+          <span class="muted small" id="rcount">0 / 0</span>
+          <span class="muted small" id="relapsed">用时 00:00</span>
+        </div>
+        <div class="toolbar" style="margin-top:12px">
+          <select class="envsel pkgsel" id="pkgsel"></select>
+          <button class="btn" id="b-scan">⟳ 扫描资源</button>
+          <button class="btn pri" id="b-start" disabled>▶ 开始发布</button>
+          <button class="btn" id="b-pause" disabled>⏸ 暂停</button>
+          <button class="btn" id="b-resume" disabled>⏵ 续跑</button>
+          <button class="btn danger" id="b-rollback" disabled>↺ 回滚</button>
+        </div>
+      </div>
+      <div id="relmain">
+        <div class="card" id="scancard"></div>
+        <div id="planbox"></div>
+        <div class="card"><h3>发布流程 <span class="sub">由 release.yaml 与当前版本生成 · 点任一步进入明细</span></h3><div id="flow"></div></div>
+        <div class="rel-grid">
+          <div class="card"><h3>集群架构大盘 <span class="sub">k8s 实时 + 网关 /admin/pool</span></h3><div id="k8s"></div></div>
+          <div class="card"><h3>实时日志 <span class="sub">本次发布全部步骤</span></h3><div class="console" id="console" style="height:452px"></div></div>
+        </div>
+      </div>
+      <div id="stepview" style="display:none"></div>
+    </section>
+
+    <section class="page" id="page-packages"><div id="pk"></div></section>
+    <section class="page" id="page-config"><div id="cf"></div></section>
+    <section class="page" id="page-history"><div id="hi"></div></section>
+    <section class="page" id="page-audit"><div id="au"></div></section>
+  </div>
+</div>
+<div class="mask-bg" id="mask"><div class="modal"><div class="mh" id="mh"></div><div class="mb" id="mb"></div><div class="mf" id="mf"></div></div></div>
+<div class="toast" id="toast"></div>
+<script src="/web/app.js"></script>
+</body>
+</html>

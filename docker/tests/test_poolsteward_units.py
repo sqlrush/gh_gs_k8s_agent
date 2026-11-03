@@ -672,6 +672,23 @@ def test_a_restarted_free_slot_is_accepted_after_checking_the_wipe(pod):
     assert _wait(lambda: s.rec["boot"] != old and s.state == poolslot.FREE)
 
 
+def test_a_quiet_restart_leaves_no_stale_container_id_for_the_next_lease(pod):
+    """安静的槽位(空闲 / 已确认停下的保留)重启过(崩溃、原地换镜像):管家曾沿用重启前的 containerID,
+    下一个人绑上来记下的就是这个旧 ID;他转保留后回来,网关带来真实的新 ID,对不上 → 409 restarted,
+    网关当成「稍后重试」,这个人一直看到「正在为您准备环境」(2026-11-03 测试环境实测)。"""
+    pod.bind()
+    _retain(pod)
+    s = pod.st.slots[0]
+    old = s.rec["boot"]
+    pod.slots[0].restart()
+    assert _wait(lambda: s.rec["boot"] != old and s.state == poolslot.FREE), pod.logs[-10:]
+    assert pod.bind()[0] == 200
+    assert s.rec["container_id"] == pod.slots[0].container_id, "租期要记重启后的容器"
+    _retain(pod)
+    code, body = pod.resume()
+    assert code == 200 and body["resumed"], body
+
+
 # -- 管家自己重启 ---------------------------------------------------------------------------------
 
 def test_steward_restart_keeps_an_active_slot_active(pod):

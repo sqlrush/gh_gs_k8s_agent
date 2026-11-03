@@ -50,6 +50,8 @@ class SlotView:
     reserved_for: Optional[str] = None
     reserved_until: float = 0.0
     evict_pending: bool = False          # 已发腾挪、等核验(停用的槽位只有带这一条才需要核验)
+    busy: bool = False                   # 槽位回执:会话正在执行(opencode 每 5 秒查一次,管家每 2 秒读)
+    busy_at: float = 0.0                 # 最近一次看到忙的时间
 
     @property
     def ref(self) -> Ref:

@@ -6,3 +6,4 @@ agent/tests
 agent/grmp_middleware/fixtures
 **/__pycache__
 **/*.pyc
+release/tests

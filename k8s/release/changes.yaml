@@ -1,0 +1,47 @@
+# 发版台读的逐版本变化(人写,与 docs/版本说明.md「升级前先看」同步)。打包时 release/pack.py 把它与本次的事实
+# (标签、提交、各镜像平台清单 digest、白名单全量)合成离线包里的 release.yaml。
+#
+# 只写「从新清单推不出来」的东西。新配置项的默认值在 k8s/base 的 ConfigMap 里,发版台按「集群现值 + 新清单默认值」迁移;
+# 新的网络策略、kbstd 安装 Job 也都在新清单里,渲染时自然带上。这里写的是:
+#   mixed_with   新版本能与哪些旧版本同时在线(网关新、池子槽位旧的那段时间)→ 池子按槽位在线替换;不在里面的按 Pod 整体替换
+#   required     必须由客户填写、没有可用默认值的新配置项(没填发版台在开跑前拦下)
+#   steps        新清单表达不了的特有动作:rebuild_kb_import(删 role=kb-import 的 Deployment,NAS 不动)
+#   whitelist    本版本给白名单团队的增量文件(核对按全量,这里只用来告诉运维该交哪个文件)
+#   notes        给运维看的提醒(不自动做的事)
+#
+# 版本从新到旧;第一条必须是本仓库清单里的版本(守卫测试)。min_upgrade_from 之前的版本按《部署上线方案》§14 手工升级。
+min_upgrade_from: agent-v1.4.0
+versions:
+  - version: agent-v1.4.4
+    mixed_with: [agent-v1.4.3]  # 网关先换(摘要带 busy),v1.4.3 的槽位本来就报忙闲;演练环境按槽位在线换过
+    required: []
+    steps: [rebuild_kb_import]    # 导入镜像换了(处置的「取代」)
+    whitelist: []
+    notes: []
+  - version: agent-v1.4.3
+    mixed_with: []              # 没实测过与 v1.4.2 混跑,按 Pod 整体替换
+    required: []
+    steps: []
+    whitelist: [scripts-delta-20261030.sql]
+    notes:
+      - "(按需,由客户 DBA 决定)给中间件执行账号授 ADM_SOURCE 读权限:GRANT SELECT ON pg_catalog.adm_source TO <执行账号>;"
+  - version: agent-v1.4.2
+    mixed_with: []
+    required: []
+    steps: []
+    whitelist: []
+    notes: []
+  - version: agent-v1.4.1
+    mixed_with: []
+    required: []
+    steps: [rebuild_kb_import]
+    whitelist: []
+    notes:
+      - "(按需)启用网页剪藏:agent-config 填 KB_CLIP_ORIGINS(协议://主机[:端口],逗号分隔)"
+  - version: agent-v1.4.0
+    mixed_with: []
+    required:
+      - {map: agent-config, key: GRMP_PATH_PREFIX}
+    steps: [rebuild_kb_import]
+    whitelist: [scripts-delta-20261024.sql, scripts-delta-20261026.sql]
+    notes: []

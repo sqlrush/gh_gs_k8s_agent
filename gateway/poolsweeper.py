@@ -136,7 +136,8 @@ class PoolAdmin:
                           "retained": p.retained,
                           "slots": [{"slot": s.index, "state": s.state, "user_id": s.user, "last_seen": s.last_seen,
                                      "dirty": s.dirty, "stale": s.stale, "listener": s.listener,
-                                     "offender": s.offender, "reserved_for": s.reserved_for} for s in p.slots]}
+                                     "offender": s.offender, "reserved_for": s.reserved_for,
+                                     "busy": s.busy, "busy_at": s.busy_at} for s in p.slots]}
                          for p in snap.pods]}
 
     def act(self, action: str, pod: str, slot: int, reason: str = "admin") -> "tuple[int, dict]":

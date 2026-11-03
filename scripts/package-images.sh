@@ -5,6 +5,7 @@
 #   gaussdb-agent-kbstd                  标准知识库(GaussDB 官方文档集),部署时由 Job kbstd-install 装进 NAS(2026-10-27 起)
 # 漏了哪个,客户拿到包也部署不完整 —— 网关起不来、官方文档集装不上,而现场往往没有外网可以补拉。开发时没有标准知识库包可加 --without-kbstd。
 # 前端镜像不在本包里:由前端方自建,按 docs/前端对接接口说明.md 接入。
+# 另有发版台镜像(跳板机上跑,不进集群)单独一个 tar + 启动脚本 release-console.sh,以及发版台读的 release.yaml。
 # 用法: scripts/package-images.sh <TAG> [--arch amd64,arm64] [--without-kbstd]
 #   前提: 镜像已构建——本机架构用 <TAG>,另一架构用 <TAG>-<arch>(scripts/build-images.sh <TAG>-<arch> --platform linux/<arch>)。
 set -euo pipefail
@@ -38,7 +39,16 @@ for ARCH in ${ARCHS//,/ }; do
   docker save $IMAGES | gzip -6 > "$OUT"
   (cd "$DIST" && shasum -a 256 "$(basename "$OUT")" > "$(basename "$OUT").sha256")
   echo "  → $(basename "$OUT") $(du -h "$OUT" | cut -f1)" >> "$DIST/MANIFEST.txt"
+  # 发版台镜像单独一个包:它跑在跳板机上,不进集群、不推客户的镜像仓库。名字不是「<包名>-<架构>」,
+  # release/pack.py 与发版台的包识别都不会把它当成要入库的镜像包
+  RIMG="gaussdb-agent-release:$TAG$SUFFIX"
+  docker image inspect "$RIMG" >/dev/null 2>&1 || { echo "缺镜像 $RIMG(build-images.sh 会一起构建)" >&2; exit 1; }
+  ROUT="$DIST/gaussdb-agent-release-${PKG#gaussdb-agent-}-$ARCH.tar.gz"
+  docker save "$RIMG" | gzip -6 > "$ROUT"
+  (cd "$DIST" && shasum -a 256 "$(basename "$ROUT")" > "$(basename "$ROUT").sha256")
+  echo "  → $(basename "$ROUT") $(du -h "$ROUT" | cut -f1)  发版台(release-console.sh 导入)" >> "$DIST/MANIFEST.txt"
 done
+install -m 0755 "$HERE/scripts/release-console.sh" "$DIST/release-console.sh"
 
 # 清单与文档:k8s/ 与 docs/ 整个打进去(docs/ 里只有交付文档)。
 # COPYFILE_DISABLE=1:在 macOS 上打包时,bsdtar 会为每个带扩展属性的文件额外塞一个
@@ -48,8 +58,14 @@ COPYFILE_DISABLE=1 tar czf "$DIST/$PKG-k8s.tar.gz" -C "$HERE" \
     --exclude='._*' --exclude='.DS_Store' --exclude='__pycache__' \
     k8s docs
 (cd "$DIST" && shasum -a 256 "$PKG-k8s.tar.gz" > "$PKG-k8s.tar.gz.sha256")
+# 发版台读的 release.yaml:本版本与历史各版本的变化(k8s/release/changes.yaml)+ 各镜像的平台清单 digest + 白名单全量。
+# changes.yaml 第一条不是本版本时这里失败 —— 发版前先把本版本的变化写进去。
+(cd "$HERE" && python3 -m release.pack --tag "$TAG" --dist "$DIST" --date "$(date +%F)")
+(cd "$DIST" && shasum -a 256 release.yaml > release.yaml.sha256)
 cat >> "$DIST/MANIFEST.txt" <<EOF
-  → $PKG-k8s.tar.gz  k8s/ 清单模板 + docs/ 交付文档(构建部署手册、前端对接接口说明)
+  → $PKG-k8s.tar.gz  k8s/ 清单模板 + docs/ 交付文档(构建部署手册、前端对接接口说明、发版台运维手册)
+  → release.yaml     发版台读的版本说明(镜像 digest、白名单全量、各版本的变化)
+  → release-console.sh  发版台一条命令起:整个目录拷进发布包目录后运行 <目录>/release-console.sh(--help 看选项)
 
 导入镜像:
   docker:      gunzip -c $PKG-<arch>.tar.gz | docker load

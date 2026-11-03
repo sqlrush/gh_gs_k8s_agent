@@ -763,8 +763,9 @@ class Slot:
         if quiet and st in (FREE, RETAINED):
             rec = self._read_pool(BOOT_FILE)
             if rec.get("boot") == boot and rec.get("state_empty") is True and self.disk_is_clean():
-                self._set(**dict(_blank(boot=boot, container_id=self.rec["container_id"]), state=FREE, quiet=True,
-                                 **self._reservation()))
+                # containerID 留空:重启后的容器 ID 管家不知道,沿用旧的会被下一次绑定当成「核验过的」记进租期,
+                # 那个人转保留后回来就因 ID 对不上被拒(restarted)。留空则绑定时记网关现读的那个
+                self._set(**dict(_blank(boot=boot), state=FREE, quiet=True, **self._reservation()))
                 self.log("槽位 %d 重启后已清盘,空闲(boot %s)" % (self.i, boot))
                 return
         self._begin_evict(self.rec["container_id"], error="restarted")

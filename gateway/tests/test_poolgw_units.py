@@ -26,6 +26,7 @@ class Slot:
         self.i, self.state, self.user = i, pa.FREE, None
         self.password = self.reports_token = None
         self.last_active = self.busy_at = self.bound_at = self.retained_at = 0.0
+        self.busy = False
         self.dirty = self.stale = self.offender = False
         self.listener = "ok"
         self.reserved_for, self.reserved_until = None, 0.0
@@ -91,7 +92,7 @@ class FakeCluster:
     def status(self, pod, ip):
         self._check(pod)
         return {"pod": pod, "in_use": self._in_use(pod), "slots": [
-            {"slot": s.i, "state": s.state, "user_id": s.user, "last_active": s.last_active, "busy_at": s.busy_at,
+            {"slot": s.i, "state": s.state, "user_id": s.user, "last_active": s.last_active, "busy": s.busy, "busy_at": s.busy_at,
              "bound_at": s.bound_at, "retained_at": s.retained_at, "dirty": s.dirty, "stale": s.stale,
              "listener": s.listener, "offender": s.offender, "reserved_for": s.reserved_for,
              "reserved_until": s.reserved_until, "evicting_since": 1.0 if s.state == pa.EVICTING else None,
@@ -488,6 +489,20 @@ def test_admin_summary_has_no_secrets_and_actions_use_fresh_container_ids(cl):
     code, _body = adm.act("evict", t.pod, t.slot)
     assert code == 202 and cl.verbs("evict")[-1][3] == "docker://%s-%d-1" % (t.pod, t.slot)
     assert adm.act("nope", t.pod, t.slot)[0] == 404 and adm.act("evict", "pool-9", 0)[0] == 404
+
+
+def test_admin_summary_shows_whether_each_slot_is_busy(cl):
+    """发版台换槽位前要等「不忙且距上次忙够久」:管家 /pool/status 早有 busy / busy_at,摘要要透出来。"""
+    table, router, _s, _l = _stack(cl)
+    t = router.target("u1")
+    s = cl.pods[t.pod][t.slot]
+    s.busy, s.busy_at = True, cl.now - 3
+    table.invalidate()
+    slots = {(p["name"], x["slot"]): x for p in poolsweeper.PoolAdmin(table, cl, router).summary()["pods"]
+             for x in p["slots"]}
+    assert slots[(t.pod, t.slot)]["busy"] is True and slots[(t.pod, t.slot)]["busy_at"] == cl.now - 3
+    other = next(v for k, v in slots.items() if k != (t.pod, t.slot))
+    assert other["busy"] is False and other["busy_at"] == 0.0
 
 
 # -- 管家客户端(对着真的管家 HTTP 服务) ------------------------------------------------------------

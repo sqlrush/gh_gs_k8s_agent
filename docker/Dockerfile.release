@@ -1,0 +1,55 @@
+# gaussdb-agent-release:发版台。跑在跳板机上(不进 k8s),一条命令起:scripts/release-console.sh(随离线包发出)。
+#
+# 在集群外做首次部署与升级:kubeconfig 的各种认证方式、kustomize、diff、exec、port-forward 都交给 kubectl,
+# 所以镜像自带一个 kubectl(版本见 KUBECTL_VERSION)。集群版本差得多时,启动脚本 --kubectl 换成集群配套的那个,
+# 资源扫描会提示相差几个小版本。
+#
+# 依赖:PyYAML(读清单)、psycopg2(白名单用只读账号直连中间件库核对)。不引 Web 框架,同网关。
+# 镜像本身不写东西:状态(SQLite、渲染出的清单、变更预览)全在挂进来的状态目录。
+FROM python:3.12-slim-bookworm
+
+ARG TARGETARCH
+# kubectl:钉版本与各架构的 sha256(不信同一服务器上现取的校验值)
+ARG KUBECTL_VERSION=v1.31.14
+ARG KUBECTL_SHA256_amd64=8791ec7c8966b61420d55103a5fb948de9f0ca3d7306d789734975ad9704bdb0
+ARG KUBECTL_SHA256_arm64=3abb0c2d7121e1833831f56fd857a93de386e76d14b64baf86220d0afe495209
+
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir "PyYAML>=6" "psycopg2-binary==2.9.10" \
+    && pip uninstall -y pip setuptools 2>/dev/null || true \
+    && rm -rf /usr/local/lib/python3.12/ensurepip/_bundled \
+    && python3 -c "import yaml, psycopg2"
+
+# 不为下载装 curl:用 Python 取、核 sha256
+RUN ARCH="${TARGETARCH:-$(dpkg --print-architecture)}" \
+    && case "$ARCH" in amd64) SUM="$KUBECTL_SHA256_amd64" ;; arm64) SUM="$KUBECTL_SHA256_arm64" ;; *) echo "不支持的架构 $ARCH" >&2; exit 1 ;; esac \
+    && python3 -c "import hashlib, sys, urllib.request; \
+data = urllib.request.urlopen(sys.argv[1], timeout=120).read(); got = hashlib.sha256(data).hexdigest(); \
+sys.exit('kubectl sha256 不符:%s' % got) if got != sys.argv[2] else open('/usr/local/bin/kubectl', 'wb').write(data)" \
+       "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" "$SUM" \
+    && chmod 0755 /usr/local/bin/kubectl \
+    && kubectl version --client >/dev/null
+
+# 默认非 root;启动脚本用 --user <本机用户> 跑,这样只能本人读的 kubeconfig 读得到、状态目录里的文件归本人。
+# HOME 指到 /tmp:任意 uid 下 kubectl 都能写它的发现缓存
+RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin release
+# release/tests 由 .dockerignore 挡掉
+COPY release/ /opt/release/release/
+
+LABEL org.opencontainers.image.title="gaussdb-agent-release" \
+      org.opencontainers.image.source="https://github.com/sqlrush/gh_agent_k8s" \
+      org.opencontainers.image.description="发版台:扫描资源、首次部署与在线升级(跳板机上跑,不进 k8s)"
+
+USER release
+WORKDIR /opt/release
+# 启动脚本用宿主机网络 + 只听 127.0.0.1(不做登录,不能对外);路径都按宿主机的原路径挂进来
+ENV PYTHONPATH=/opt/release HOME=/tmp RELEASE_LISTEN=127.0.0.1:8090 RELEASE_DIR=/releases RELEASE_STATE=/state
+EXPOSE 8090
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD python3 -c "import os, urllib.request; h, _, p = os.environ['RELEASE_LISTEN'].rpartition(':'); urllib.request.urlopen('http://%s:%s/' % (h if h not in ('', '0.0.0.0') else '127.0.0.1', p), timeout=4)"
+ENTRYPOINT ["python3", "-m", "release"]

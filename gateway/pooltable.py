@@ -72,7 +72,8 @@ def slot_view(pod: str, s: dict, started: float) -> pa.SlotView:
                        retained_at=num("retained_at"), dirty=bool(s.get("dirty")), stale=bool(s.get("stale")),
                        listener=str(s.get("listener") or "unknown"), offender=bool(s.get("offender")),
                        restarted_at=started, reserved_for=s.get("reserved_for") or None,
-                       reserved_until=num("reserved_until"), evict_pending=s.get("evicting_since") is not None)
+                       reserved_until=num("reserved_until"), evict_pending=s.get("evicting_since") is not None,
+                       busy=bool(s.get("busy")), busy_at=busy_at)
 
 
 class PoolTable:
