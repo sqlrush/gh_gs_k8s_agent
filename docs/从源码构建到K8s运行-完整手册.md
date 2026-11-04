@@ -389,7 +389,7 @@ kubectl apply -k k8s/base
 > service/gateway created
 > persistentvolumeclaim/nas created
 > deployment.apps/gateway created
-> job.batch/kbstd-install-v1-4-4 created
+> job.batch/kbstd-install-v1-4-5 created
 > networkpolicy.networking.k8s.io/frontend-policy created
 > networkpolicy.networking.k8s.io/gateway-policy created
 > networkpolicy.networking.k8s.io/kb-import-policy created
@@ -403,7 +403,7 @@ kubectl -n gaussdb-agent get pods
 ```
 
 > PVC `nas` 是 `Bound`。两个 `gateway` Pod 是 `CrashLoopBackOff` 或 `Error`：**正常**。还没建信任凭据，网关按设计拒绝启动，5.8 之后就好；
-> 它能起来再退出，说明节点已经能从你的镜像仓库拉镜像。`kbstd-install-v1-4-4-…` 是 `Completed`：官方文档集已装进知识库（5.7）；
+> 它能起来再退出，说明节点已经能从你的镜像仓库拉镜像。`kbstd-install-v1-4-5-…` 是 `Completed`：官方文档集已装进知识库（5.7）；
 > NAS 还没接好时它会失败重试，接好后自己就过。
 >
 > 卡在 `ImagePullBackOff` / `ErrImagePull`：节点拉不到镜像，检查 `REG` 与仓库权限（私有仓库要配 `imagePullSecrets` 或节点级凭据）。
@@ -594,12 +594,12 @@ kubectl -n gaussdb-agent exec deploy/kb-import-<管理员工号> -c opencode -- 
 > 导入容器要在运行（管理员登录进导入容器一次即可，5.11；首次实测 10 秒建好）。知识库管理员：SSO 传的角色含 `gateway-config` 的 `KB_ADMIN_ROLES`（默认 `kb-admin`），
 > 或把工号登记进 ConfigMap `agent-roles` 的 `kb-admins`。不配 embedding 时检索走词法 + 图，不影响使用。
 
-**官方文档集随部署自动装上。** 5.3 的 `apply -k` 建了一次性 Job `kbstd-install-v1-4-4`：它从标准知识库镜像里取出包，
+**官方文档集随部署自动装上。** 5.3 的 `apply -k` 建了一次性 Job `kbstd-install-v1-4-5`：它从标准知识库镜像里取出包，
 用导入镜像里的 `kb.py docset install` 装进 NAS 的 `kb/docsets/`（逐个文件核对 sha256，同版本跳过，不碰贵方自己的知识，不要任何网络），
 装完重建 L0 / L1。核对：
 
 ```bash
-kubectl -n gaussdb-agent logs job/kbstd-install-v1-4-4
+kubectl -n gaussdb-agent logs job/kbstd-install-v1-4-5
 ```
 
 > ```
@@ -608,7 +608,7 @@ kubectl -n gaussdb-agent logs job/kbstd-install-v1-4-4
 > ```
 > 再 apply 一次是 `[skipped] G25132C 已是这个版本…,不动`。`ImagePullBackOff` 是没推标准知识库镜像或 5.1 没改到 `kbstd-install.yaml`；
 > 日志是权限错误、Job 最终 `Failed`：NAS 的 `kb/` 不是 uid 1000 可写，改好后
-> `kubectl -n gaussdb-agent delete job kbstd-install-v1-4-4 && kubectl apply -f k8s/base/kbstd-install.yaml` 重跑。
+> `kubectl -n gaussdb-agent delete job kbstd-install-v1-4-5 && kubectl apply -f k8s/base/kbstd-install.yaml` 重跑。
 > 之后在对话里问一个参数的默认值，回答里能引用 `PD-G25132C-…` 并按产品文档上青色。
 
 ### 5.8 启动网关
