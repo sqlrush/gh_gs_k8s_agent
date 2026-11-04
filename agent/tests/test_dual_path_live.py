@@ -113,7 +113,7 @@ def test_parameterised_script_matches_across_both_paths(direct, middleware):
 def test_both_paths_return_only_strings(direct, middleware):
     """全字符串化在两侧都成立 —— 直连路径不能因为「本地」就返回原生类型。
 
-    返回原生类型的话，本地写出的解析代码到客户环境会全部失效。
+    返回原生类型的话，本地写出的解析代码到现场环境会全部失效。
     """
     for rows in (middleware.run("health.db_info"), direct.run("health.db_info")):
         assert rows

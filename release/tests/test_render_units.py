@@ -108,7 +108,7 @@ def test_a_configured_model_range_replaces_only_the_model_rule():
     r = rd.render(K8S, cfg, TAG, _cluster_cms(), _local_netpols(), EXISTING, REQ)
     rt = _doc(r, "NetworkPolicy", "runtime-policy")["spec"]["egress"]
     assert "0.0.0.0/0" not in str(rt) and "10.30.0.0/24" in str(rt)
-    assert "11434" in str(rt) and "8781" in str(rt), "认不出的客户规则(Ollama)不受影响"
+    assert "11434" in str(rt) and "8781" in str(rt), "认不出的行方规则(Ollama)不受影响"
 
 
 # -- 其他 ------------------------------------------------------------------------------------------

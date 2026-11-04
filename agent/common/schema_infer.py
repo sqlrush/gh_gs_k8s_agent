@@ -1,6 +1,6 @@
 """贴文本没带 --schema 时,按表名在目录里找 schema:唯一就用,多个候选就问,没有就照旧。
 
-现场(客户 2026-09-09 早):模型贴文本漏了 --schema → 400。命令是模型拼的,SKILL.md 只能约束不能保证;
+现场(2026-09-09 早):模型贴文本漏了 --schema → 400。命令是模型拼的,SKILL.md 只能约束不能保证;
 脚本层自己去 pg_class 查一遍,把「模型记不记得带参数」从关键路径上拿掉。
 纪律不变:同名表跨 schema 时不猜(Oracle 迁移库里 gbatch / dsc_ora_public 同名表很常见),列出候选交用户;
 各表分散在不同 schema(多 schema 的 search_path)同样不猜——只有 DBA 给执行账号设完整 search_path 能根治。

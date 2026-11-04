@@ -1,6 +1,6 @@
 # 按名字从 ADM_SOURCE 逐行取存储过程 / 函数 / 包体的源码 —— proc_def(pg_proc)取不到时的兜底(common/proc_source.py)。
 # 为什么要有:开了对象隔离(ALTER DATABASE … ENABLE PRIVATE OBJECT)的库,数据库给 PG_PROC、PG_NAMESPACE 加了行级
-# 访问控制,普通账号联表查询 0 行(客户 2026-09-08 现场:过程明明在,skill 说找不到)。ADM_SOURCE 是管理员视角的视图
+# 访问控制,普通账号联表查询 0 行(2026-09-08 现场:过程明明在,skill 说找不到)。ADM_SOURCE 是管理员视角的视图
 # (GaussDB 505「其他系统视图」,PG_CATALOG 与 SYS 下各一份),默认只有系统管理员可读,普通账号要 DBA 授权。
 # 视图没有 schema 列,只有 owner(对象所有者);也没有形参与对象 id —— 同名重载的几份会混在一起,调用方按行号重复识别并拒绝。
 # 包内过程不单独成行:取的是整个 package body,由调用方切出目标过程。

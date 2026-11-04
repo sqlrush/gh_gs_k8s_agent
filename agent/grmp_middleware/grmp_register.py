@@ -1,10 +1,10 @@
-"""脚本注册工具 —— 对应客户侧的「版本 DML 发布」环节。
+"""脚本注册工具 —— 对应行方的「版本 DML 发布」环节。
 
-**这是发布期工具，不是运行期接口。** 客户的 GRMP 没有脚本管理 API
+**这是发布期工具，不是运行期接口。** 行方的 GRMP 没有脚本管理 API
 （「由于安全原因，目前脚本仅能通过版本 dml 带出」），白名单的写权限归
 发布流程，读与执行权限归 agent。本工具因此刻意做成命令行，不挂 HTTP ——
-挂上去就等于本地放开了客户不给的权限，explain 之类的脚本在本地能动态
-注册、到客户环境注册不了，又是一个本地测不出来的落差。
+挂上去就等于本地放开了行方不给的权限，explain 之类的脚本在本地能动态
+注册、到现场环境注册不了，又是一个本地测不出来的落差。
 
 用法：
     python3 -m grmp_middleware.grmp_register --registry scripts/registry \\
@@ -35,7 +35,7 @@ def discover(registry: pathlib.Path) -> List[pathlib.Path]:
 
 
 def _timestamp() -> str:
-    """客户样例的 create_time 精确到毫秒：2026-07-03 19:36:58.978。"""
+    """现场样例的 create_time 精确到毫秒：2026-07-03 19:36:58.978。"""
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
@@ -90,7 +90,7 @@ def scripts_no_skill_calls(registry: pathlib.Path) -> List[str]:
 
 
 def report_risks(records: Sequence[sc.ScriptRecord]) -> List[str]:
-    """风险标注 —— 只报告，不拦截。客户环境能跑通的脚本，本地不能拒绝。"""
+    """风险标注 —— 只报告，不拦截。现场环境能跑通的脚本，本地不能拒绝。"""
     lines: List[str] = []
     for rec in records:
         for item in risk.assess(rec.script_content, rec.params):
@@ -107,7 +107,7 @@ def main(argv: Sequence[str] = None) -> int:
         action="store_true",
         help="重名时覆盖（保持原 id 不变）。不给此参数时重名一律拒绝。",
     )
-    parser.add_argument("--dml-out", default=None, help="导出客户格式 INSERT DML 的路径")
+    parser.add_argument("--dml-out", default=None, help="导出行方格式 INSERT DML 的路径")
     parser.add_argument(
         "--include-unused",
         action="store_true",
@@ -121,7 +121,7 @@ def main(argv: Sequence[str] = None) -> int:
     parser.add_argument(
         "--user",
         default=os.environ.get("GRMP_REGISTER_USER", "grmp-register"),
-        help="写入 create_user/last_modify_user。交付给客户的 DML 应填真实工号。",
+        help="写入 create_user/last_modify_user。交付给行方的 DML 应填真实工号。",
     )
     parser.add_argument("--dry-run", action="store_true", help="只校验与出报告，不写库")
     args = parser.parse_args(argv)
@@ -146,7 +146,7 @@ def main(argv: Sequence[str] = None) -> int:
     print("校验通过：%d 条脚本" % len(records))
     risks = report_risks(records)
     if risks:
-        print("\n风险标注（放行，但需人工确认 —— 这些脚本在客户环境同样存在该风险）：")
+        print("\n风险标注（放行，但需人工确认 —— 这些脚本在现场环境同样存在该风险）：")
         for line in risks:
             print(line)
     else:
@@ -161,8 +161,8 @@ def main(argv: Sequence[str] = None) -> int:
             for n in unused:
                 print("  - %s" % n, file=sys.stderr)
             print(
-                "\n导出的每一条 INSERT 都要灌进客户生产库的 script_config，"
-                "客户得为它走变更评审。\n"
+                "\n导出的每一条 INSERT 都要灌进生产库的 script_config，"
+                "行方得为它走变更评审。\n"
                 "这些多半是中间件自测用的脚本（perf.* 是动态性能视图那组验证场景，"
                 "session.* 给 grmp_demo.sh 用）—— 该留在仓库里，不该混进交付物。\n"
                 "确实要一起交付就加 --include-unused；否则用 --registry 指一个"
@@ -210,7 +210,7 @@ def main(argv: Sequence[str] = None) -> int:
         if args.exclude_unused:
             drop = set(scripts_no_skill_calls(registry))
             shipped = [r for r in stored if r.script_name not in drop]
-            # 剔掉了什么必须逐条说出来 —— 静默少几条，客户那边就表现成
+            # 剔掉了什么必须逐条说出来 —— 静默少几条，行方那边就表现成
             # 「某个 skill 突然报脚本不存在」，而发布记录上看不出少了谁
             print("\n已剔除 %d 条无人调用的脚本（未进交付 DML）：" % len(drop))
             for n in sorted(drop):

@@ -22,7 +22,7 @@ SHA=$(git -C "$SRC" rev-parse "$TAG^{commit}")
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-# 从标签导出,不碰 gh_skill 的工作树。docs/ demo/ prd/ 不导:交付文档与客户材料不进公开仓库。
+# 从标签导出,不碰 gh_skill 的工作树。docs/ demo/ prd/ 不导:交付文档与原始材料不进公开仓库。
 git -C "$SRC" archive --format=tar "$TAG" \
   common skills scripts tools tests grmp_middleware \
   AGENTS.md install-opencode.sh deploy.sh requirements.txt pytest.ini LICENSE NOTICE \
@@ -31,7 +31,7 @@ git -C "$SRC" archive --format=tar "$TAG" \
 mkdir -p "$DEST"
 cp -R "$TMP"/. "$DEST"/
 find "$DEST" -name __pycache__ -type d -prune -exec rm -rf {} +
-# 这条测试依赖 docs/delivery(客户白名单交付物,gh_skill 里也是 gitignore 的),本仓库没有这个目录
+# 这条测试依赖 docs/delivery(行方白名单交付物,gh_skill 里也是 gitignore 的),本仓库没有这个目录
 rm -f "$DEST/tests/test_delivery_drift_units.py"
 
 printf 'gh_skill %s %s\nvendored %s\n' "$TAG" "$SHA" "$(date +%F)" > "$DEST/UPSTREAM"

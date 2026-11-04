@@ -64,7 +64,7 @@ def test_no_hypopg_note_is_worded_per_access_path(skill):
     """「下一步该做什么」两条路不一样，标注不能只有一份措辞。
 
     这条原先断言 note 里必须出现直连驱动名（"得给出拿到验证背书的具体办法"）。
-    在本机直连时那确实是可执行的下一步；可客户的白名单部署里**压根没有直连
+    在本机直连时那确实是可执行的下一步；可行方的白名单部署里**压根没有直连
     通道** —— 那正是白名单模型的前提。对着那边的 DBA 说「改用 driver: psycopg2
     重跑」，不是建议，是噪音，还会把人往「绕过白名单」的方向引。
 
@@ -77,7 +77,7 @@ def test_no_hypopg_note_is_worded_per_access_path(skill):
 
     assert "psycopg2" in direct, "直连路径要给出拿到验证背书的具体办法"
     assert "psycopg2" not in whitelist, (
-        "白名单路径不该提 psycopg2 —— 客户环境没有直连通道，这句话不可执行")
+        "白名单路径不该提 psycopg2 —— 现场环境没有直连通道，这句话不可执行")
     for note in (direct, whitelist):
         assert "未经验证" in note and "人工验证" in note
 

@@ -4,7 +4,7 @@
 用普通断言逐条验证，HTTP 那层只剩一个薄壳（见 http_server.py）。
 
 一条贯穿的规则：**业务错误走 HTTP 200 + code!="0"**，HTTP 状态码只用于
-传输层问题（路由不存在、方法不对）。这是客户的错误模型，照搬。
+传输层问题（路由不存在、方法不对）。这是行方的错误模型，照搬。
 """
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ class App:
         self.path_prefix = prefix or DEFAULT_PATH_PREFIX
         self.list_path = grmp_paths.list_path(self.path_prefix)
         self.invoke_path = grmp_paths.invoke_path(self.path_prefix)
-        # 接口文档的示例 URL 多了一段 /dataip/{dataip}，客户实际调用没有。
+        # 接口文档的示例 URL 多了一段 /dataip/{dataip}，行方实际调用没有。
         # 一并接受这种写法：照着文档写的客户端若拿到 404，排查方向会被带偏。
         self._dataip_re = re.compile(r"^%s/dataip/[^/]+(?P<rest>/.*)$" % re.escape(self.path_prefix))
         self._store = store
@@ -116,7 +116,7 @@ class App:
             reason = self._signature.check(route, headers)
             if reason is not None:
                 return 200, envelope.error(
-                    "签名校验失败：%s（本实现约定：客户环境此场景的响应形态未知）" % reason)
+                    "签名校验失败：%s（本实现约定：现场环境此场景的响应形态未知）" % reason)
 
         if route == self.invoke_path:
             return self._invoke_operation(body)
@@ -146,11 +146,11 @@ class App:
                 break
         if not supplied:
             return envelope.error(
-                "缺少 auth 请求头（本实现约定：客户环境此场景的响应形态未知）"
+                "缺少 auth 请求头（本实现约定：现场环境此场景的响应形态未知）"
             )
         if supplied != self._token:
             return envelope.error(
-                "auth 令牌不匹配（本实现约定：客户环境此场景的响应形态未知）"
+                "auth 令牌不匹配（本实现约定：现场环境此场景的响应形态未知）"
             )
         return None
 
@@ -174,7 +174,7 @@ class App:
             return 200, envelope.error("缺少必填参数 dataIp")
 
         if self._instances.resolve(data_ip) is None:
-            # 【实】必须逐字一致：客户把这个响应当作调用链路正常的判据
+            # 【实】必须逐字一致：行方把这个响应当作调用链路正常的判据
             return 200, envelope.error(envelope.ERR_INSTANCE_NOT_FOUND)
 
         page_num, error = _positive_int(parsed, "offset", DEFAULT_OFFSET, None)

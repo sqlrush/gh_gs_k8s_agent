@@ -1,6 +1,6 @@
 """EXPLAIN 前把 search_path 切到 SQL 原本的 schema。
 
-现场 sqltune 报 HTTP 400 的成因(客户 2026-09-07 反馈「入参 sql 没带 schema」):业务 SQL 的表名多半不带 schema,
+现场 sqltune 报 HTTP 400 的成因(2026-09-07 反馈「入参 sql 没带 schema」):业务 SQL 的表名多半不带 schema,
 靠应用账号的 search_path 解析;EXPLAIN 是用中间件执行账号跑的,它的 search_path 是 "$user", public,
 解析不到 → relation does not exist → 中间件包成 400。而 statement_history 里本来就记着 schema_name。
 
@@ -151,7 +151,7 @@ def explain_plan(runner, base_script: str, sql: str, schema: str) -> Tuple[str, 
     if ok:
         rows = runner.run(base_script + SCHEMA_SUFFIX, {"sql": sql, "schema": template_value(segs)})
         return _join(rows), path, ""
-    # 切不成(客户 09-09 早截图:执行器跑不了两条语句):先把 SQL 里不带 schema 的表名补全再走单语句模板——
+    # 切不成(09-09 早截图:执行器跑不了两条语句):先把 SQL 里不带 schema 的表名补全再走单语句模板——
     # 不依赖执行器、不依赖 DBA;补全后解析到同一张表,计划与原 SQL 等价。没有可补的才原样退回。
     # 路径有多段时按第一段补(业务表绝大多数在第一段,public 垫底),说明里如实写这个前提。
     from common import sqlqualify           # 延迟导入:sqlqualify 反过来引用本模块的 valid_schema

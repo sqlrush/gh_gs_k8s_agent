@@ -96,7 +96,7 @@ esac
 awk '/^={10,}/{n++} {print} n==2{exit}' "$LOG"
 note "访问日志在 ${LOG}（不打到屏幕，免得混进报文里）"
 
-# ---------- 按逻辑名解析 ID（不硬编码，与客户环境的做法一致）----------
+# ---------- 按逻辑名解析 ID（不硬编码，与现场环境的做法一致）----------
 # 先落盘再解析：把 curl 和 python 塞进一层 $( ) 里嵌套引号，出问题时看不出
 # 是哪一环坏的（实测就踩过：报文正常但嵌套里取到的是错误信封）。
 LIST_JSON=/tmp/grmp_demo_list.json
@@ -130,7 +130,7 @@ call "$BASE" "{\"dataIp\":\"$IP\",\"offset\":1,\"limit\":2}"
 }
 
 run 2 && {
-hdr 2 "接口一：dataIp 查不到实例（与客户样例逐字比对）"
+hdr 2 "接口一：dataIp 查不到实例（与现场样例逐字比对）"
 note "看点：HTTP 200 而不是 4xx；msg 必须一字不差"
 call "$BASE" "{\"dataIp\":\"1.2.3.4\"}"
 printf '   HTTP 状态码：'
@@ -171,7 +171,7 @@ printf '   注入 no_such_user_zz9%s or %s1%s=%s1 ：' "$Q" "$Q" "$Q" "$Q"
 brief "$INVOKE" "$INJ_P" 'print(len(d["result"]["data"]), "行")'
 echo
 warn "0 行 → 若干行 = 注入成功。渲染成 where usename = 'no_such_user_zz9' or '1'='1'"
-warn "客户中间件若也是 String.replace 实现，客户环境有同一个洞——需向客户确认是否转义"
+warn "现场中间件若也是 String.replace 实现，现场环境有同一个洞——需向本行确认是否转义"
 }
 
 run 7 && {

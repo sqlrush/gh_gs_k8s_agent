@@ -1,6 +1,6 @@
 """GaussDB 私有内核函数的探测与使用:gs_get_explain(integer) / gs_get_kernel_info()。
 
-背景(2026-09 现场四类报错之二):客户脚本调用这两个函数,目标实例上报 does not exist。
+背景(2026-09 现场四类报错之二):行方脚本调用这两个函数,目标实例上报 does not exist。
 两个函数在 GaussDB 集中式与分布式文档里自 V2.0-3.x 起都有,openGauss 里**从来没有**
 (og5 5.0.3 / og7 7.0.0 实测)。所以本模块的纪律是:
 
@@ -9,7 +9,7 @@
   · **探测永不抛**:探测脚本本身跑不了(没注册、连不上)只算「未知」,由调用方决定退不退回;
   · **「该有而没有」只对 GaussDB 成立**:version() 含 GaussDB 而函数缺失才给中文说明
     (catalog 未升级 / 逐库不一致 / 实参类型),openGauss 缺失是常态,不报;
-  · **签名按探测结果二选一,不按文档**:2026-09-08 客户在 505.2.1.SPC0600 的 pg_catalog 里查到的是
+  · **签名按探测结果二选一,不按文档**:2026-09-08 行方在 505.2.1.SPC0600 的 pg_catalog 里查到的是
     gs_get_explain(bigint),文档写的 (integer) 已过时(pg_stat_activity.pid 本来就是 64 位线程号)。
     探到 bigint 走 explain.runtime_plan({{pid}}::bigint);探到 integer 走 explain.runtime_plan_int4
     且 pid 必须在 integer 范围内;两者都不是则不调、说明后退回 EXPLAIN。
@@ -136,7 +136,7 @@ def missing_note(kf: KernelFuncs) -> str:
         f"② pg_proc 逐 database 独立,脚本连接的这个库缺少该对象——请在**同一个 database** 里执行 "
         f"SELECT proname, pg_get_function_arguments(oid) FROM pg_proc WHERE proname IN ('{FUNC_EXPLAIN}','{FUNC_KERNEL_INFO}') "
         f"核对,并与 postgres 库比对;"
-        f"③ 核对时连的库 / 实例与脚本实际执行的 dataIp 实例不是同一个(2026-09-08 客户在 grmp 库上查到三个函数齐全,"
+        f"③ 核对时连的库 / 实例与脚本实际执行的 dataIp 实例不是同一个(2026-09-08 行方在 grmp 库上查到三个函数齐全,"
         f"而报错发生在诊断任务打到的实例上),或该实例升级尚未提交(SHOW upgrade_mode;)。"
         f"另注意 505.2.1.SPC0600 实测签名是 gs_get_explain(bigint),文档写的 (integer) 已过时。"
         f"本次已退回现有路径(EXPLAIN 估算计划 / 标准视图)。"

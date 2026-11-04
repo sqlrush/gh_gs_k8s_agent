@@ -1,7 +1,7 @@
 """把注册好的白名单导成可读的 Markdown。
 
 script_config.db 是 SQLite，GitHub 上只显示成二进制、点不开。而这份清单
-恰恰是最该被人看见的东西 —— 客户要照着它做变更评审，DBA 要知道 agent
+恰恰是最该被人看见的东西 —— 行方要照着它做变更评审，DBA 要知道 agent
 到底能跑哪些 SQL。所以额外导一份文本。
 
 用法：
@@ -43,7 +43,7 @@ def render(db_path: pathlib.Path) -> str:
     rows = list(conn.execute(
         "SELECT * FROM script_config ORDER BY CAST(id AS INTEGER)"))
 
-    # script_local 存 readonly 声明 —— 客户的 21 列里没有这个字段，
+    # script_local 存 readonly 声明 —— 行方的 21 列里没有这个字段，
     # 是本实现额外要求脚本作者表态的（见 script.py）
     local = {}
     try:
@@ -57,7 +57,7 @@ def render(db_path: pathlib.Path) -> str:
         "# GRMP 白名单脚本清单",
         "",
         "由 `grmp_middleware/fixtures/script_config.db` 导出（那是 SQLite，",
-        "GitHub 上点不开）。**这份清单就是 agent 在客户环境能执行的全部 SQL**",
+        "GitHub 上点不开）。**这份清单就是 agent 在现场环境能执行的全部 SQL**",
         "—— 白名单之外的一条都递不进去。",
         "",
         "重新生成：",
@@ -72,7 +72,7 @@ def render(db_path: pathlib.Path) -> str:
         "| id 范围 | %s ~ %s |" % (rows[0]["id"], rows[-1]["id"]) if rows else "| id 范围 | — |",
         "",
         "> `id` 是**环境相关数据，不是契约**。skill 从不持有它 —— 运行时调",
-        "> 接口一按 `cmd_name` 现查。客户环境重新发布后 id 会不同，属正常。",
+        "> 接口一按 `cmd_name` 现查。现场环境重新发布后 id 会不同，属正常。",
         "",
         "## 按命名空间",
         "",

@@ -337,7 +337,7 @@ def test_resolved_name_does_not_raise_when_unresolvable(home):
 # --- api 模式：登录要回答两个问题 --------------------------------------------
 
 def test_api_login_answers_both_questions(monkeypatch):
-    """客户环境的流程：对话框里给库名 → 走 api_connection 确认
+    """现场环境的流程：对话框里给库名 → 走 api_connection 确认
 
       1) 这个库在不在（中间件按 dataIp 查实例，查不到就拒）
       2) 这个库能跑哪些脚本（白名单）

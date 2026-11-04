@@ -168,7 +168,7 @@ def _load_proctune_evidence():
 
 
 def test_evidence_says_when_analyze_was_requested_but_the_plan_is_an_estimate():
-    """现场 proctune.plan_text_analyze 按客户只读要求把 ANALYZE 固定关闭:要了 analyze,
+    """现场 proctune.plan_text_analyze 按行方只读要求把 ANALYZE 固定关闭:要了 analyze,
     模板回来的仍是估算计划。analyzed 按计划文本判(false),报告里要说明。"""
     evidence = _load_proctune_evidence()
 

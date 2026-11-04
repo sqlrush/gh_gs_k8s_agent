@@ -182,7 +182,7 @@ def test_touch_failing_for_other_reasons_is_logged_not_raised():
 def test_missing_grmp_token_secret_is_named_explicitly():
     """**2026-09-21 真跑时踩到。**
 
-    runtime 要本人的 grmp-token-<工号> Secret,那是客户中间件按人签发的,网关不创建它。
+    runtime 要本人的 grmp-token-<工号> Secret,那是现场中间件按人签发的,网关不创建它。
     缺了它 Pod 永远起不来,而网关原来只报「120 秒内未就绪」—— 把人往「启动慢 / 镜像大」
     的方向带,真原因(少一个 Secret)没人看得到。
     """
@@ -219,7 +219,7 @@ def test_kb_admin_only_user_needs_no_grmp_token():
 def test_restarting_a_scaled_down_pod_starts_a_fresh_grace_period():
     """重新拉起被闲置回收过的 Pod 时,活动时间必须写成「现在」。
 
-    2026-09-24 客户现场:scale 模式下 Deployment 保留,创建时间停在十几小时前;
+    2026-09-24 现场:scale 模式下 Deployment 保留,创建时间停在十几小时前;
     再登录时网关按模板 apply,模板里活动注解是空值,把原来的活动时间清掉 ——
     回收器于是按创建时间算出「闲置 15 小时」,下一轮扫描就把刚拉起、还在 ContainerCreating
     的 Pod 缩回 0。用户看到的是 504,网关日志反复「闲置回收:已缩容」。

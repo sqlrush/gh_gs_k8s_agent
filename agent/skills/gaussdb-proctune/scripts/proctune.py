@@ -90,7 +90,7 @@ _SESSION_REQUIRED = (
     "但缺了执行计划与索引验证的证据包不足以支撑调优结论，所以整条子命令在此停止，"
     "不做半份输出。\n"
     "可选做法：为这类诊断保留一条直连通道（driver: psycopg2），"
-    "或在客户环境不提供本能力；只做结构诊断可改用 "
+    "或在现场环境不提供本能力；只做结构诊断可改用 "
     "`proctune.py collect`（走中间件）或 gaussdb-procinfo。"
 )
 
@@ -173,7 +173,7 @@ _NO_HYPOPG_BODY = (
 )
 
 # 收尾那句按访问路径分叉，理由同 sqltune：白名单部署里没有可切换的直连
-# 通道，劝客户「改用 driver: psycopg2」不是建议，是把人往绕过白名单的方向引。
+# 通道，劝行方「改用 driver: psycopg2」不是建议，是把人往绕过白名单的方向引。
 _HYPOPG_HINT_DIRECT = "需要验证背书请改用 driver: psycopg2 的连接重跑。"
 _HYPOPG_HINT_WHITELIST = (
     "本次走的是白名单访问路径（只执行预注册脚本、每次调用独立连接），"
@@ -253,9 +253,9 @@ def tune_cursors(runner, db, qualified: str,
     return CursorTuneResult(proc=proc, cursors=cursors, skipped=skipped)
 
 
-# --- 客户知识库检索项 ----------------------------------------------------------
+# --- 本行知识库检索项 ----------------------------------------------------------
 
-# 结构发现的中文叫法(与 SKILL.md 第 7 步同一套说法):检索文本用中文,才对得上客户案例里的写法。
+# 结构发现的中文叫法(与 SKILL.md 第 7 步同一套说法):检索文本用中文,才对得上本行案例里的写法。
 _STRUCT_LABELS = {
     "loop_sql": "循环里跑 SQL",
     "per_row_dml": "循环内逐行 DML",
@@ -364,7 +364,7 @@ def proc_collect_report(pe: ProcEvidence) -> str:
     out += "\n## Key Parameters (GUC)\n\n"
     out += render.table(["NAME", "SETTING", "UNIT"],
                         [[g.name, g.setting, g.unit] for g in pe.gucs])
-    # 客户知识库对这个过程与它的结构发现怎么说;--format json 不带(形状不变)
+    # 本行知识库对这个过程与它的结构发现怎么说;--format json 不带(形状不变)
     out += "\n" + kbsection.markdown(kb_items_collect(pe))
     return out
 
@@ -409,7 +409,7 @@ def cursor_tune_report(tr: CursorTuneResult) -> str:
     else:
         rows = [[s.name, s.kind, s.skip_reason] for s in tr.skipped]
         out += render.table(["Name", "Kind", "Reason"], rows)
-    # 客户知识库对游标计划里的发现怎么说;--format json 不带(形状不变)
+    # 本行知识库对游标计划里的发现怎么说;--format json 不带(形状不变)
     out += "\n" + kbsection.markdown(kb_items_tune(tr))
     return out
 

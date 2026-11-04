@@ -19,7 +19,7 @@ OK_STATUS = ("存在", "前缀匹配")
 def _cite_checker():
     if str(_KB_SCRIPTS) not in sys.path:
         sys.path.insert(0, str(_KB_SCRIPTS))
-    import kb_cite  # noqa: E402  (技能目录之间是同级的,装到客户环境也一样)
+    import kb_cite  # noqa: E402  (技能目录之间是同级的,装到现场环境也一样)
     return kb_cite
 
 

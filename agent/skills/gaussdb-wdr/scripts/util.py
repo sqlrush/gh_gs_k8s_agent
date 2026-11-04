@@ -18,7 +18,7 @@ def summarize_err(exc: Exception) -> str:
     """Make a degrade note: truncate the raw error, keep the Chinese hint whole.
 
     GRMP 路径的报错前缀(status / task_id)本来就长,一刀切在 160 字会把
-    「提示:…」切成半句——那段才是客户能照做的内容,不能截。
+    「提示:…」切成半句——那段才是行方能照做的内容,不能截。
     """
     head, sep, hint = str(exc).partition(HINT_MARK)
     if len(head) > ERR_HEAD_MAX:

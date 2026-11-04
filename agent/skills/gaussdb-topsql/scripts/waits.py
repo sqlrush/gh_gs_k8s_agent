@@ -7,7 +7,7 @@
 **为什么用 CPU + 数据 IO,不用锁等待时间。** dbe_perf.statement 与 snapshot.snap_summary_statement 里
 **没有**锁等待列(og5 逐列核对过),有的是 cpu_time 与 data_io_time。别的来源都缺一块:
   · statement_history.lock_wait_time 只记**跑完了**的执行 —— 那一轮被挡住、最后被取消的 FOR UPDATE
-    (1081 秒)一条记录都没有;客户默认 track_stmt_stat_level 也只记慢 SQL;
+    (1081 秒)一条记录都没有;行方默认 track_stmt_stat_level 也只记慢 SQL;
   · gs_asp 的采样在「解析阶段等表锁」时不带 unique_query_id(og5 上 400 个样本是空的),
     被 ALTER 挡住的 DML 恰好就是这种。
 所以只说能从同一组计数器里算准的:自身耗时 = CPU + 数据 IO;等待占比 = 1 − 自身耗时 / 总耗时。

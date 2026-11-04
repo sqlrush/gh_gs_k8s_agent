@@ -231,7 +231,7 @@ def render_l0(kb: pathlib.Path, cat: kbcat.Catalog, version: str, today: Optiona
         ("已知缺陷与版本例外", counts.get("defect", 0), ""),
         ("处置与恢复手册", counts.get("runbook", 0), ""),
         ("高斯产品文档", counts.get("product", 0),
-         f"客户摘录 {counts.get('product', 0) - official}、官方文档集 {official}(见下)" if official else ""),
+         f"行方摘录 {counts.get('product', 0) - official}、官方文档集 {official}(见下)" if official else ""),
         ("存量 Wiki 经验", counts.get("wiki", 0), ""),
     ]
     out = ["# 知识库总索引(L0)", "",

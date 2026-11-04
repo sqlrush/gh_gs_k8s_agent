@@ -3,7 +3,7 @@
 # 与 explain.plan_text 的本质差别:不执行任何 SQL、不需要 SQL 文本,拿到的是内核里正在走的那个计划
 # (估算计划可能因绑定值 / 统计信息 / 计划跳变而与之不同)。
 #
-# **签名按现场实测写 (bigint),不按文档的 (integer)。** 2026-09-08 客户在 GaussDB Kernel 505.2.1.SPC0600 上查
+# **签名按现场实测写 (bigint),不按文档的 (integer)。** 2026-09-08 行方在 GaussDB Kernel 505.2.1.SPC0600 上查
 # pg_catalog:gs_get_explain(bigint) / gs_get_dn_explain(text, bigint) / gs_get_kernel_info(),
 # 文档写的 (integer) 已过时。pg_stat_activity.pid 本来就是 64 位线程号(og5 实测 281440978523808),
 # 放不进 integer,bigint 才对得上。文档签名是 (integer) 的老内核用同族的 explain.runtime_plan_int4,

@@ -1,11 +1,11 @@
 """脚本定义：YAML（仓库内单一事实源）→ ScriptRecord（script_config 21 列）。
 
-字段刻意与客户 script_config 的 21 列逐一对齐，包括我们自己用不到的
+字段刻意与行方 script_config 的 21 列逐一对齐，包括我们自己用不到的
 region / deployment_form / refered_appbusiness 等作用域列 —— 这样注册工具
-导出的 INSERT DML 可以直接交给客户走版本发布，不需要再做一次映射。
+导出的 INSERT DML 可以直接交给行方走版本发布，不需要再做一次映射。
 
-脚本没有 API 可注册（客户原文：「由于安全原因，目前脚本仅能通过版本 dml
-带出」），所以「注册」在两边都是发布期动作：客户走版本 DML，我们走本工具。
+脚本没有 API 可注册（行方原文：「由于安全原因，目前脚本仅能通过版本 dml
+带出」），所以「注册」在两边都是发布期动作：行方走版本 DML，我们走本工具。
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ import yaml
 from .placeholder import ParamDef, api_type_name, extract_placeholders
 from .statement import is_read_only
 
-# 客户 script_config 的 21 列，顺序即样例 DML 的列顺序
+# 行方 script_config 的 21 列，顺序即样例 DML 的列顺序
 SCRIPT_CONFIG_COLUMNS: Tuple[str, ...] = (
     "id",
     "script_type",
@@ -82,7 +82,7 @@ class ScriptError(Exception):
 
 
 def quoted_column(name: str) -> str:
-    """按客户 DML 的写法给列名加引号。"""
+    """按行方 DML 的写法给列名加引号。"""
     return '"%s"' % name if name in _QUOTED_COLUMNS else name
 
 
@@ -114,8 +114,8 @@ class ScriptRecord:
     extend: Optional[str] = None
     compliance_mode: str = "ALL"
 
-    # 本地概念，**不属于客户 script_config 的 21 列**：执行器据此决定开
-    # 只读还是可写会话。客户文档全篇未提执行会话是否只读，所以这一项是
+    # 本地概念，**不属于行方 script_config 的 21 列**：执行器据此决定开
+    # 只读还是可写会话。行方文档全篇未提执行会话是否只读，所以这一项是
     # 我们自己加的约束，存储上也不占 script_config 的列（见 store.py）。
     readonly: bool = True
 
@@ -123,9 +123,9 @@ class ScriptRecord:
 
     @property
     def parameter_config(self) -> str:
-        """【实】与客户样例逐字一致：键名、键序、无空格。
+        """【实】与现场样例逐字一致：键名、键序、无空格。
 
-        这份 JSON 是双方共享的数据资产，格式偏一点，导出的 DML 客户就用不了。
+        这份 JSON 是双方共享的数据资产，格式偏一点，导出的 DML 行方就用不了。
         autoAcquire 是 JSON 布尔 false，不是字符串。
         """
         items = [
@@ -143,10 +143,10 @@ class ScriptRecord:
         return dataclasses.replace(self, id=str(script_id))
 
     def stamped(self, user: str, when: str) -> "ScriptRecord":
-        """填入审计列，取值形态照客户样例。时间由调用方给，本模块不取当前时刻。
+        """填入审计列，取值形态照现场样例。时间由调用方给，本模块不取当前时刻。
 
         last_modify_user 在创建时就与 create_user 同值填上，last_modify_time
-        留 NULL —— 客户既有记录就是这个形态，交付的 DML 要与之同形。
+        留 NULL —— 行方既有记录就是这个形态，交付的 DML 要与之同形。
         """
         return dataclasses.replace(
             self,
@@ -185,10 +185,10 @@ class ScriptRecord:
     def to_api_detail(self) -> Dict[str, Any]:
         """CommonOmOperationDetail —— 接口一响应里的一条命令详情。
 
-        description 取 script_name：客户响应里这两个值完全相同，且
+        description 取 script_name：行方响应里这两个值完全相同，且
         script_config 根本没有 description 列。照此复刻，不自作主张
         把 YAML 里给人看的描述填进去 —— 那会让本地调用方依赖一个
-        客户环境不存在的信息。
+        现场环境不存在的信息。
         """
         return {
             "id": self.id,

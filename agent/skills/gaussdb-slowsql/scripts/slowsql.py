@@ -100,7 +100,7 @@ def slow_sql_screened(runner, threshold_ms: int, limit: int, begin_time: str, ex
                       include_system: bool = False) -> tuple[list[StmtRow], "syssql.Screening"]:
     """(慢 SQL 行, 排除内核系统 SQL 的结果)。
 
-    2026-10-22 客户要求:慢 SQL 定位排除 GaussDB 自己的系统 SQL(WDR 快照、监控采集、诊断工具查系统视图),
+    2026-10-22 行方要求:慢 SQL 定位排除 GaussDB 自己的系统 SQL(WDR 快照、监控采集、诊断工具查系统视图),
     报告里写明排除了几条。include_system=True(--include-system)原样保留。
     """
     fetched = fetch_rows(runner, threshold_ms, limit if include_system else limit + syssql.SCREEN_MARGIN,

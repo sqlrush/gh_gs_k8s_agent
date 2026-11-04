@@ -1,6 +1,6 @@
-"""诊断 skill 脚本接入「客户知识库参照」小节的公共入口:按每条发现检索客户知识库。
+"""诊断 skill 脚本接入「本行知识库参照」小节的公共入口:按每条发现检索本行知识库。
 
-脚本层接入而不是靠提示词——模型是在已经看到客户先例的前提下作答的,「有没有看到」可以断言。
+脚本层接入而不是靠提示词——模型是在已经看到本行先例的前提下作答的,「有没有看到」可以断言。
 health / lockwait / sqltune 最早各自内联了同样几行(各自的 kb_section);之后接入的 skill 统一走这里。
 
 纪律与那三个一致:
@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Sequence, Tuple
 
-SECTION_TITLE = "## 客户知识库参照"      # 与 common/kb/render.py 同名小节;那边装不上时这里自己写
+SECTION_TITLE = "## 本行知识库参照"      # 与 common/kb/render.py 同名小节;那边装不上时这里自己写
 
 
 @dataclass(frozen=True)

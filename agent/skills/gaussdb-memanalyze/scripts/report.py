@@ -3,7 +3,7 @@
 The capability probe goes first, on purpose: before reading a single number the
 user must know which layers had data and which were blind, and why.
 
-唯一读外部的是 markdown 里的「客户知识库参照」小节(读知识库文件 / 索引,不连业务库;
+唯一读外部的是 markdown 里的「本行知识库参照」小节(读知识库文件 / 索引,不连业务库;
 失败只降级成「未接入」,见 common/kbsection.py)。
 """
 from __future__ import annotations
@@ -87,8 +87,8 @@ def render_markdown(ev: MemEvidence) -> str:
         parts.append("\n".join(f"> 注：{n}" for n in ev.notes) + "\n")
     parts.append(_capability_block(ev))
     parts.append(_findings_block(ev))
-    # 客户知识库对每条发现怎么说 —— 紧跟在确定性发现之后、各层明细之前(与 health 同一位置):
-    # 处置建议以客户先例为首选依据,不能让读者看完通用分析再想起它。JSON 输出不带(形状不变)。
+    # 本行知识库对每条发现怎么说 —— 紧跟在确定性发现之后、各层明细之前(与 health 同一位置):
+    # 处置建议以本行先例为首选依据,不能让读者看完通用分析再想起它。JSON 输出不带(形状不变)。
     parts.append(kbsection.markdown(ev.findings))
     parts += [_dim_block(d) for d in ev.dims]
     return "\n".join(parts)

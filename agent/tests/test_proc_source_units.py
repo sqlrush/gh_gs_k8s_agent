@@ -1,6 +1,6 @@
 """common.proc_source —— pg_proc 取不到时按 ADM_SOURCE 兜底取存储过程源码(procinfo / proctune 共用)。
 
-需求(客户 2026-10-29):开了对象隔离的库,普通账号查 pg_proc / pg_namespace 受行级访问控制,联表 0 行;
+需求(2026-10-29):开了对象隔离的库,普通账号查 pg_proc / pg_namespace 受行级访问控制,联表 0 行;
 ADM_SOURCE 是管理员视角的视图(owner / name / type / line / text,一行源码一条)。下面钉住:
   · 逐行拼接不假设行尾换行、空行可能是 NULL,拼出来第 N 行 = ADM_SOURCE 第 N 行;同一行号出现两次(重载)拒绝;
   · 过程头换成 DECLARE、行数不变,与 pg_proc.prosrc 同形,静态分析照常;

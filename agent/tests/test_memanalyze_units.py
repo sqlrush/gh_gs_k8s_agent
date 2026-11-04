@@ -523,7 +523,7 @@ def test_operator_layer_explains_itself_when_the_view_is_present_but_empty():
 
 
 def test_summarize_err_keeps_the_chinese_hint_whole():
-    """只取报错第一行会把第二行的「提示:…」整段丢掉——那段才是客户能照做的内容。
+    """只取报错第一行会把第二行的「提示:…」整段丢掉——那段才是行方能照做的内容。
     第一行照旧截 200 字,提示原样跟在后面。"""
     for _m in ("model", "util"):
         sys.modules.pop(_m, None)

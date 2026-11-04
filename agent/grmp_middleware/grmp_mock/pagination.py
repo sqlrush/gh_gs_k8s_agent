@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Sequence
 
-# PageHelper 默认值，客户响应中即为 8
+# PageHelper 默认值，行方响应中即为 8
 NAVIGATE_PAGES = 8
 
 

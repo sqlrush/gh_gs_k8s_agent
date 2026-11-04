@@ -80,8 +80,8 @@ class ShapeRejected(Exception):
 # 唯一能让它走中间件的写法是注册一条 `EXPLAIN {{user_sql}}` 的直通脚本
 # （实测可行，见 docs/test/2026-08-03-gh_skill-经中间件访问测试报告.md 发现 4）。
 # 本实现**不这么做**：那等于在白名单上开一个通用入口，任何 SQL 都能从这条
-# 脚本进去，白名单的意义被架空。要不要开这个口子是客户的安全策略决策，
-# 不是技术决策，不该由交付方替客户定。
+# 脚本进去，白名单的意义被架空。要不要开这个口子是行方的安全策略决策，
+# 不是技术决策，不该由交付方替行方定。
 #
 # 走的是注册好的 `EXPLAIN (...) {{sql}}` 模板 —— **中间件与直连同一条路**。
 # 原先还留了一条「模板受理不了就回落到原始连接」的旁路，理由是直连能出
@@ -285,7 +285,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     schema = args.schema
     fr = None
     if args.sql_id is not None:
-        # 客户 09-09 早截图:模型按 sqlfetch → explain 的流程贴文本,schema 在贴文本那一步丢了 → 400。
+        # 行方 09-09 早截图:模型按 sqlfetch → explain 的流程贴文本,schema 在贴文本那一步丢了 → 400。
         # 按 id 取时 statement_history 的 schema_name 一起带回来,表名不带 schema 也能出计划。
         try:
             runner = access.for_conn(args.conn, timeout=args.timeout)
@@ -414,7 +414,7 @@ def _emit_history(args, fr, hist) -> int:
 
 def _emit(args, sql_text: str, plan: str, source: str, notes: tuple) -> int:
     try:
-        # 要了 --analyze 却拿到估算计划(现场脚本按客户只读要求固定关闭 ANALYZE):来源行与说明都要写明。
+        # 要了 --analyze 却拿到估算计划(现场脚本按行方只读要求固定关闭 ANALYZE):来源行与说明都要写明。
         # 只对 EXPLAIN 那几条来源判——gs_get_explain 的运行态计划本来就不是 ANALYZE 的产物。
         analyzed = ea.analyzed_for_real(plan, args.analyze)
         if args.analyze and not analyzed and source.startswith("EXPLAIN"):

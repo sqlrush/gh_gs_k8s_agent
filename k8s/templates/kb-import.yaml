@@ -23,7 +23,7 @@ spec:
       enableServiceLinks: false
       securityContext: {runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, runAsNonRoot: true}
       # **新工号第一次登录:个人目录还不存在。** 主容器按 subPath 挂 ${SUBPATH_ROOT}/<工号> 时,kubelet 会以 root 建出它,
-      # 而本 Pod 以 uid 1000 运行 → 写不进 → opencode 反复崩溃重启(2026-09-24 客户现场、10-15 全新 NAS 实测;
+      # 而本 Pod 以 uid 1000 运行 → 写不进 → opencode 反复崩溃重启(2026-09-24 现场、10-15 全新 NAS 实测;
       # 以前只能先跑 runtime-doctor.sh <工号> --fix 绕过)。这里以 uid 1000 挂**父目录**先把它建好并确认可写 ——
       # 挂到工号这一级的话 kubelet 一样会先以 root 建出来。只有这个初始化容器挂得到整个 ${SUBPATH_ROOT}/,模型所在的主容器仍只挂本人那份。
       # 失败原因写进容器的终止消息,网关在用户等待时读得到(不用等满超时再让人去 describe)。

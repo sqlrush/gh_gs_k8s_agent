@@ -66,7 +66,7 @@ def _post(app, path, body):
 
 
 def _id_of(app, cmd_name):
-    """按逻辑名解析 ID —— 与 agent 在客户环境必须做的事完全一致。"""
+    """按逻辑名解析 ID —— 与 agent 在现场环境必须做的事完全一致。"""
     _, body = _post(app, LIST_PATH, {"dataIp": DATA_IP, "limit": 1000})
     for detail in body["result"]["list"]:
         if detail["cmd_name"] == cmd_name:

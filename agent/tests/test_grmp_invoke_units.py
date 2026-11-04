@@ -109,7 +109,7 @@ def _ok_body(script_id="1", param=None):
 
 
 # ===========================================================================
-# 1. 成功响应 —— 与客户样例同形
+# 1. 成功响应 —— 与现场样例同形
 # ===========================================================================
 
 def test_success_envelope_has_exactly_the_four_documented_keys(ctx):
@@ -226,7 +226,7 @@ def test_caller_cannot_ask_for_a_writable_session(ctx):
 # ===========================================================================
 
 def test_parameters_are_substituted_textually_into_the_sql(ctx):
-    """【实】客户样例 param 元素为 {param_name, param_value}，取值是字符串。"""
+    """【实】现场样例 param 元素为 {param_name, param_value}，取值是字符串。"""
     app, _, holder = ctx
     _invoke(
         app,

@@ -198,14 +198,14 @@ def _wait_display(p: dict) -> str:
 
 
 def kb_section(findings) -> str:
-    """「客户知识库参照」:按每条 finding 查客户知识库(脚本层接入,与 health 同款)。
+    """「本行知识库参照」:按每条 finding 查本行知识库(脚本层接入,与 health 同款)。
 
     知识库不存在 / 没配 / 连不上,小节只剩「> 知识库未接入(原因)」——报告照常,不许静默省略。
     """
     try:
         from common.kb import query as kbquery
     except ImportError as exc:                       # 旧安装没有 common/kb
-        return f"## 客户知识库参照\n> 知识库未接入(common/kb 未安装:{exc})\n\n"
+        return f"## 本行知识库参照\n> 知识库未接入(common/kb 未安装:{exc})\n\n"
     return kbquery.section_for(list(findings))[0]
 
 
@@ -241,7 +241,7 @@ def render_markdown(rep: LockReport) -> str:
         out.append("> **检测到死锁**：" + "；".join(
             " → ".join(str(s) for s in ring) + " → …回到起点"
             for ring in rep.deadlocks) + "\n")
-    # 客户知识库对这些锁发现怎么说——放在明细之前,处置建议(含下面的快速恢复语句)以它为首选依据。
+    # 本行知识库对这些锁发现怎么说——放在明细之前,处置建议(含下面的快速恢复语句)以它为首选依据。
     out.append(kb_section(rep.findings))
 
     body = []
@@ -701,7 +701,7 @@ def run_span(runner, args) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except (common.DBError, access.QueryError) as exc:
-        # 客户环境没导入新增的三条白名单时落到这里:说清是缺脚本,不是「没有锁等待」
+        # 现场环境没导入新增的三条白名单时落到这里:说清是缺脚本,不是「没有锁等待」
         print(f"error: 时段锁回溯取数失败({exc})。需要白名单里有 {aspchain.STATUS_SCRIPT} / "
               f"{aspchain.PAIRS_SCRIPT} / {aspchain.SESSIONS_SCRIPT} 三条脚本", file=sys.stderr)
         return 2

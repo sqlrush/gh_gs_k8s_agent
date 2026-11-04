@@ -1,6 +1,6 @@
 # 占位符替换前的列类型探测（coltypes.infer_types）。
 #
-# 现场教训（2026-08-11 客户日志）：比较列名不在整数白名单（如 grp / uid /
+# 现场教训（2026-08-11 行方日志）：比较列名不在整数白名单（如 grp / uid /
 # stock_quantity）时启发式兜底填 'test'，EXPLAIN 在计划期常量强转时报
 # `invalid input syntax for integer: "test"` —— 同一条 SQL 反复失败一小时，
 # agent 绕不出来。先问 catalog 再替换，合成值首发就类型正确。

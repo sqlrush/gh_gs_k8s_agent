@@ -36,7 +36,7 @@ def banner(app_settings: Settings, store: ScriptStore, imap: inst.InstanceMap,
         "grmp-mock —— GRMP 协议兼容中间件（测试替身）",
         "",
         "⚠️  仅限本机开发调试。只监听 %s，不得部署到共享或生产环境。" % BIND_HOST,
-        "    本进程对 {{}} 采用文本替换而非绑定变量 —— 这是为复现客户行为",
+        "    本进程对 {{}} 采用文本替换而非绑定变量 —— 这是为复现行方行为",
         "    而刻意保留的注入面，对外暴露等于把它挂到网上。",
         "",
         "监听      http://%s:%d%s(路径前缀取 GRMP_PATH_PREFIX,没设用样例前缀)" % (BIND_HOST, port, list_path),
@@ -56,7 +56,7 @@ def banner(app_settings: Settings, store: ScriptStore, imap: inst.InstanceMap,
         lines.append("可写脚本  无 —— 全部脚本都以只读会话执行")
     lines += [
         "",
-        "本进程当前的假设（未经客户环境证实，猜错多半不报错、只出错值）：",
+        "本进程当前的假设（未经现场环境证实，猜错多半不报错、只出错值）：",
     ]
     lines += ["  - %s" % line for line in app_settings.assumption_lines()]
     lines += [
@@ -101,7 +101,7 @@ def main(argv: Sequence[str] = None) -> int:
     parser.add_argument("--sign-window", type=int, default=signature.DEFAULT_WINDOW_SECONDS, help="Timestamp 允许偏差(秒)")
     parser.add_argument(
         "--no-require-signature", action="store_true",
-        help="过渡期(客户 2026-09-20,密钥审批未下来):只校验 Appkey 与 Timestamp,不验签。此时不需要 --sm2-public-key")
+        help="过渡期(2026-09-20,密钥审批未下来):只校验 Appkey 与 Timestamp,不验签。此时不需要 --sm2-public-key")
     args = parser.parse_args(argv)
 
     policy = None

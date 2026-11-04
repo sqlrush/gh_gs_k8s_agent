@@ -144,7 +144,7 @@ if __name__ == "__main__":
 
 def test_summarize_err_keeps_the_chinese_hint_whole():
     """降级说明可以截原始报错,但不能把「提示:」那段切掉——GRMP 路径的报错前缀
-    (status / task_id)本来就长,一刀 160 字正好切在提示中间,客户看到的是半句话。"""
+    (status / task_id)本来就长,一刀 160 字正好切在提示中间,行方看到的是半句话。"""
     # 不写 `from util import`:wdr / memanalyze 也有同名 util 模块,收集顺序不同会拿到别家的副本。
     # collectors 是本文件顶部锁定的 health 副本,它引用的 summarize_err 就是 health 的。
     summarize_err = collectors.summarize_err

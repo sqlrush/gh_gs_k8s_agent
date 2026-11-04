@@ -1,7 +1,7 @@
 """脚本定义：YAML → ScriptRecord（script_config 21 列）→ API 响应结构。
 
 YAML 是仓库内的单一事实源，两条执行路径共用；ScriptRecord 的字段刻意与
-客户 script_config 的 21 列对齐，使导出的 DML 可直接用于客户版本发布。
+行方 script_config 的 21 列对齐，使导出的 DML 可直接用于行方版本发布。
 """
 import sys
 import pathlib
@@ -54,7 +54,7 @@ def test_load_maps_yaml_to_script_record(tmp_path):
 
 
 def test_defaults_match_customer_sample_row(tmp_path):
-    """【实】客户 id=527 那条记录的作用域/场景字段取值，作为本仓库默认值。"""
+    """【实】行方 id=527 那条记录的作用域/场景字段取值，作为本仓库默认值。"""
     rec = _load(MINIMAL_YAML, tmp_path)
     assert rec.script_type == "SQL"
     assert rec.database_type == "postgres"
@@ -67,14 +67,14 @@ def test_defaults_match_customer_sample_row(tmp_path):
 
 
 def test_stamped_follows_customer_audit_column_pattern(tmp_path):
-    """【实】客户样例的四个审计列：
+    """【实】现场样例的四个审计列：
 
         create_user      = 工号
         create_time      = '2026-07-03 19:36:58.978'   毫秒精度
         last_modify_user = 同一个工号，创建时就填上
         last_modify_time = NULL
 
-    last_modify_user 留 NULL 与客户不符 —— 交付的 DML 要与客户既有记录同形。
+    last_modify_user 留 NULL 与行方不符 —— 交付的 DML 要与行方既有记录同形。
     """
     rec = _load(MINIMAL_YAML, tmp_path).stamped("123456789", "2026-07-03 19:36:58.978")
     assert rec.create_user == "123456789"
@@ -94,7 +94,7 @@ def test_scope_columns_default_to_none(tmp_path):
 
 
 def test_script_record_exposes_all_twenty_one_columns(tmp_path):
-    """【实】script_config 共 21 列，导出的 DML 要能直接用于客户环境。"""
+    """【实】script_config 共 21 列，导出的 DML 要能直接用于现场环境。"""
     rec = _load(MINIMAL_YAML, tmp_path)
     assert len(sc.SCRIPT_CONFIG_COLUMNS) == 21
     row = rec.as_row()
@@ -121,14 +121,14 @@ def test_script_without_params_yields_empty_param_list(tmp_path):
 
 
 # ===========================================================================
-# 2. parameter_config —— 必须与客户样例逐字一致
+# 2. parameter_config —— 必须与现场样例逐字一致
 # ===========================================================================
 
 def test_parameter_config_matches_customer_sample_verbatim(tmp_path):
-    """【实】客户样例：[{"key":"threshold_seconds","value":"","type":"INTEGER","autoAcquire":false}]
+    """【实】现场样例：[{"key":"threshold_seconds","value":"","type":"INTEGER","autoAcquire":false}]
 
     键名、键序、无空格都要一致 —— 这份 JSON 是双方共享的数据资产，
-    导出的 DML 要能被客户直接执行。
+    导出的 DML 要能被行方直接执行。
     """
     rec = _load(MINIMAL_YAML, tmp_path)
     assert rec.parameter_config == (
@@ -213,7 +213,7 @@ def test_api_detail_param_is_empty_array_not_null(tmp_path):
 
 
 def test_api_detail_description_falls_back_to_cmd_name(tmp_path):
-    """【例】客户响应里 description 与 cmd_name 完全相同，且 script_config 无该列。
+    """【例】行方响应里 description 与 cmd_name 完全相同，且 script_config 无该列。
 
     本实现照此处理：description 由脚本名兜底，调用方不应依赖它有独立含义。
     """

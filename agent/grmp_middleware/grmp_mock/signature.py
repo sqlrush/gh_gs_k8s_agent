@@ -1,8 +1,8 @@
-"""模拟客户 2026-09-18 起的中间件加固:在 auth 之外校验 Appkey / Timestamp / Signature。
+"""模拟行方 2026-09-18 起的中间件加固:在 auth 之外校验 Appkey / Timestamp / Signature。
 
-三道门对应客户的说法:调用方范围(Appkey 登记过)、重放(Timestamp 在窗口内)、上下文根签名
+三道门对应行方的说法:调用方范围(Appkey 登记过)、重放(Timestamp 在窗口内)、上下文根签名
 (Signature 是该 Appkey 私钥对「路径 + 时间戳」的 SM2 签名)。校验参数与 common/grmp/signing.py
-的旋钮一一对应,mock 启动时按客户最终口径配,skill 侧配一样的值,对不上就在本地先暴露。
+的旋钮一一对应,mock 启动时按行方最终口径配,skill 侧配一样的值,对不上就在本地先暴露。
 真实 GRMP 校验失败的响应形态未知(【缺】),这里沿用 mock 的业务错误模型并在 msg 里注明。
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ class SignaturePolicy:
     signature_encoding: str = "hex"
     payload: str = "{path}+{timestamp}"
     window_seconds: int = DEFAULT_WINDOW_SECONDS
-    # 2026-09-20 客户过渡期:密钥审批未下来,中间件先只校验 Appkey 与 Timestamp。
+    # 2026-09-20 行方过渡期:密钥审批未下来,中间件先只校验 Appkey 与 Timestamp。
     # 默认仍是 True —— 密钥到位后不改这里就自动是全校验。
     require_signature: bool = True
 

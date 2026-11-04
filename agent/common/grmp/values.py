@@ -34,7 +34,7 @@ def is_null(value: Any) -> bool:
     不能写 `if not x`：那会把 0 当成 NULL，而「autovacuum 距今 0 秒」
     与「从未 autovacuum」是两回事。
 
-    副作用：NULL 与真正的空串分不开。这是客户中间件自带的信息损失，
+    副作用：NULL 与真正的空串分不开。这是现场中间件自带的信息损失，
     不是我们能修的，只能一并当作「无值」。
     """
     return value is None or value == ""

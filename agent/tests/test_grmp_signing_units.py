@@ -1,8 +1,8 @@
-"""GRMP 请求签名(客户 2026-09-18 的中间件加固):每个请求在 auth 之外再带 Appkey / Timestamp / Signature。
+"""GRMP 请求签名(2026-09-18 的中间件加固):每个请求在 auth 之外再带 Appkey / Timestamp / Signature。
 
 设置来源:环境变量 > config.yaml 的 api_connection;没配 appkey 就不签(兼容还没开校验的中间件)。
 私钥:环境变量 GRMP_SM2_PRIVATE_KEY > 凭据文件(默认名 grmp-sm2)。
-签名细节(时间戳单位 / 编码 / 格式 / userId / 原文拼法)全部可配,客户那边任何一项对不上都不用改代码。
+签名细节(时间戳单位 / 编码 / 格式 / userId / 原文拼法)全部可配,行方那边任何一项对不上都不用改代码。
 """
 import json
 import pathlib

@@ -1,4 +1,4 @@
-"""慢 SQL / Top SQL 排行排除内核系统 SQL(2026-10-22 客户要求)—— slowsql 与 topsql 的接线。
+"""慢 SQL / Top SQL 排行排除内核系统 SQL(2026-10-22 行方要求)—— slowsql 与 topsql 的接线。
 
 钉住:系统 SQL 不上榜、榜不因排除而变短(多取了余量)、报告里写明排除了几条、--include-system 原样保留、
 正文截断(80 / 180 字)时按 sql_id 补全文再判。判定本身见 test_syssql_units.py。

@@ -1,11 +1,11 @@
 """script_config 的本地存储（SQLite）。
 
 为什么不建在 og 上：og 有 200 万行 demo 数据，不希望被测试元数据污染；
-中间件的元数据本来就属于中间件自己（客户那边 GRMP 也有独立的库）；
+中间件的元数据本来就属于中间件自己（行方那边 GRMP 也有独立的库）；
 标准库自带 sqlite3，零依赖。
 
-表结构保留客户 script_config 的 21 列全集，包括我们用不到的作用域列 ——
-注册工具据此导出的 INSERT DML 才能直接交给客户走版本发布。
+表结构保留行方 script_config 的 21 列全集，包括我们用不到的作用域列 ——
+注册工具据此导出的 INSERT DML 才能直接交给行方走版本发布。
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from common.grmp.placeholder import ParamDef
 from common.grmp.script import SCRIPT_CONFIG_COLUMNS, ScriptRecord
 
-# 21 列的 SQLite 类型。客户侧 id 是 varchar，这里同样用 TEXT ——
+# 21 列的 SQLite 类型。行方 id 是 varchar，这里同样用 TEXT ——
 # 用 INTEGER 会让读出来的 id 变成数字，进而让协议里的字符串 id 悄悄变形。
 _COLUMN_TYPES: Dict[str, str] = {
     "id": "TEXT PRIMARY KEY",
@@ -51,7 +51,7 @@ class StoreError(Exception):
 
 
 def _quote_ident(name: str) -> str:
-    """SQLite 标识符引用。extend 在客户 DML 里也是带引号的。"""
+    """SQLite 标识符引用。extend 在行方 DML 里也是带引号的。"""
     return '"%s"' % name.replace('"', '""')
 
 
@@ -77,8 +77,8 @@ class ScriptStore:
         )
         with self._connect() as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS script_config (%s)" % cols)
-            # 只读标记单独一张表。它是本实现自己的概念，客户 script_config
-            # 的 21 列里没有对应项；塞进去会让导出的 DML 多一列，客户拿去
+            # 只读标记单独一张表。它是本实现自己的概念，行方 script_config
+            # 的 21 列里没有对应项；塞进去会让导出的 DML 多一列，行方拿去
             # 直接执行就会失败。导出 DML 时这张表也不参与。
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS script_local ("
@@ -174,8 +174,8 @@ def _params_from_config(raw: Optional[str]) -> Tuple[ParamDef, ...]:
 
     描述在这里丢失是必然的 —— parameter_config 的四个键
     (key/value/type/autoAcquire) 里没有描述位。这是客户数据模型自带的
-    信息损失，必须一并复刻：若我们额外存一份描述，本地 API 会返回客户
-    API 给不出的信息，调用方据此写出的代码到客户环境就会失效。
+    信息损失，必须一并复刻：若我们额外存一份描述，本地 API 会返回行方
+    API 给不出的信息，调用方据此写出的代码到现场环境就会失效。
     """
     if not raw:
         return ()

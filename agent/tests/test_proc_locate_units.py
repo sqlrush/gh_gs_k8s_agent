@@ -1,6 +1,6 @@
 """common.proc_locate —— 过程「找不到」时代为排查:连的库对不对、有没有权限、本身在不在,并给用户问题清单。
 
-现场(客户 09-08 晚截图):procinfo 按三段名查 gmag.pckg_xxx.proc_maketext 得 0 行,脚本只报一句「找不到」,
+现场(09-08 晚截图):procinfo 按三段名查 gmag.pckg_xxx.proc_maketext 得 0 行,脚本只报一句「找不到」,
 模型手里没有任何可继续查的工具,写了两条跑不了的 SQL 后把问题推回用户「确认拼写」。
 og5 实测(对象隔离 ENABLE PRIVATE OBJECT):隔离藏的是 pg_namespace 那一行——pg_proc 单表仍查得到、gs_package 仍查得到,
 三表 JOIN 就成了 0 行;授 USAGE 后全部可见。所以「过程在但 schema 不可见」是可推断的,其余情况交给用户/DBA 回答。

@@ -1,7 +1,7 @@
-"""把调用人工号送到 GRMP(客户 2026-09-20 确认要)。
+"""把调用人工号送到 GRMP(2026-09-20 确认要)。
 
 中间件按 `dataIp` 路由、按 `auth` 令牌认调用方,报文里本来没有「谁在调用」这一维
-(脚本白名单表 21 列全是实例属性,`create_user` 只是建表人)。客户确认要显式收工号。
+(脚本白名单表 21 列全是实例属性,`create_user` 只是建表人)。本行确认要显式收工号。
 
 **字段名与位置还没给**,所以两处都做成开关,跟签名旋钮一个路子——对不上不用改代码:
 
@@ -17,7 +17,7 @@
 **配了字段名却取不到工号 → ConfigError,不发空值。** 悄悄发空,中间件看到的是
 「有人调用但没有身份」,而我方退出码 0、报告照出,正是最难查的那类失效。
 默认签名原文是「路径 + 时间戳」,不含头与报文,所以加这两样不影响签名;
-若客户日后改成对报文签名,`GRMP_USER_ID_PARAM` 要在签名之前加进去,届时再调顺序。
+若行方日后改成对报文签名,`GRMP_USER_ID_PARAM` 要在签名之前加进去,届时再调顺序。
 """
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def settings_from(env: Mapping[str, str]) -> Optional[UserIdSettings]:
 
 
 def apply_headers(settings: Optional[UserIdSettings], headers: Dict[str, str]) -> Dict[str, str]:
-    """返回新的头字典;没配头名时原样返回。头名按客户给的原文发,不做大小写归一。"""
+    """返回新的头字典;没配头名时原样返回。头名按行方给的原文发,不做大小写归一。"""
     if settings is None or not settings.header:
         return headers
     return {**headers, settings.header: settings.user_id}

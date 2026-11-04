@@ -91,7 +91,7 @@ def test_rows_carry_self_time_and_wait_share():
 
 
 def test_old_whitelist_without_cpu_columns_degrades_to_unknown_not_zero():
-    """客户还没重导白名单时取数脚本没有 cpu_sec:不能当 0 —— 那会把每条都标成「全在等」。"""
+    """行方还没重导白名单时取数脚本没有 cpu_sec:不能当 0 —— 那会把每条都标成「全在等」。"""
     rows = topsql.top_sql(FakeRunner(with_cpu=False), "time", 10)
     assert all(r.self_sec is None and r.wait_ratio is None for r in rows)
     out = topsql.stmt_table("Top SQL by time", rows)

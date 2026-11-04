@@ -4,7 +4,7 @@
   · synonyms —— 现场的叫法,同时是 L1 的「症状与同义词」与文字归类的依据;
   · codes    —— 诊断发现 code 的正则(LOCK_* / CONN_* …),发现按 code 直接落到专题;
   · dimensions —— 发现的维度名片段(health / wdr 的 DIM_*),code 没对上时按维度。
-默认 12 个写在这里;客户在 <kb>/topics/_taxonomy.yaml 里增删改(同 slug 覆盖,新 slug 追加,
+默认 12 个写在这里;行方在 <kb>/topics/_taxonomy.yaml 里增删改(同 slug 覆盖,新 slug 追加,
 `disabled: true` 去掉一个默认专题)。taxonomy 文件坏了不炸,退回默认并带一条 warning。
 """
 from __future__ import annotations

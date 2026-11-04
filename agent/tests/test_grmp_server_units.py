@@ -22,7 +22,7 @@ LIST_PATH = "/example/grmp/diagnostic/agent/common-operations"
 INVOKE_PATH = LIST_PATH + "/invoke"
 
 TOKEN = "0123456789abcdef0123456789abcdef"
-DATA_IP = "10.0.0.9"          # 本机映射用的占位 IP，不使用客户测试环境的真实 IP
+DATA_IP = "10.0.0.9"          # 本机映射用的占位 IP，不使用现场测试环境的真实 IP
 UNKNOWN_IP = "1.2.3.4"
 
 
@@ -76,7 +76,7 @@ def test_instance_map_rejects_multi_ip_input():
 
 
 def test_missing_instance_file_yields_empty_map(tmp_path):
-    """配置缺失时映射为空，于是每个 dataIp 都走「查不到实例」——与客户同形。"""
+    """配置缺失时映射为空，于是每个 dataIp 都走「查不到实例」——与行方同形。"""
     m = inst.load(tmp_path / "nope.yaml")
     assert m.resolve(DATA_IP) is None
     assert m.count() == 0
@@ -148,9 +148,9 @@ def test_get_method_is_rejected(app):
 
 
 def test_dataip_path_variant_is_accepted_with_body_taking_precedence(app):
-    """接口文档的示例 URL 带 /dataip/{dataip} 段，客户实际调用没有。
+    """接口文档的示例 URL 带 /dataip/{dataip} 段，行方实际调用没有。
 
-    以客户实际调用为准，但一并接受带路径段的写法（否则照着文档写的
+    以行方实际调用为准，但一并接受带路径段的写法（否则照着文档写的
     客户端会拿到 404，排查方向会被带偏）；冲突时以 body 为准。
     """
     path = (
@@ -169,7 +169,7 @@ def test_dataip_path_variant_is_accepted_with_body_taking_precedence(app):
 # ===========================================================================
 
 def test_unknown_data_ip_returns_the_customer_error_verbatim(app):
-    """【实】客户示例第 6 节：传入不存在的 dataIp 的返回，必须逐字一致。"""
+    """【实】行方示例第 6 节：传入不存在的 dataIp 的返回，必须逐字一致。"""
     status, body = _post(app, body={"dataIp": UNKNOWN_IP})
     assert status == 200
     assert body == {
@@ -196,7 +196,7 @@ def test_non_object_json_body_is_rejected(app):
 
 
 def test_offset_and_limit_default_to_one_and_ten(app):
-    """【规】offset 默认 1，limit 默认 10；【实】客户示例中两者确实可省。"""
+    """【规】offset 默认 1，limit 默认 10；【实】行方示例中两者确实可省。"""
     _, body = _post(app, body={"dataIp": DATA_IP})
     assert body["result"]["pageNum"] == 1
     assert body["result"]["pageSize"] == 10

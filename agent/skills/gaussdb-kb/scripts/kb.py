@@ -215,7 +215,7 @@ def _share_health(kb: pathlib.Path, d: dict) -> None:
     """知识库可写(导入环境)时,状态另写一份到共享知识库 index/health.json。
 
     个人报告在导入环境写进 admins/<工号>/reports,而大盘只读诊断环境那份 —— 知识库管理员照大盘的提示「在会话里查一次」
-    却看不到(2026-11-03 客户反馈,测试环境复现)。报告服务在本人那份缺失或更旧时读这一份。状态本来就是共享知识库的
+    却看不到(2026-11-03 行方反馈,测试环境复现)。报告服务在本人那份缺失或更旧时读这一份。状态本来就是共享知识库的
     (索引、文档集、收件目录、缺口都在知识库目录里),不该按人和环境分开存。写失败只 warn。"""
     from common.kb import atomic
     try:
@@ -293,7 +293,7 @@ def cmd_health(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kb.py",
-        description="GaussDB 客户知识库(查询):检索 · 分层读取(L0 overview / L1 topic / L2 show / L3 evidence)· 大盘 · 引用核对。"
+        description="GaussDB 本行知识库(查询):检索 · 分层读取(L0 overview / L1 topic / L2 show / L3 evidence)· 大盘 · 引用核对。"
                     "导入与索引在 gaussdb-kb-import。",
     )
     sub = parser.add_subparsers(dest="command", required=True)

@@ -20,7 +20,7 @@ TEXT_SUFFIXES = (".txt", ".md", ".markdown", ".sql", ".log")
 
 
 def read_text_file(path: pathlib.Path) -> str:
-    """utf-8 读不出来就按 gb18030 再试一次——客户的 txt 十有八九是后者。
+    """utf-8 读不出来就按 gb18030 再试一次——行方的 txt 十有八九是后者。
 
     与 rulesfile 里的同名函数实现相同:本模块要在**未拆分**的部署里也能独立工作
     (那边没有 rulesfile),所以自带一份,不跨模块依赖。
@@ -159,7 +159,7 @@ def pdf_extraction_problem(text: str, pages: int) -> Optional[str]:
             f"超过 {_PDF_MAX_GARBAGE:.0%})。常见于 PDF 内嵌 CID 字体但缺少 ToUnicode "
             f"映射表——抠出来的是私用区码位,看着像内容,实际是垃圾。"
             f"**乱码入库比空文档更糟**:模型会把它当成规范条款。"
-            f"请用 Adobe/WPS 的「PDF 转 Word」重新导出,或向客户索要 .docx 原件。"
+            f"请用 Adobe/WPS 的「PDF 转 Word」重新导出,或向行方索要 .docx 原件。"
         )
     return None
 
@@ -170,7 +170,7 @@ def _scanned_msg(pages: int, chars: int) -> str:
         f"PDF 提取到的文本过少({where})。这几乎可以肯定是**扫描件/图片型 PDF**——"
         f"里面的字是图片,不是文本。**本工具不做 OCR**。\n"
         f"请先 OCR 转成文本(Adobe/WPS 的「PDF 转 Word」、macOS 预览的实时文字识别、"
-        f"或向客户索要 .docx/.txt 原件),再导入。\n"
+        f"或向行方索要 .docx/.txt 原件),再导入。\n"
         f"绝不入库空文档:那会让模型误以为「这份规范没有条款」。"
     )
 

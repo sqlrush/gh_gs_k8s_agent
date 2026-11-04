@@ -9,7 +9,7 @@
 #   - 开了签名校验的 GRMP mock(8782)+ 转发 8781,Pod 经宿主网关访问它
 #   - 两个用户:普通用户(只有 runtime)与知识库管理员(runtime + kb-import)
 #   - 两个 port-forward,浏览器和 CLI 都从本机 127.0.0.1 接入
-# 与客户环境的差别:中间件是 mock、模型是 DeepSeek、NAS 是 hostPath、网关的活由这个脚本代劳。
+# 与现场环境的差别:中间件是 mock、模型是 DeepSeek、NAS 是 hostPath、网关的活由这个脚本代劳。
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")/../.." && pwd)
 C=${CONTEXT:-orbstack}; NS=gaussdb-agent
@@ -110,7 +110,7 @@ key = cfg["provider"]["deepseek"]["options"]["apiKey"]
 print("apiVersion: v1\nkind: Secret\nmetadata:\n  name: model-api\n  namespace: gaussdb-agent\ntype: Opaque\nstringData:\n  MODEL_API_KEY: %s" % json.dumps(key))
 PY
 
-echo "== 4 供给两个用户的 Pod(网关在客户环境干的事)"
+echo "== 4 供给两个用户的 Pod(网关在现场环境干的事)"
 "$PY" "$HERE/scripts/k8s/provision.py" "$USER_NORMAL" --image-tag "$TAG" 2>&1 | sed 's/^/   /'
 "$PY" "$HERE/scripts/k8s/provision.py" "$USER_ADMIN" --kb-admin --image-tag "$TAG" 2>&1 | sed 's/^/   /'
 

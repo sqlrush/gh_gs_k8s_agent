@@ -97,6 +97,7 @@ def input_modalities(env: Mapping[str, str]) -> Optional[list]:
 # 写进 opencode.json 才是 opencode 真执行的(1.18.27 实测这些键都认)。bash 规则**最后一条匹配的生效**,
 # 复合命令(管道、&&、$())逐条核对,`*` 能匹配 `/` 与空格,所以:先全拒,再放行,最后把放行里的漏洞拒回去。
 ROLE_RUNTIME, ROLE_KB_IMPORT = "runtime", "kb-import"
+ROOTSPEC_SEARCH = "/workspace/search_docs.py"     # 镜像里的根规范检索脚本(本行知识库不可用或查不到时用)
 _READ_ONLY_COMMANDS = ("cat", "grep", "head", "tail", "ls", "wc", "sort", "uniq", "cut", "date", "echo", "pwd",
                        "ps", "df", "du", "free", "find", "cd", "stat", "file", "tree", "realpath", "basename",
                        "dirname", "which", "diff", "true")
@@ -129,6 +130,7 @@ def opencode_permissions(env: Mapping[str, str]) -> dict:
     skills = (env.get("XDG_CONFIG_HOME") or "/data/config").rstrip("/") + "/opencode/skills"
     # 顺序就是规则:先全拒 → 放行技能脚本与只读命令 → 拒掉一切重定向 → 给放行过的命令补安全结尾 → 最后再拒漏洞。
     allowed = ["%s %s/gaussdb-*" % (py, skills) for py in ("python3", "python")]
+    allowed += ["%s %s" % (py, ROOTSPEC_SEARCH) + tail for py in ("python3", "python") for tail in ("", " *")]   # 根规范检索
     allowed += [p for cmd in _READ_ONLY_COMMANDS for p in (cmd, cmd + " *")]
     bash: Dict[str, str] = {"*": "deny"}
     bash.update((p, "allow") for p in allowed)
@@ -140,7 +142,7 @@ def opencode_permissions(env: Mapping[str, str]) -> dict:
         "webfetch": "deny", "websearch": "deny",               # 数据不出域
         "skill": {"*": "deny", "gaussdb-*": "allow"},
         "read": "allow", "glob": "allow", "grep": "allow", "list": "allow",
-        "external_directory": "allow",          # 知识库 /nas/kb 在项目目录之外,模型要能读规则原文
+        "external_directory": "allow",          # 知识库 /nas/kb 与根规范 /workspace/docs 在项目目录之外,模型要能读原文
         "bash": bash,
     }
 
@@ -423,7 +425,7 @@ def make_reports_server(root: pathlib.Path, port: int, user_id: str = "", kb_dir
     另一条不是文件的路径是 /_kb/catalog.json:大盘知识库页签的目录,由 kbcatalog 从共享知识库现读现算
     (只读案例 / 现行条款 / 已确认的边,不读收件目录与原件)。没给 kb_dir 就没有这条路。
     「目录」页签按渐进式披露一层层取(kboutline,2026-10-25):/_kb/outline.json(L0 + L1)、
-    /_kb/list.json(L1 下钻,分页)、/_kb/item/<ID>.json(L2)、/_kb/evidence/<ID>.json(L3;客户条目只给出处,不给原件)。
+    /_kb/list.json(L1 下钻,分页)、/_kb/item/<ID>.json(L2)、/_kb/evidence/<ID>.json(L3;本行条目只给出处,不给原件)。
     知识库里的文件本身不能经这个端口直接取 —— 只端算好的目录。
 
     token 非空时(固定池化,2026-10-23)每个请求都要带 `Authorization: Bearer <token>`,否则 401:

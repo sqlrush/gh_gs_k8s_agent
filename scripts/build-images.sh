@@ -7,11 +7,11 @@
 #   推仓库:     scripts/build-images.sh agent-v1.0.5-oc1.18.27 \
 #                 --registry ghcr.io/sqlrush --platform linux/amd64,linux/arm64 --push
 #
-# **--push 有两道闸,都是 2026-09-22 客户拉不到镜像换来的。** 当时镜像是在 Mac
-# (aarch64)上 `docker tag 本地镜像 → docker push` 推到 GHCR 的,客户在 x86 服务器上拉:
+# **--push 有两道闸,都是 2026-09-22 行方拉不到镜像换来的。** 当时镜像是在 Mac
+# (aarch64)上 `docker tag 本地镜像 → docker push` 推到 GHCR 的,行方在 x86 服务器上拉:
 #   no matching manifest for linux/amd64/v3 in the manifest list entries
 # 标签在、权限也对,那个 manifest list 里**只有 arm64**。而推送侧全程没有任何报错:
-# push 成功、在 Mac 上 pull 回来也正常 —— 只有客户那台机器会失败。
+# push 成功、在 Mac 上 pull 回来也正常 —— 只有行方那台机器会失败。
 #   ① --push 必须带 --registry:没有仓库前缀的 tag 推到 docker.io/library,说不清推去了哪;
 #   ② --push 必须是多架构,除非显式 --single-arch 认下「这次只推本机架构」。
 set -euo pipefail
@@ -47,7 +47,7 @@ if [ -n "$PUSH" ]; then
     *)
       if [ -z "$SINGLE" ]; then
         echo "--push 只给了 ${PLATFORM:-本机架构},推上去就是**单架构镜像**。" >&2
-        echo "客户在另一种架构上拉会看到 'no matching manifest for linux/... in the manifest" >&2
+        echo "行方在另一种架构上拉会看到 'no matching manifest for linux/... in the manifest" >&2
         echo "list entries',而推送这一侧不会有任何报错。两条路选一条:" >&2
         echo "  加 --platform linux/amd64,linux/arm64  (推荐,一个标签同时含两种架构)" >&2
         echo "  加 --single-arch                       (明确只推本机架构)" >&2
@@ -69,7 +69,7 @@ done
 docker buildx build $PLATFORM $LOAD $PUSH -f "$HERE/docker/Dockerfile.gateway" \
   -t "${PREFIX}gaussdb-agent-gateway:$TAG" "$HERE"
 # 前端不在本仓库构建:由前端方自建镜像,按 docs/前端对接接口说明.md 接入
-# 发版台:跳板机上跑的独立程序(不进 k8s)。随离线包单独一个 tar 发出,不推进客户的镜像仓库
+# 发版台:跳板机上跑的独立程序(不进 k8s)。随离线包单独一个 tar 发出,不推进行方的镜像仓库
 # shellcheck disable=SC2086
 docker buildx build $PLATFORM $LOAD $PUSH -f "$HERE/docker/Dockerfile.release" \
   -t "${PREFIX}gaussdb-agent-release:$TAG" "$HERE"

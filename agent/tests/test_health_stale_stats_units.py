@@ -60,7 +60,7 @@ def test_a_never_analyzed_table_is_flagged():
 
 
 def test_an_unreadable_stale_stats_script_is_said_not_silent():
-    """客户还没重导白名单时,新代码传的 min_pages 会被中间件拒(脚本未声明的参数)。"""
+    """行方还没重导白名单时,新代码传的 min_pages 会被中间件拒(脚本未声明的参数)。"""
     err = access.QueryError("传入了脚本未声明的参数：min_pages")
     d = collectors.collect_schema(_Runner(err), thresholds.default_thresholds(), 10)
     rows = [r for r in d.rows if r[0] == "统计新鲜度"]

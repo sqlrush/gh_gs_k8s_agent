@@ -314,7 +314,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
               "新增 / 沿用 / 修改 / 废止。")
         print("  废止的条款移进 archive/ 并标 status: deprecated —— **不要直接删除**"
               "(ID 需永远可追溯,且永不复用)。")
-        print("  漏掉这一步,各 skill 会继续按已废止的规范判客户违规,而 validate 查不出来。")
+        print("  漏掉这一步,各 skill 会继续按已废止的规范判行方违规,而 validate 查不出来。")
         print()
 
     print("Next: 按 SKILL.md 工作流分段阅读 source.md,把条款分类写入 rules/ guides/ errata/,"
@@ -467,7 +467,7 @@ def cmd_index(args: argparse.Namespace) -> int:
         "",
         "## archive/(已废止条款 —— 仅供追溯,**不得据此判定**)",
         "",
-        "> 这些条款已被客户的新版规范废止,**不在检索范围内**,也不得用来认定任何违规。",
+        "> 这些条款已被行内的新版规范废止,**不在检索范围内**,也不得用来认定任何违规。",
         "> 列在这里只为一件事:历史报告引用过这些 ID,ID 必须永远可追溯、且永不复用。",
         "",
     ]
@@ -673,7 +673,7 @@ def validate_rules_listing(kb: pathlib.Path, findings: list) -> None:
     所以校验双向卡死:
       - 现行条款缺席清单 → 模型永远看不见它;
       - 清单里的 ID 在 rules/ 已无对应现行条款 → 幽灵条款(多半是废止/删除后忘了重跑 index),
-        会让模型据一条并不存在的规范去判客户违规。
+        会让模型据一条并不存在的规范去判行方违规。
     """
     listing = kb / "RULES.md"
     if not listing.is_file():
@@ -960,7 +960,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="kb.py",
-        description="GaussDB 客户知识库(导入):规范/工单导入 · 选择列表确认 · 索引(SQLite + sqlite-vec,可选 Neo4j) · 契约注入。"
+        description="GaussDB 本行知识库(导入):规范/工单导入 · 选择列表确认 · 索引(SQLite + sqlite-vec,可选 Neo4j) · 契约注入。"
                     "查询、大盘、引用核对在 gaussdb-kb。",
     )
     sub = parser.add_subparsers(dest="command", required=True)

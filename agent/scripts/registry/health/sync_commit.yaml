@@ -7,7 +7,7 @@
 # `replconninfo1..N` 定义对端才会生效,而 og5 上这些全是空的(单机部署)。
 #
 # 所以只看 `synchronous_commit` + `synchronous_standby_names` 就报警,会在
-# **每一个单机库上乱报** —— 而单机库恰恰是客户环境里最多的一类。必须拿
+# **每一个单机库上乱报** —— 而单机库恰恰是现场环境里最多的一类。必须拿
 # replconninfo 是否配过来区分,这就是 peers_configured 这一列。
 #
 # 四个事实各自不可省:

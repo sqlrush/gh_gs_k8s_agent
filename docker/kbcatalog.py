@@ -9,7 +9,7 @@
   graph/*.yaml     已确认(accepted)的关系边;canonical.yaml 只用来把同一对象的不同叫法合成一个节点
   errata/ 与六类类型化条目(wiki/ product/ runbooks/ defects/ baselines/ profiles/,2026-10-24 八类知识):
                    每条带类型与专题标签;topics/_taxonomy.yaml 只用来取专题名
-收件目录 inbox/、原始材料 sources/ 与 raw/、索引 index/ 都不读:那里是未审核的材料与客户原件,
+收件目录 inbox/、原始材料 sources/ 与 raw/、索引 index/ 都不读:那里是未审核的材料与原件,
 大盘上不该出现。
 
 解析全部复用 common/kb 里检索用的那几个函数(cases / rulesfile / graphfiles),

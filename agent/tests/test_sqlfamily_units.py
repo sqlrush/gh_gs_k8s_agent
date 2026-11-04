@@ -11,7 +11,7 @@ def _dir(skill: str) -> str:
 
     这里曾经写死 skills/<skill>/，目录名却是 skills/gaussdb-<skill>/ ——
     收集阶段就 FileNotFoundError，整个 tests/ 一起中断。也就是说本文件
-    自客户版导入起从未跑过，看着像覆盖，实际一条没执行。
+    自行方版导入起从未跑过，看着像覆盖，实际一条没执行。
     """
     return skill if skill.startswith("gaussdb-") else "gaussdb-" + skill
 

@@ -1,8 +1,8 @@
 """标准化(gaussdb-kb-init)→ 导入(gaussdb-kb-import)的交接。
 
 kb-init 已经把时间 / 系统 / 出处定下来了,导入这一侧必须**认得**这些已定字段,否则:
-  1. 案例的 `source` 会指向我们的中间文件,而不是客户原件——出处回指链断在自己手里(加 kb-init 引入的回退);
-  2. 原始工单号(客户拿它跟 ITSM 交叉引用)被换成 `<批次>-N`;
+  1. 案例的 `source` 会指向我们的中间文件,而不是原件——出处回指链断在自己手里(加 kb-init 引入的回退);
+  2. 原始工单号(行方拿它跟 ITSM 交叉引用)被换成 `<批次>-N`;
   3. 模型在候选里把六要素**再抽一遍**,与标准化文档不一致时没有任何东西核对——静默漂移。
 非 std 的材料必须一字不变地走老路(这里有回归守卫)。
 """
@@ -35,7 +35,7 @@ DRAFT = {
     "处置": "将 cbst.seq_acct_no 的 CACHE 改为 1000（本行口径不低于 500）。",
     "复发标志": "insert 等待集中在序列取号，且该序列 CACHE=1。",
 }
-# kb-init 写的出处指向**客户原件**
+# kb-init 写的出处指向**原件**
 META = {"source": "工单导出-2025Q3.csv#row=2", "source_file": "工单导出-2025Q3.csv",
         "source_kind": "csv", "extracted_by": "script"}
 
@@ -70,7 +70,7 @@ def test_split_keeps_each_block_distinct_when_several_std_tickets_share_a_file(t
 
 
 def test_non_std_markdown_is_split_exactly_as_before(tmp_path):
-    """回归守卫:客户直接丢进来的普通 md 不能受影响。"""
+    """回归守卫:行方直接丢进来的普通 md 不能受影响。"""
     text = "# 第一单\n\n现象 A。\n\n---\n\n# 第二单\n\n现象 B。\n"
     items = kbingest.split_text_items(text, "raw.md", "raw")
     assert [it.id for it in items] == ["raw-1", "raw-2"]
@@ -87,7 +87,7 @@ def test_a_block_missing_the_required_std_keys_is_not_treated_as_std(tmp_path):
     assert it.id == "raw" and it.locator == "raw.md"
 
 
-# ---------------------------------------------------------------- 落盘:出处指回客户原件
+# ---------------------------------------------------------------- 落盘:出处指回原件
 
 def test_written_item_cites_the_customers_file_not_our_intermediate_one(tmp_path):
     items = kbingest.split_text_items(_std_file(tmp_path).read_text(encoding="utf-8"),

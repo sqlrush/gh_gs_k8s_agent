@@ -1,6 +1,6 @@
 """知识库目录(大盘知识条目 / 案例 / 条款 / 关系图页签的数据)。
 
-最要紧的是**只端该端的**:收件目录里未审核的材料、客户原件、已废止条款、候选边都不能上大盘。
+最要紧的是**只端该端的**:收件目录里未审核的材料、原件、已废止条款、候选边都不能上大盘。
 """
 import json
 import pathlib
@@ -76,7 +76,7 @@ CPU 占 DB time 84%
     (kb / "inbox" / "x").mkdir(parents=True)
     (kb / "inbox" / "x" / "未审核.md").write_text("未审核的工单 SECRET-INBOX", encoding="utf-8")
     (kb / "sources").mkdir()
-    (kb / "sources" / "客户原件.md").write_text("客户原件 SECRET-SOURCE", encoding="utf-8")
+    (kb / "sources" / "原件.md").write_text("原件 SECRET-SOURCE", encoding="utf-8")
     return kb
 
 

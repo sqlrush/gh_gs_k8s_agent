@@ -49,16 +49,16 @@ def _missing_section(sub_results, no_sub_note: str = "") -> str:
 
 
 def kb_section(findings) -> tuple:
-    """「客户知识库参照」:按每条 finding 查客户知识库,固定小节 + JSON。
+    """「本行知识库参照」:按每条 finding 查本行知识库,固定小节 + JSON。
 
-    脚本层接入而不是靠提示词——模型是在已经看到客户先例的前提下作答的,"有没有看到"
+    脚本层接入而不是靠提示词——模型是在已经看到本行先例的前提下作答的,"有没有看到"
     可以断言。知识库不存在 / 没配 / 连不上,小节只剩「> 知识库未接入(原因)」,报告照常。
     没装 common/kb(旧安装)也一样降级,不许让健康检查因为知识库炸掉。
     """
     try:
         from common.kb import query as kbquery
     except ImportError as exc:
-        text = f"## 客户知识库参照\n> 知识库未接入(common/kb 未安装:{exc})\n\n"
+        text = f"## 本行知识库参照\n> 知识库未接入(common/kb 未安装:{exc})\n\n"
         return text, {"status": {"attached": False, "reason": f"common/kb 未安装:{exc}"}, "items": []}
     return kbquery.section_for(list(findings))
 
@@ -101,7 +101,7 @@ def render_health(ev: HealthEvidence, sub_results=(), no_sub_note: str = "") -> 
     # 再进正文——不能让读者先看到一份干净的报告，才在最后发现漏了什么。
     out += _missing_section(sub_results, no_sub_note)
     out += _uncovered_section()
-    # 第三段固定小节:客户知识库对每条发现怎么说(条款 / 相似案例 / 本行历史路径)。
+    # 第三段固定小节:本行知识库对每条发现怎么说(条款 / 相似案例 / 本行历史路径)。
     # 放在维度正文之前——处置建议要以它为首选依据,不能让读者(模型)先看完通用分析再想起它。
     out += kb_section(ev.findings)[0]
 

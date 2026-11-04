@@ -5,7 +5,7 @@
 #
 # 正文与 procinfo.key_gucs 逐字相同（common/sql.py 里 skill_sqltune_004 与
 # skill_procinfo_002 本来就是两份相同的常量）。**刻意不复用同一个逻辑名**：
-# 逻辑名按 skill 分域，客户侧审批与作废也按域走；共用一条的话，procinfo
+# 逻辑名按 skill 分域，行方审批与作废也按域走；共用一条的话，procinfo
 # 哪天要加一个 GUC，sqltune 的证据包会跟着变而没人知道。
 # **cpu_tuple_cost / cpu_index_tuple_cost / cpu_operator_cost 是代价推演的输入。**
 # 少了它们就只能拿 PostgreSQL 的默认值(0.01/0.005/0.0025)去算 —— 实例上真调过

@@ -1,4 +1,4 @@
-"""健康检查里排除内核系统 SQL(2026-10-22 客户要求):慢 SQL 维度、时段 Top SQL 的标题、时段落盘冠军。"""
+"""健康检查里排除内核系统 SQL(2026-10-22 行方要求):慢 SQL 维度、时段 Top SQL 的标题、时段落盘冠军。"""
 from __future__ import annotations
 
 import datetime as _dt

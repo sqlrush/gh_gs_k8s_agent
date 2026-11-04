@@ -145,7 +145,7 @@ CANDIDATE_TEMPLATE = {
         "primary_factor": "<根因一句话>", "secondary_factors": ["<次要因素>"],
         "conclusion": "<已确认|推测|待验证 —— 原文明确写了根因且已验证才是已确认>",
         "objects": ["<表/GUC/等待事件/错误码,原样>"], "signals": ["<复发标志:再出现时能观察到什么>"],
-        "rules": ["<引用的客户条款 ID,如 GS-VAC-002,没有留空>"],
+        "rules": ["<引用的行内条款 ID,如 GS-VAC-002,没有留空>"],
         "topics": ["<所属专题 slug:conn/lock/sql/proc/wait/wal/mem/vacuum/repl/param/space/batch>"],
         "sections": {"现场": "<现象,含现场背景:系统、版本、时段、负载>", "判断": "<根因推理>", "处置": "<做了什么>",
                      "复发标志": "<再发时的信号>",
@@ -350,7 +350,7 @@ def review_candidates(kb: pathlib.Path, slug: str, candidates: List[Dict[str, An
         if str(case.get("conclusion") or "") not in kbcases.CONCLUSION_CONFIDENCE:
             errors.append(f"候选 {item_id}:conclusion 必须是 已确认/推测/待验证")
         # 材料经 gaussdb-kb-init 标准化过的:候选与标准化文档说法不一,当场点名。
-        # 静默采用候选那一版,知识库与交给客户的标准化文档就此分叉,而两边都还「看起来正常」。
+        # 静默采用候选那一版,知识库与交给行方的标准化文档就此分叉,而两边都还「看起来正常」。
         for fld, settled in _settled_fields(item_path).items():
             got = str(case.get(fld) or "").strip()
             if got and got != settled:

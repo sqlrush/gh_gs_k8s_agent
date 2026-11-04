@@ -123,7 +123,7 @@ def test_kb_outline_contract(samples):
         _check("kb_item", _load(p))
     for p in sorted((samples / "_kb" / "evidence").glob("*.json")):
         _check("kb_evidence", _load(p))
-    assert len(list((samples / "_kb" / "item").glob("*.json"))) == 2, "官方文档一条、客户条目一条"
+    assert len(list((samples / "_kb" / "item").glob("*.json"))) == 2, "官方文档一条、本行条目一条"
 
 
 def test_kb_catalog_contract(samples):

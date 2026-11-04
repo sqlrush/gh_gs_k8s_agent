@@ -89,7 +89,7 @@ def test_admin_token_empty_means_control_api_off():
 
 
 def test_headers_are_configurable():
-    """头名按客户实际填。示例一律用中性值 —— 本仓是公开仓,不放客户标识。"""
+    """头名按行方实际填。示例一律用中性值 —— 本仓是公开仓,不放行方标识。"""
     c = cfg.load({**_MIN, "GATEWAY_USER_HEADER": "X-Staff-No", "GATEWAY_ROLES_HEADER": "X-Staff-Groups"})
     assert c.user_header == "X-Staff-No" and c.roles_header == "X-Staff-Groups"
 

@@ -1,6 +1,6 @@
 """存储过程名的解析与定位 —— procinfo / proctune 共用。
 
-支持三段名 schema.package.proc。现场(客户 2026-09-08 截图):模型按慢 SQL 里的写法传了
+支持三段名 schema.package.proc。现场(2026-09-08 截图):模型按慢 SQL 里的写法传了
 gmag.pckg_xxx.proc_xxx,旧逻辑按最后一个点切,把 gmag.pckg_xxx 当 schema 找不到,报 not found,
 模型于是脑补「GaussDB 包子程序不注册在 pg_proc」。实测(og5 A 兼容库)包内过程就在 pg_proc 里:
 proname 是过程名、prosrc 是过程体、propackageid 指向 gs_package;GaussDB 505 同源。

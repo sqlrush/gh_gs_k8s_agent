@@ -4,7 +4,7 @@
 # 只写「从新清单推不出来」的东西。新配置项的默认值在 k8s/base 的 ConfigMap 里,发版台按「集群现值 + 新清单默认值」迁移;
 # 新的网络策略、kbstd 安装 Job 也都在新清单里,渲染时自然带上。这里写的是:
 #   mixed_with   新版本能与哪些旧版本同时在线(网关新、池子槽位旧的那段时间)→ 池子按槽位在线替换;不在里面的按 Pod 整体替换
-#   required     必须由客户填写、没有可用默认值的新配置项(没填发版台在开跑前拦下)
+#   required     必须由行方填写、没有可用默认值的新配置项(没填发版台在开跑前拦下)
 #   steps        新清单表达不了的特有动作:rebuild_kb_import(删 role=kb-import 的 Deployment,NAS 不动)
 #   whitelist    本版本给白名单团队的增量文件(核对按全量,这里只用来告诉运维该交哪个文件)
 #   notes        给运维看的提醒(不自动做的事)
@@ -12,6 +12,13 @@
 # 版本从新到旧;第一条必须是本仓库清单里的版本(守卫测试)。min_upgrade_from 之前的版本按《部署上线方案》§14 手工升级。
 min_upgrade_from: agent-v1.4.0
 versions:
+  - version: agent-v1.4.5
+    mixed_with: [agent-v1.4.4]  # 网关只改了措辞;提示词在用户镜像里,槽位换到哪版用哪版
+    required: []
+    steps: [rebuild_kb_import]    # 导入镜像换了(独立的根提示词)
+    whitelist: []
+    notes:
+      - "(按需)镜像里的三份根规范模板要换成行内正式规范的,推进内网仓库之前在离线包上执行 rootspec-overlay.sh(版本说明 v1.4.5「根规范模板替换」)"
   - version: agent-v1.4.4
     mixed_with: [agent-v1.4.3]  # 网关先换(摘要带 busy),v1.4.3 的槽位本来就报忙闲;演练环境按槽位在线换过
     required: []
@@ -24,7 +31,7 @@ versions:
     steps: []
     whitelist: [scripts-delta-20261030.sql]
     notes:
-      - "(按需,由客户 DBA 决定)给中间件执行账号授 ADM_SOURCE 读权限:GRANT SELECT ON pg_catalog.adm_source TO <执行账号>;"
+      - "(按需,由行方 DBA 决定)给中间件执行账号授 ADM_SOURCE 读权限:GRANT SELECT ON pg_catalog.adm_source TO <执行账号>;"
   - version: agent-v1.4.2
     mixed_with: []
     required: []

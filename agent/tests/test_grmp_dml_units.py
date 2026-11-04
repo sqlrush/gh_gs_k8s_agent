@@ -1,8 +1,8 @@
-"""导出客户格式的 INSERT DML。
+"""导出行方格式的 INSERT DML。
 
-客户没有脚本管理 API（原文：「由于安全原因，目前脚本仅能通过版本 dml 带出」），
+行方没有脚本管理 API（原文：「由于安全原因，目前脚本仅能通过版本 dml 带出」），
 新增诊断能力必须随版本发布上线。所以这份 DML 就是交付物本身 ——
-列顺序、引号风格、NULL 写法都要与客户样例一致，客户才能直接拿去执行。
+列顺序、引号风格、NULL 写法都要与现场样例一致，行方才能直接拿去执行。
 """
 import sys
 import pathlib
@@ -95,7 +95,7 @@ def test_statement_ends_with_semicolon():
 
 
 def test_script_file_bundles_statements_with_a_provenance_header():
-    """交付物要能自证来源：客户拿到的是一段 SQL，得知道它是什么、谁生成的。"""
+    """交付物要能自证来源：行方拿到的是一段 SQL，得知道它是什么、谁生成的。"""
     text = dml.script_file([_rec(), _rec(id="528", script_name="health.db_info")])
     assert text.count("INSERT INTO") == 2
     assert text.lstrip().startswith("--")

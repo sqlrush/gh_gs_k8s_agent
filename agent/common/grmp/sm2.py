@@ -1,13 +1,13 @@
 """国密 SM2 数字签名(GB/T 32918.2-2016,曲线 sm2p256v1),纯 Python。
 
 给 GRMP 请求头 Signature 用:每次请求签一段几十字节的文本。不引第三方包
-(交付镜像的 Python 依赖是客户白名单管的);正确性靠三层对照钉住——标准附录的
+(交付镜像的 Python 依赖是行方白名单管的);正确性靠三层对照钉住——标准附录的
 固定 k 向量、与 gmssl 互签互验、OpenSSL 3 生成的 PEM 私钥与 DER 签名能解能验
 (tests/test_sm2_units.py)。
 
 私钥文本接受两种形态:64 位 hex(可带 0x)、PEM(PKCS#8 或 SEC1 ECPrivateKey);
 公钥接受 hex(X‖Y,可带 04 前缀)与 PEM(SubjectPublicKeyInfo)。签名编码 raw(r‖s 64 字节)
-或 DER;文本化 hex 或 base64——客户 Java 侧默认 DER,Python 库默认 raw,都得能出。
+或 DER;文本化 hex 或 base64——行方 Java 侧默认 DER,Python 库默认 raw,都得能出。
 """
 from __future__ import annotations
 

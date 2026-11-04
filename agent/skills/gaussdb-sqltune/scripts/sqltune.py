@@ -83,8 +83,8 @@ import whatif  # noqa: E402
 # 从而得出「加这个索引没用」的**错误结论**。所以宁可在入口失败。
 #
 # 不为任意 SQL 注册「EXPLAIN {{user_sql}}」这类直通脚本：那等于给白名单开一个
-# 通用入口，任何 SQL 都能从这一条进去。要不要开属于客户的安全策略决策，
-# 不是交付方能替客户定的技术选择。同 gaussdb-explain 的处理。
+# 通用入口，任何 SQL 都能从这一条进去。要不要开属于行方的安全策略决策，
+# 不是交付方能替行方定的技术选择。同 gaussdb-explain 的处理。
 _SESSION_REQUIRED = (
     "sqltune 的两项核心能力都要求一条原始数据库会话：\n"
     "  · EXPLAIN 用户给的任意 SQL —— 白名单按逻辑脚本名放行预注册的 SQL，"
@@ -95,7 +95,7 @@ _SESSION_REQUIRED = (
     "已迁到白名单的部分（按 id 取 SQL 原文、表/索引/列统计/GUC）本身能走中间件，"
     "但缺了执行计划的证据包不足以支撑调优结论，所以整条命令在此停止，不做半份输出。\n"
     "可选做法：为这类诊断保留一条直连通道（driver: psycopg2），"
-    "或在客户环境不提供本 skill；只看 SQL 原文/慢 SQL 清单可改用 "
+    "或在现场环境不提供本 skill；只看 SQL 原文/慢 SQL 清单可改用 "
     "gaussdb-sqlfetch / gaussdb-topsql / gaussdb-slowsql / gaussdb-health。"
 )
 
@@ -162,7 +162,7 @@ _NO_HYPOPG_BODY = (
 
 # 收尾那句按访问路径分叉。同一件事，两边的下一步不一样：
 #   本机直连  下一步是换一条 driver: psycopg2 的连接重跑，确实能拿到背书
-#   白名单    压根没有直连通道 —— 那句话在客户环境不是建议，是噪音，
+#   白名单    压根没有直连通道 —— 那句话在现场环境不是建议，是噪音，
 #             还会把人往「绕过白名单」的方向引。这边只能是人工验证。
 _HYPOPG_HINT_DIRECT = "需要 hypopg 背书请改用 driver: psycopg2 的连接重跑。"
 _HYPOPG_HINT_WHITELIST = (
@@ -259,8 +259,8 @@ def _guard_sql(sql_text: str, analyze: bool) -> None:
     DML + --analyze 在这条路上**不可用**，必须报错而不是悄悄不 analyze：
     静默降级会让用户以为拿到的是实际执行的计划，实测两者能差 2.3 倍。
 
-    白名单路径(中间件)连不带 ANALYZE 的写语句也拦:客户中间件只受理 SELECT 的执行计划,
-    UPDATE / INSERT / DELETE 递过去一律 400(客户 09-08 清单第 2 项第 3 点,要求 skill 层拦截)。
+    白名单路径(中间件)连不带 ANALYZE 的写语句也拦:现场中间件只受理 SELECT 的执行计划,
+    UPDATE / INSERT / DELETE 递过去一律 400(09-08 清单第 2 项第 3 点,要求 skill 层拦截)。
     直连原始会话那条路不经这里,EXPLAIN UPDATE 不执行语句,直连照常出计划。
     """
     ensure_explainable(sql_text, analyze=analyze)
@@ -409,7 +409,7 @@ def tune_by_sql(runner, db, sql_text: str, binds: list[str], do_analyze: bool,
 
 
 def resolve_schema(runner, sql_text: str, schema: str, source: str) -> tuple[str, str]:
-    """贴文本没带 --schema(客户 09-09 早:模型漏了参数 → 400)/ 按 id 只有按账号名推测的值时,按表名在目录里找:
+    """贴文本没带 --schema(09-09 早:模型漏了参数 → 400)/ 按 id 只有按账号名推测的值时,按表名在目录里找:
     唯一匹配就用(来源记 catalog);同名表跨 schema 又定不下来就拒绝并列出候选——不猜;目录里没有就照旧。
     用户显式给的 --schema 和 statement_history 的记录值不动。"""
     if schema and source != "user_name":
@@ -446,11 +446,11 @@ def kb_items(tr: TuneResult) -> list:
 
 
 def kb_section(tr: TuneResult) -> tuple:
-    """「客户知识库参照」小节 + JSON;知识库任何问题都降级成「未接入(原因)」,不影响调优报告。"""
+    """「本行知识库参照」小节 + JSON;知识库任何问题都降级成「未接入(原因)」,不影响调优报告。"""
     try:
         from common.kb import query as kbquery
     except ImportError as exc:
-        text = f"## 客户知识库参照\n> 知识库未接入(common/kb 未安装:{exc})\n\n"
+        text = f"## 本行知识库参照\n> 知识库未接入(common/kb 未安装:{exc})\n\n"
         return text, {"status": {"attached": False, "reason": f"common/kb 未安装:{exc}"}, "items": []}
     return kbquery.section_for(kb_items(tr))
 
@@ -520,7 +520,7 @@ def sqltune_report(tr: TuneResult) -> str:
     elif runtime_note:
         out += "\n## Runtime Plan\n\n> " + runtime_note + "\n"
 
-    # 客户知识库对这条 SQL 与计划发现怎么说——放在结论性小节之前,处置建议以它为首选依据。
+    # 本行知识库对这条 SQL 与计划发现怎么说——放在结论性小节之前,处置建议以它为首选依据。
     out += "\n" + kb_section(tr)[0]
 
     out += "\n## Verified Index Candidates\n\n"

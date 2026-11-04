@@ -3,7 +3,7 @@
 钉住的纪律:
   · 导航页不成条;GUC 参数一参一条、带字段;错误码按码切块、只建关键词;视图按名字归专题(不按华为放错的目录);
   · ID 永不复用:重导沿用,新页面接着编,删掉的页面号码保留;
-  · 官方文档单独一个候选池:几千条官方文档不能把客户先例挤出候选;
+  · 官方文档单独一个候选池:几千条官方文档不能把本行先例挤出候选;
   · 测试开关打开时官方文档一律「适用性未知」,并且打包时拒绝;
   · 包装上要核对校验和,同版本跳过;长条目 show 先给小节清单,错误码 --grep 只给那一码。
 """
@@ -209,7 +209,7 @@ def test_docset_pool_keeps_customer_cases_and_labels_applicability(kb, tmp_path)
     typed = [r.id for r in res.items[0].typed]
     assert any(i.startswith("product:PD-T25-") for i in typed), typed
     res = query.from_text("死锁", kb_dir=kb)
-    assert "case:S2-20250812-CBMS-死锁频发" in [c.id for c in res.items[0].cases], "客户案例照样排在客户池里"
+    assert "case:S2-20250812-CBMS-死锁频发" in [c.id for c in res.items[0].cases], "本行案例照样排在行方池里"
     (kb / "kb.yaml").write_text("embeddings: {source: none}\ntest_switches: {docset_applicability_unknown: true}\n",
                                 encoding="utf-8")
     res = query.from_text("lockwait_timeout 默认值", kb_dir=kb)

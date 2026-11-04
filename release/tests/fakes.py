@@ -22,7 +22,7 @@ def digest_of(data: bytes) -> str:
 # -- OCI 包 --------------------------------------------------------------------------------------
 
 def make_package(path, arch: str, images: Dict[str, List[bytes]], suffix: bool = True, drop_blob: str = "",
-                 attestation: bool = True) -> Dict[str, str]:
+                 attestation: bool = True, tag: str = "agent-v1.4.4-oc1.18.27") -> Dict[str, str]:
     """images: 镜像名 → 各层内容(第一层可在多个镜像间共用)。返回 镜像名 → 平台清单 digest。
     结构照 v1.4.3 实物:顶层 index.json 的命名条目是单架构 index(平台清单 + 证明清单)。"""
     blobs: Dict[str, bytes] = {}
@@ -53,10 +53,10 @@ def make_package(path, arch: str, images: Dict[str, List[bytes]], suffix: bool =
         idx = json.dumps({"schemaVersion": 2, "mediaType": "application/vnd.oci.image.index.v1+json",
                           "manifests": entries}).encode()
         idd, ids = put(idx)
-        tag = "agent-v1.4.4-oc1.18.27" + ("-" + arch if suffix else "")
+        ref = tag + ("-" + arch if suffix else "")
         top.append({"mediaType": "application/vnd.oci.image.index.v1+json", "digest": idd, "size": ids,
-                    "annotations": {"io.containerd.image.name": "docker.io/library/%s:%s" % (name, tag),
-                                    "org.opencontainers.image.ref.name": tag}})
+                    "annotations": {"io.containerd.image.name": "docker.io/library/%s:%s" % (name, ref),
+                                    "org.opencontainers.image.ref.name": ref}})
     top.append({"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": "sha256:" + "0" * 64, "size": 1,
                 "annotations": {"io.containerd.manifest.subject": "x"}})       # 实物里有的无名附属条目
     with tarfile.open(path, "w:gz") as tf:

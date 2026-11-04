@@ -1,7 +1,7 @@
 """交付 DML 的范围闸。
 
-`--dml-out` 导出的每一条 INSERT，都是要灌进客户生产库 script_config 的
-一条白名单 SQL。多一条没人用的，客户就得为一条没有任何 skill 验证过的
+`--dml-out` 导出的每一条 INSERT，都是要灌进生产库 script_config 的
+一条白名单 SQL。多一条没人用的，行方就得为一条没有任何 skill 验证过的
 SQL 走变更评审 —— 而且是**安静地**多出来：DML 文件长几行，没人会去数。
 
 仓库里确实有一批只给中间件自测用的脚本（perf.* 是「动态性能视图」那组
@@ -38,7 +38,7 @@ def test_export_refuses_to_silently_ship_unused_scripts(tmp_path, capsys):
     """默认拒绝导出，并把多余的脚本逐条列出来。
 
     不是「导出并警告」—— 警告在一堆输出里没人看，而 DML 已经生成好了，
-    下一步就是发给客户。
+    下一步就是发给行方。
     """
     out = tmp_path / "release.sql"
     rc = grmp_register.main([

@@ -19,7 +19,7 @@ def test_validate_accepts_psycopg2():
 
 def test_retired_pg8000_driver_is_rejected_with_the_fix(tmp_path):
     """pg8000 已整体换成 psycopg2,不保留别名。老配置必须**当场报错并说清怎么改**——
-    留个别名或给一句泛泛的 must be one of,都会让客户不知道该动哪一行。"""
+    留个别名或给一句泛泛的 must be one of,都会让行方不知道该动哪一行。"""
     with pytest.raises(ConfigError) as ei:
         validate(_conn(driver="pg8000"))
     msg = str(ei.value)
@@ -72,11 +72,11 @@ def test_state_dir_falls_back_to_legacy_gdaa_home(tmp_path, monkeypatch):
     assert state_dir() == tmp_path / "legacy"
 
 def test_state_dir_defaults_to_the_container_path(monkeypatch):
-    """两个环境变量都没有时，落到客户容器里的绝对路径。
+    """两个环境变量都没有时，落到行方容器里的绝对路径。
 
-    这不是笔误：客户改造版把默认值从 ~/.gdaa 改成了容器内的固定路径，
+    这不是笔误：行方改造版把默认值从 ~/.gdaa 改成了容器内的固定路径，
     OpenCode 容器里 /workspace 一定存在。而测试原本还断言 ~/.gdaa，
-    所以它自客户版导入起就一直是红的。
+    所以它自行方版导入起就一直是红的。
 
     **在容器外这是个坑**：开发机上 /workspace 不存在、也建不出来（根目录
     无写权限），不设 GSDB_HOME 直接跑任何 skill 都会在写状态时失败。

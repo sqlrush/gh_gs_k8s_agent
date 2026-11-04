@@ -141,7 +141,7 @@ def test_interp_json_new_keys_parse_and_bad_values_are_ignored():
 
 def test_citestyle_matches_the_template_rules():
     assert citestyle.library_for("PD-G25132C-01481") == ("GaussDB 官方文档库", citestyle.OFFICIAL_COLOR)
-    assert citestyle.library_for("PD-0001") == ("产品文档库", citestyle.OFFICIAL_COLOR)     # 客户导入的产品文档也是官方说法
+    assert citestyle.library_for("PD-0001") == ("产品文档库", citestyle.OFFICIAL_COLOR)     # 本行导入的产品文档也是官方说法
     assert citestyle.library_for("S3-20260416-FPAYS-PAYS支付流水重复提交")[0] == "本行案例库"
     assert citestyle.library_for("lockwait_timeout") is None
     assert (citestyle.format_ref("WK-0002", "调到 1GB", "未验证")

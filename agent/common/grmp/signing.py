@@ -1,16 +1,16 @@
-"""GRMP 请求签名(客户 2026-09-18 的中间件加固)。
+"""GRMP 请求签名(2026-09-18 的中间件加固)。
 
 每个请求在 `auth` 令牌之外再带三个头:
-    Appkey     调用方应用名——整个智能体一个,客户约定
+    Appkey     调用方应用名——整个智能体一个,行方约定
     Timestamp  调用时的时间戳
     Signature  用该 Appkey 的 SM2 私钥对「URL 上下文根 + 时间戳」的签名
-分工:这三个认应用、防重放、防改路径。`auth` 认的是「调用方」——**令牌按不按人签发,客户
+分工:这三个认应用、防重放、防改路径。`auth` 认的是「调用方」——**令牌按不按人签发,行方
 未明说**,现有材料里数据库侧只见到单一「中间件执行账号」。工号由 `common/grmp/userid.py`
-按客户给的字段单独发(2026-09-20 确认要),不要把身份寄托在这三个头上。
+按行方给的字段单独发(2026-09-20 确认要),不要把身份寄托在这三个头上。
 
 设置来源:环境变量 > config.yaml 的 api_connection;没配 Appkey 就不签(中间件还没开校验时照常可用)。
 私钥:环境变量 GRMP_SM2_PRIVATE_KEY > 凭据文件(默认名 grmp-sm2,`credential_cli set` 存入);不落配置文件。
-签名细节——时间戳单位、签名格式、编码、userId、原文拼法——客户那边每一项都可能不同,全部可配,
+签名细节——时间戳单位、签名格式、编码、userId、原文拼法——行方那边每一项都可能不同,全部可配,
 对不上不用改代码。默认取国标 / Java(BouncyCastle)最常见的形态。
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ ENV_PRIVATE_KEY = "GRMP_SM2_PRIVATE_KEY"
 ENV_USER_ID = "GRMP_SIGN_USER_ID"
 ENV_PAYLOAD = "GRMP_SIGN_PAYLOAD"
 DEFAULT_CREDENTIAL = "grmp-sm2"
-DEFAULT_PAYLOAD = "{path}+{timestamp}"       # 客户给的例子:"/v1/validateByNorth/validate+timestamp"
+DEFAULT_PAYLOAD = "{path}+{timestamp}"       # 行方给的例子:"/v1/validateByNorth/validate+timestamp"
 
 MODE_FULL = "full"
 MODE_HEADERS_ONLY = "headers-only"
@@ -42,7 +42,7 @@ _KNOBS = {
     "timestamp": ("GRMP_SIGN_TIMESTAMP", ("ms", "s"), "ms"),
     "format": ("GRMP_SIGN_FORMAT", ("raw", "der"), "raw"),
     "encoding": ("GRMP_SIGN_ENCODING", ("hex", "base64"), "hex"),
-    # 2026-09-20 客户过渡期:密钥审批没下来,先只发 Appkey + Timestamp。
+    # 2026-09-20 行方过渡期:密钥审批没下来,先只发 Appkey + Timestamp。
     # 必须显式配 —— 不做「拿不到私钥就自动降级」,那样生产上 Secret 挂载失败会悄悄不签名。
     "mode": ("GRMP_SIGN_MODE", (MODE_FULL, MODE_HEADERS_ONLY), MODE_FULL),
 }
@@ -53,7 +53,7 @@ class SignSettings:
     appkey: str
     private_key: Optional[int]              # SM2 私钥 d;headers-only 档为 None
     mode: str = MODE_FULL                   # full=三个头;headers-only=只 Appkey + Timestamp
-    user_id: bytes = sm2.DEFAULT_USER_ID    # 国标默认;OpenSSL 默认是空串,客户用什么必须问
+    user_id: bytes = sm2.DEFAULT_USER_ID    # 国标默认;OpenSSL 默认是空串,行方用什么必须问
     timestamp_unit: str = "ms"
     signature_format: str = "raw"           # raw = r‖s 64 字节;der = ASN.1(Java 默认)
     signature_encoding: str = "hex"
@@ -79,7 +79,7 @@ class RequestSigner:
         ts = self.timestamp()
         headers = {HEADER_APPKEY: st.appkey, HEADER_TIMESTAMP: ts}
         if st.mode == MODE_HEADERS_ONLY:
-            return headers                  # 过渡期:客户密钥还没批下来
+            return headers                  # 过渡期:行方密钥还没批下来
         r, s = sm2.sign(st.private_key, self.payload_for(path, ts).encode("utf-8"), st.user_id)
         signature = sm2.to_text(sm2.encode_signature(r, s, st.signature_format), st.signature_encoding)
         return {**headers, HEADER_SIGNATURE: signature}

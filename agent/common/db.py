@@ -17,7 +17,7 @@ from .credential import load_secret, secret_for
 # 原先失败时会自动改用另一个驱动。那让同一份配置在不同机器上跑出不同后端，
 # 而两者能力不同 —— gsql 每条语句起独立子进程（provides_session=False），
 # psycopg2 是单条持久连接（True）。于是 hypopg 虚拟索引验证这类依赖会话的功能，
-# 在「配了 gsql、实际兜底到 psycopg2」的机器上能跑，在真用 gsql 的客户环境
+# 在「配了 gsql、实际兜底到 psycopg2」的机器上能跑，在真用 gsql 的现场环境
 # 跑不了，而且不报错。
 #
 # 本机没有 gsql 时，在 config.yaml 里另配一条 driver: psycopg2 的连接。
@@ -32,7 +32,7 @@ def _load_backend(driver: str):
     """惰性导入指定后端类（gsql-only 环境无需装 psycopg2，反之亦然）。
 
     驱动模块装不上时给一句中文(装哪个包 / 或改走 grmp),不把 ModuleNotFoundError 的整条栈甩给用户——
-    模型级验收里模型看到栈后会自己去 pip install,客户机器上这不是它该做的事。
+    模型级验收里模型看到栈后会自己去 pip install,行方机器上这不是它该做的事。
     """
     try:
         if driver == "psycopg2":

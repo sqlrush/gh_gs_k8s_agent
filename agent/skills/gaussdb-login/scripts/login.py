@@ -93,7 +93,7 @@ def _api_connection(ip: str, database: str, endpoint) -> Connection:
     库名仍然必须收：它决定后续取数落在哪个库上，也要写进报告的抬头，
     否则一份诊断报告事后分不清是同一实例上的哪个库。
 
-    **一个待客户确认的点**：若同一实例上有多个库、而白名单按库区分，
+    **一个待本行确认的点**：若同一实例上有多个库、而白名单按库区分，
     仅凭 dataIp 拿到的清单可能不对。协议没给库名的位置，这条要问开发。
     """
     return Connection(
@@ -202,7 +202,7 @@ def _verify_direct(conn: Connection) -> tuple:
 # --- api 模式:库名核对 --------------------------------------------------------
 
 # 已随白名单下发的「当前库 / 当前账号 / 实例上的库清单」脚本(过程找不到时的排查用),两份 SQL 同体。
-# 复用它而不新加一条:新脚本要客户重新导入白名单才生效。
+# 复用它而不新加一条:新脚本要行方重新导入白名单才生效。
 DB_SCRIPTS = ("procinfo.locate_context", "proctune.locate_context")
 
 
@@ -321,7 +321,7 @@ def _describe(conn: Connection, note: str, path, role: str = "", handle: str = "
     out += "\n会话已写入 `%s`。\n\n" % path
 
     if conn.driver == "grmp":
-        # 白名单决定了这个库上**哪些 skill 真的能用** —— 客户环境里各库注册的
+        # 白名单决定了这个库上**哪些 skill 真的能用** —— 现场环境里各库注册的
         # 脚本可以不一样，不摆出来的话，某个 skill 报「脚本不存在」时才发现。
         try:
             names = whitelist(conn)
@@ -345,7 +345,7 @@ def _describe(conn: Connection, note: str, path, role: str = "", handle: str = "
 
 
 def _status(handle: str) -> int:
-    """只看本对话的会话。不带句柄就是未登录——沙箱里别人的会话一个字不提(2026-09-11 客户反馈的越权)。"""
+    """只看本对话的会话。不带句柄就是未登录——沙箱里别人的会话一个字不提(2026-09-11 行方反馈的越权)。"""
     import time
     handle = handle or session.selected() or ""
     if not handle:

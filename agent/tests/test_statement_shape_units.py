@@ -35,7 +35,7 @@ def test_semicolon_inside_a_comment_is_not_a_separator(sql):
 
     `SELECT 1 AS x -- a;b;c` 原先被判成 3 条语句，explain 报
     「SQL 含多条语句（3 条）」—— 数字和结论都是错的。直连模式靠回落到
-    原始会话侥幸能跑，客户环境只有中间件，就是拒之门外。
+    原始会话侥幸能跑，现场环境只有中间件，就是拒之门外。
     """
     assert len(split_statements(sql)) == 1
 

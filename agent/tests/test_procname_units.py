@@ -1,6 +1,6 @@
 """common.procname —— 存储过程名的解析与定位:支持 schema.package.proc 三段名,同名多个时拒绝不猜。
 
-现场(客户 09-08 截图):模型按慢 SQL 里的写法传了 gmag.pckg_xxx.proc_xxx 三段名,旧逻辑按最后一个点切,
+现场(09-08 截图):模型按慢 SQL 里的写法传了 gmag.pckg_xxx.proc_xxx 三段名,旧逻辑按最后一个点切,
 把 gmag.pckg_xxx 当 schema 找不到,报 not found,模型于是脑补「包子程序不在 pg_proc」。实测 openGauss/GaussDB 的
 包内过程就在 pg_proc 里(propackageid → gs_package)。另一个更隐蔽的坑:不同包里的同名过程被 LIMIT 1 静默取第一个。
 """

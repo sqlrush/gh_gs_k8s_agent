@@ -1,6 +1,6 @@
 """EXPLAIN ANALYZE 到底有没有真跑:看计划文本,不看请求标志。
 
-现场三条 *_analyze 注册脚本按客户只读要求把 ANALYZE 固定成 false(17dde8c),用户要了 --analyze
+现场三条 *_analyze 注册脚本按行方只读要求把 ANALYZE 固定成 false(17dde8c),用户要了 --analyze
 拿到的仍是估算计划。skill 不能凭「我请求了 analyze」就说这是实测——要看计划里有没有 actual 行。
 """
 import pathlib
@@ -29,7 +29,7 @@ def test_analyzed_for_real_needs_both_request_and_actual_rows():
 
 def test_note_only_when_analyze_was_requested_but_not_run():
     note = ea.analyze_note(ESTIMATE, True)
-    assert "ANALYZE" in note and "估算" in note and "只读" in note   # 说清原因:客户只读要求
+    assert "ANALYZE" in note and "估算" in note and "只读" in note   # 说清原因:行方只读要求
     assert "实测" in note                                            # 提醒引用口径
     assert ea.analyze_note(ACTUAL, True) == ""
     assert ea.analyze_note(ESTIMATE, False) == ""

@@ -1,6 +1,6 @@
 """入库前的标准化:五花八门的工单材料 → 统一格式的六要素 md。
 
-知识库导入(gaussdb-kb-import)吃的是结构化材料,而客户手里的是 word / pdf / 截图 / 随手记的 txt。
+知识库导入(gaussdb-kb-import)吃的是结构化材料,而行方手里的是 word / pdf / 截图 / 随手记的 txt。
 这一层把它们先拉平成同一种 md:frontmatter 记**时间、系统**与出处,正文固定四段
 **现场 / 判断 / 处置 / 复发标志**。段名与 `cases/` 的案例格式一致,后面 ingest → propose →
 选择列表 → apply 的流程一个字都不用改。

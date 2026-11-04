@@ -21,7 +21,7 @@ entered_by: 12345
 entered_at: 2026-09-02
 objects: [cbst.cosp_asyn_task_dtl, autovacuum_vacuum_threshold]   # 表 / GUC / 等待事件 / 错误码,原样
 signals: [单条 update 偶发秒级, autovacuum 频繁触发]                 # 复发标志:再发时能观察到什么
-rules: [GS-VAC-002]               # 引用的客户条款 ID,可空
+rules: [GS-VAC-002]               # 引用的行内条款 ID,可空
 topics: [vacuum]                  # 所属专题(kb.py topic --list),决定进哪个 L1 专题导航
 evidence: [evidence/20250224-慢日志.png]   # 可选:照片、日志等原始证据(kb.py attach 存档)
 ---

@@ -3,7 +3,7 @@
 **为什么读日志、而且是用户给的日志。** 死锁的明细(环上是谁、各自在跑什么、谁被牺牲)数据库里不留:
 pg_stat_database.deadlocks 只有次数;lockwait 抓的是正在发生的环,而 deadlock_timeout(og5 是 1 秒)
 一到内核就杀掉牺牲者、解开环,等命令跑起来环早没了。明细只写在数据库日志里,而读日志的
-pg_read_file 要 initial account —— 客户不会为此给权限(用户 2026-10-18 定:需要改客户数据库的一律不做)。
+pg_read_file 要 initial account —— 行方不会为此给权限(用户 2026-10-18 定:需要改生产数据库的一律不做)。
 所以这里解析**用户贴过来的日志段**:用户从日志里把 `deadlock detected` 那几段复制给我们即可。
 
 **不依赖 log_line_prefix。** 各现场的前缀不同(og5 是「时间 用户 库 地址 线程号 会话[…] 事务号 [BACKEND]」),

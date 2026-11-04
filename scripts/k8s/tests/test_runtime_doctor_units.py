@@ -1,8 +1,8 @@
 """k8s/tools/runtime-doctor.sh 的约束闸。
 
-这个脚本是给客户现场一键诊断 / 一键修复用的:跑在客户的 Windows Git Bash 上,
-会改客户集群里的出网策略与配置。下面每一条都对应一个真实的坑或一条不能破的约束。
-行为本身在本地集群上端到端验过(复刻客户现场的问题);前半钉住容易被改坏的写法,
+这个脚本是给现场一键诊断 / 一键修复用的:跑在行方的 Windows Git Bash 上,
+会改行方集群里的出网策略与配置。下面每一条都对应一个真实的坑或一条不能破的约束。
+行为本身在本地集群上端到端验过(复刻现场的问题);前半钉住容易被改坏的写法,
 后半加载脚本里的函数(DOCTOR_LIB=1),直接喂探测结果核对判读与诊断意见。
 """
 import os
@@ -23,17 +23,17 @@ def _code_lines():
 
 
 def test_ships_with_the_package_and_the_docs_point_to_it():
-    """离线包只打 k8s/ 与 docs/:脚本必须在 k8s/ 下,手册里要有入口,客户才找得到。"""
+    """离线包只打 k8s/ 与 docs/:脚本必须在 k8s/ 下,手册里要有入口,行方才找得到。"""
     assert _SCRIPT.is_file()
     for name in ("从源码构建到K8s运行-完整手册.md",):
         assert "runtime-doctor.sh" in (_ROOT / "docs" / name).read_text(encoding="utf-8"), name
 
 
 def test_needs_only_bash_and_kubectl():
-    """客户的 Git Bash 里不一定有 python,也没有 jq。"""
+    """行方的 Git Bash 里不一定有 python,也没有 jq。"""
     code = "\n".join(_code_lines())
     for tool in ("python", "jq ", "base64"):
-        assert tool not in code, "脚本用到了 %s —— 客户的 Git Bash 里不一定有" % tool.strip()
+        assert tool not in code, "脚本用到了 %s —— 行方的 Git Bash 里不一定有" % tool.strip()
 
 
 def test_disables_git_bash_path_conversion():

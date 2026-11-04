@@ -1,6 +1,6 @@
 """EXPLAIN ANALYZE 到底跑没跑,看计划文本,不看请求标志。
 
-现场三条 *_analyze 注册脚本(explain / sqltune / proctune)按客户只读要求把 ANALYZE 固定成 false
+现场三条 *_analyze 注册脚本(explain / sqltune / proctune)按行方只读要求把 ANALYZE 固定成 false
 (wengzhongyu 17dde8c,2026-08-14):用户 SQL 不会被执行,要了 --analyze 拿到的仍是估算计划。
 直连原始会话那条路(sqltune / proctune 有 db 时)仍是真 ANALYZE。两条路口径必须一致,
 所以统一按结果判:EXPLAIN ANALYZE 的每个节点都带 `(actual time=… rows=… loops=…)`,没有就是估算。
@@ -11,7 +11,7 @@ from __future__ import annotations
 ACTUAL_MARK = "actual time="
 
 FIELD_ANALYZE_OFF_NOTE = (
-    "本次要了 ANALYZE,拿到的仍是估算计划:现场注册脚本按客户只读要求把 ANALYZE 固定关闭,"
+    "本次要了 ANALYZE,拿到的仍是估算计划:现场注册脚本按行方只读要求把 ANALYZE 固定关闭,"
     "用户 SQL 没有被执行,计划里没有 actual 行数与耗时——引用时不要说成实测,行数与耗时都是规划器的估算"
 )
 

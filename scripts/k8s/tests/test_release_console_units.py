@@ -1,7 +1,7 @@
 """发版台随离线包发出:镜像单独一个 tar、release-console.sh 一条命令起(假 docker)。
 
 钉住:
-① 发版台的 tar 不会被 release/pack.py 与发版台的包识别当成「要推进客户镜像仓库的镜像包」;
+① 发版台的 tar 不会被 release/pack.py 与发版台的包识别当成「要推进行方镜像仓库的镜像包」;
 ② 启动前核 sha256,拷坏了不导入;
 ③ 起容器:宿主机网络、只听 127.0.0.1、用本机用户、目录按宿主机原路径挂(发布包目录只读),
    kubeconfig 引用的证书在别的目录也挂进去,用 exec 认证插件时提示;
@@ -51,7 +51,7 @@ def test_console_tar_is_not_taken_for_an_image_package():
     assert 'install -m 0755 "$HERE/scripts/release-console.sh" "$DIST/release-console.sh"' in body
     name = "gaussdb-agent-release-v1.4.4-oc1.18.27-amd64.tar.gz"
     assert not package.NAME.match(name), "发版台识别包时会把它当成 amd64 镜像包"
-    assert not fnmatch.fnmatch(name, "gaussdb-agent-v1.4.4-oc1.18.27-*.tar.gz"), "pack.py 会把它的镜像写进 release.yaml、推进客户仓库"
+    assert not fnmatch.fnmatch(name, "gaussdb-agent-v1.4.4-oc1.18.27-*.tar.gz"), "pack.py 会把它的镜像写进 release.yaml、推进行方仓库"
 
 
 @pytest.fixture

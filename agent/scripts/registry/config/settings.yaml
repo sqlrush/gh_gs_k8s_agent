@@ -4,12 +4,12 @@
 # 而名字列表只能以字符串形式拼进 SQL(`name = ANY(string_to_array('{{names}}', ','))`)——
 # 那是一个注入面,而收益只是少传几百行。og5 实测 pg_settings 758 行,
 # 一次取回来在 Python 侧比对基线,既没有注入面,也让基线能随时增删而不用改白名单脚本
-# (改脚本要客户重新导入,改基线不用)。
+# (改脚本要行方重新导入,改基线不用)。
 #
 # 取的列比"名字+值"多几样,每样都有用:
 #   unit        —— 归一化必需。shared_buffers 的单位是 8kB、work_mem 是 kB、
 #                  statement_timeout 是 ms;不按 unit 归一就会把 4GB 读成 524288。
-#   boot_val    —— 内核默认值。判「这个值是客户特意改的,还是从来没动过」要靠它。
+#   boot_val    —— 内核默认值。判「这个值是行方特意改的,还是从来没动过」要靠它。
 #   reset_val   —— reload 之后会变成什么。改了配置文件但没 reload 时,
 #                  setting 与 reset_val 会不一致 —— 那本身就是一条该报的发现。
 #   context     —— 改这个参数要不要重启(postmaster)。给处置建议时必须说清,

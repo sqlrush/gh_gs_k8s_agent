@@ -3,7 +3,7 @@
 钉住的:
   · 骨架里有 L0(八类计数、画像、官方文档集)与 L1(专题:本行条目、候选原因、官方计数与代表条目),官方文档的原书目录带条目数;
   · 官方文档逐条只在下钻时分页取,一页最多 200 条;
-  · L2 给小节全文;L3 官方文档给原页(GUC 参数只给本参数一段),**客户条目只给出处位置、不给原件内容**;
+  · L2 给小节全文;L3 官方文档给原页(GUC 参数只给本参数一段),**本行条目只给出处位置、不给原件内容**;
   · ID 只在目录里查,不认识的 404;知识库文件本身仍不能经报告端口直接读。
 """
 import json
@@ -84,9 +84,9 @@ def test_item_and_evidence_layers(tmp_path):
     ev = ol.evidence(lw["id"])
     assert ev["kind"] == "page" and "### lockwait_timeout" in ev["text"] and "deadlock_timeout" not in ev["text"]
     case = next(t for t in ol.outline()["topics"] if t["entries"])["entries"][0]["id"]
-    assert ol.item(case)["sections"], "客户条目给小节"
+    assert ol.item(case)["sections"], "本行条目给小节"
     cev = ol.evidence(case)
-    assert cev["kind"] == "refs" and "text" not in cev and "kb.py evidence" in cev["note"], "客户原件不上大盘"
+    assert cev["kind"] == "refs" and "text" not in cev and "kb.py evidence" in cev["note"], "原件不上大盘"
     assert ol.item("PD-T25-99999") is None and ol.item("../../etc/passwd") is None
 
 

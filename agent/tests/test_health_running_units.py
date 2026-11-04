@@ -123,7 +123,7 @@ def test_a_full_fetch_whose_youngest_transaction_is_old_says_it_may_have_missed_
 
 
 def test_kernel_system_sql_is_excluded_and_counted():
-    """与慢 SQL 表同一口径(2026-10-22 客户要求):只碰系统视图的语句不算业务慢 SQL,
+    """与慢 SQL 表同一口径(2026-10-22 行方要求):只碰系统视图的语句不算业务慢 SQL,
     标题里写明排除了几条。"""
     rows = [_act(7, 900, query="SELECT * FROM pg_stat_activity a, pg_locks l WHERE a.pid = l.pid"),
             _act(8, 900)]
@@ -133,7 +133,7 @@ def test_kernel_system_sql_is_excluded_and_counted():
 
 
 def test_an_old_whitelist_without_the_waiting_column_still_works():
-    """客户还没重导白名单时 long_xact 没有 waiting 列 —— 不能 KeyError 把整维度带崩。"""
+    """行方还没重导白名单时 long_xact 没有 waiting 列 —— 不能 KeyError 把整维度带崩。"""
     row = _act(1, 900)
     del row["waiting"]
     assert [f.code for f in R.judge([row], _th(), top=10, fetched_cap=R.RUNNING_FETCH).findings] \

@@ -89,7 +89,7 @@ class Status:
     table_last: str = ""        # 落表样本最新到哪
     flush_mode: str = ""        # asp_flush_mode:table / file / all
     sample_num: str = ""        # asp_sample_num:内存最多留几个样本
-    memory_known: bool = False  # 新版 lockwait.asp_status 才返回内存那几行;客户没重导白名单时为 False
+    memory_known: bool = False  # 新版 lockwait.asp_status 才返回内存那几行;行方没重导白名单时为 False
 
 
 @dataclass(frozen=True)

@@ -47,6 +47,13 @@ COPY docker/podctl.py docker/statesync.py docker/fdtree.py docker/poolsync.py do
 # (2026-10-25 测试环境:/opt/agent/kboutline.py 0600,报告端口反复崩、所有人的槽位 opencode_not_ready)
 RUN chmod 0755 /opt/agent/entrypoint.sh && chown -R agent:agent /opt/agent && chmod -R a+rX /opt/agent \
     && mkdir -p /data /nas && chown agent:agent /data
+# 根规范:随镜像发布、不依赖 NAS。本行知识库不可用或查不到时,智能体用 /workspace/search_docs.py 检索 /workspace/docs/。
+# 镜像里只放三个模板(带 ROOTSPEC-TEMPLATE 标记,检索时跳过);行内部署时用 scripts/rootspec-overlay.sh 换成正式规范。
+# 只读:root 所有、所有人可读,容器根文件系统本来就是只读挂载
+COPY docker/search_docs.py /workspace/search_docs.py
+COPY docker/rootspec/ /workspace/docs/
+RUN chmod 0755 /workspace /workspace/docs && chmod 0644 /workspace/search_docs.py /workspace/docs/* \
+    && test "$(ls /workspace/docs | wc -l)" = "3" && python3 /workspace/search_docs.py --list
 # 固定池化的槽位以 uid 2000+i 运行(与管家 agent 同组):给它们 passwd 条目,git / getpwuid 才不报「不认识的用户」
 RUN for i in $(seq 0 15); do useradd --uid $((2000 + i)) --gid agent --no-create-home --home-dir /data/home \
         --shell /usr/sbin/nologin "slot$i"; done
@@ -87,6 +94,9 @@ USER root
 RUN cd /opt/agent/config/opencode/skills && for d in gaussdb-*; do case "$d" in gaussdb-kb|gaussdb-kb-import|gaussdb-kb-init) ;; *) rm -rf "$d" ;; esac; done \
     && test "$(ls -d gaussdb-* | wc -l)" = "3"
 COPY --from=imgdeps /opt/imgdeps/ /usr/local/lib/python3.12/site-packages/
+# 导入环境有自己的根提示词(角色、能力边界、写知识库的约束与诊断环境不同)
+COPY agent/AGENTS-kb-import.md /opt/agent/config/opencode/AGENTS.md
+RUN chmod 0644 /opt/agent/config/opencode/AGENTS.md && grep -q "知识库导入环境" /opt/agent/config/opencode/AGENTS.md
 RUN python3 -c "import PIL.Image, pillow_heif; pillow_heif.register_heif_opener(); print('pillow', PIL.__version__, 'pillow-heif', pillow_heif.__version__)"
 # 7zip(7zz):解 GaussDB 官方文档 CHM(kb.py ingest <CHM> → 官方文档集);poppler-utils(pdftotext):导 PDF 规范
 # —— 2026-10-25 发现容器里一直没有 pdftotext,PDF 在导入容器里导不进去。装完当场各跑一次,缺了构建就失败

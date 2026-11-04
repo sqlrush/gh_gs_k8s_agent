@@ -3,7 +3,7 @@
 pack:打包前三道检查——测试开关必须关着、该套索引建完整(条目全进索引、要向量的块全有向量)、条目校验零错误;
       任何一道不过就拒绝,不出包。包里有 kb-std.json(清单 + 每个文件的 sha256)。
 install:按 kb-std.json 核对每个文件 → 解到临时目录 → 原子换上(旧的留一份在 docsets/.rollback/);
-      装着的内容版本(content_hash + built_at)与包里一致就跳过,不动任何文件。客户知识库一个字节都不碰。
+      装着的内容版本(content_hash + built_at)与包里一致就跳过,不动任何文件。本行知识库一个字节都不碰。
 """
 from __future__ import annotations
 

@@ -14,10 +14,10 @@ pg_stat_activity 里),所以「按应用名认内核线程」在排行里用不�
   ② 不引用任何表,只调用系统函数(generate_wdr_report、pg_* / gs_* 等;pg_sleep 除外 —— 那是业务在等)。
 
 判定**保守**,与 sqltune 的系统对象策略同一方向:拿不准一律当业务 SQL 保留。
-误保留只是榜上多一行;误排除会把客户真正的慢 SQL 藏起来。
+误保留只是榜上多一行;误排除会把行方真正的慢 SQL 藏起来。
   - 排行里的正文是截断的(slowsql 180 字、topsql 80 字),FROM 可能在截掉的那一半里 —— 截断且只看到系统
     对象时**不下结论**,按 sql_id 补取全文(白名单里已有的 sqlfetch.from_statement / from_history,
-    不改白名单、客户不用重导)再判;补不到就保留,并在说明里写明有几条是这样保留的。
+    不改白名单、行方不用重导)再判;补不到就保留,并在说明里写明有几条是这样保留的。
   - WITH 子句的名字不是表;`extract(epoch from now())` 里的 now 是函数不是表。两者都不算用户对象。
 """
 from __future__ import annotations

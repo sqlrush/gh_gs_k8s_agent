@@ -1,4 +1,4 @@
-"""grmp-mock 的签名校验(客户 2026-09-18 加固的本地对照):缺头、错 Appkey、过期时间戳、坏签名都拒;
+"""grmp-mock 的签名校验(2026-09-18 加固的本地对照):缺头、错 Appkey、过期时间戳、坏签名都拒;
 skill 侧 GrmpClient 带 RequestSigner 发出的请求原样能过——两边旋钮一致就通,不一致就在本地先暴露。"""
 import json
 import pathlib

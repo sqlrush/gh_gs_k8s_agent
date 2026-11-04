@@ -1,4 +1,4 @@
-"""把离线包里的镜像推进客户的内网仓库:Registry HTTP API v2,只用标准库。
+"""把离线包里的镜像推进行方的内网仓库:Registry HTTP API v2,只用标准库。
 
 一个镜像:逐个 blob 先 HEAD(在就跳过)→ 别的仓库推过的尝试跨仓库挂载 → 都不行才上传(POST 拿上传地址,PUT 单次传完);
 最后 PUT 平台清单,读回 Docker-Content-Digest 必须等于清单的 sha256。认证按 401 的 WWW-Authenticate 走 Basic 或 Bearer。

@@ -1,13 +1,13 @@
 """知识库大盘「目录」页签的数据:按渐进式披露 L0 → L1 → L2 → L3 一层层取,不一次端出几千条。
 
 报告端口 4097 上四条路(现读现算;骨架按文件修改时间缓存):
-  /_kb/outline.json                       L0 骨架 + L1 专题(客户条目、本行确认过的候选原因、官方文档计数与代表条目)
+  /_kb/outline.json                       L0 骨架 + L1 专题(本行条目、本行确认过的候选原因、官方文档计数与代表条目)
                                           + 官方文档集的原书目录(到第 5 级,带条目数;GUC 参数能下到参数类)
   /_kb/list.json?docset=&path=&topic=&offset=&limit=
                                           L1 下钻:某个目录 / 某个专题下的官方文档条目(分页,一页最多 200 条)
   /_kb/item/<ID>.json                     L2 一条条目的全文(小节)
-  /_kb/evidence/<ID>.json                 L3 原始证据:官方文档给原页;**客户条目只给出处位置,不给原件内容**
-                                          (原件在 sources/,大盘不端客户原件 —— 与目录页签同一条规矩)
+  /_kb/evidence/<ID>.json                 L3 原始证据:官方文档给原页;**本行条目只给出处位置,不给原件内容**
+                                          (原件在 sources/,大盘不端原件 —— 与目录页签同一条规矩)
 ID 只在目录里查,不拿请求里的字符串拼路径;收件目录 inbox/、原件 sources/、索引 index/ 一律不读。
 """
 from __future__ import annotations
@@ -43,7 +43,7 @@ _READ_DIRS = ("cases", "rules", "graph", "errata", "guides", "topics") + kbtypes
 
 
 def _key(kb: pathlib.Path) -> Tuple[float, ...]:
-    """缓存键:客户知识各目录的最新修改时间 + 各官方文档集 manifest / catalog 的修改时间(不扫几千个条目文件)。"""
+    """缓存键:本行知识各目录的最新修改时间 + 各官方文档集 manifest / catalog 的修改时间(不扫几千个条目文件)。"""
     latest = 0.0
     for sub in _READ_DIRS:
         root = kb / sub
@@ -240,7 +240,7 @@ class Outline:
         refs = [str(r) if not isinstance(r, dict) else f"{r.get('file', '')}#{r.get('at', '')}"
                 for r in list(e.evidence) + ([e.source] if e.source and e.source not in e.evidence else [])]
         return {"id": e.id, "kind": "refs", "refs": refs,
-                "note": "客户原件(sources/、evidence/)不在大盘展示;要核对原文请在会话里让智能体执行 kb.py evidence " + e.id}
+                "note": "原件(sources/、evidence/)不在大盘展示;要核对原文请在会话里让智能体执行 kb.py evidence " + e.id}
 
 
 __all__ = ["Outline", "build", "LIST_MAX"]

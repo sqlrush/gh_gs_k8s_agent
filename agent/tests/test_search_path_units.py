@@ -134,7 +134,7 @@ def test_fallback_explain_failure_carries_the_note_in_the_error():
     assert "白名单" in msg and "ALTER ROLE" in msg and "SET search_path = app_trade, public" in msg
 
 
-# ---------------------------------------------------------------- 切不成 search_path → 脚本自己补全表名(客户 09-09 早截图)
+# ---------------------------------------------------------------- 切不成 search_path → 脚本自己补全表名(09-09 早截图)
 
 class _QualRunner(FakeRunner):
     """记下单语句模板收到的 SQL;可指定「原文失败、补全后成功」。"""

@@ -1,7 +1,7 @@
-"""把调用人工号送到 GRMP(客户 2026-09-20 确认要)。
+"""把调用人工号送到 GRMP(2026-09-20 确认要)。
 
 中间件按 dataIp 路由、按 auth 令牌认调用方,报文里本来没有「谁在调用」这一维。
-客户要显式收工号,但字段名与位置(请求头 / 报文顶层)还没给,所以两者都做成开关,
+行方要显式收工号,但字段名与位置(请求头 / 报文顶层)还没给,所以两者都做成开关,
 默认两个都不配 —— 不配就跟加这个特性之前一模一样。
 
 **这里守的主要是静默失效**:配了字段名却取不到工号时,绝不能悄悄发一个空值。
@@ -106,7 +106,7 @@ def test_param_not_added_when_only_header_configured():
 
 
 def test_header_name_is_sent_verbatim():
-    """客户给什么头名就发什么,不做大小写归一 —— 中间件那边可能是大小写敏感的。"""
+    """行方给什么头名就发什么,不做大小写归一 —— 中间件那边可能是大小写敏感的。"""
     st = userid.settings_from(_env(GRMP_USER_ID_HEADER="staffNo", GSDB_USER_ID="u1234"))
     assert "staffNo" in _client(user_id=st)._headers("/v1/x")
 

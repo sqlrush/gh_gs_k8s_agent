@@ -1,7 +1,7 @@
 """Render the WDR evidence pack (the `wdr collect` output) — port of report.go.
 
 Fixed ## sections so the skill can parse it deterministically.
-markdown 里另有「客户知识库参照」小节(按发现检索客户知识库,失败降级成「未接入」,见 common/kbsection.py)。
+markdown 里另有「本行知识库参照」小节(按发现检索本行知识库,失败降级成「未接入」,见 common/kbsection.py)。
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def render_evidence(ev: Evidence) -> str:
         out += render.table(["严重度", "维度", "Code", "指标", "值", "阈值", "证据", "sql_id"], rows)
         out += "\n"
 
-    # 客户知识库对每条发现怎么说:写 interp.json 的根因与建议时以它为首选依据(引用带 ID)。
+    # 本行知识库对每条发现怎么说:写 interp.json 的根因与建议时以它为首选依据(引用带 ID)。
     # 只在 collect 的 markdown 里:--format json 的证据包是 render 的输入和大盘存档,形状不变。
     out += kbsection.markdown(ev.findings)
 

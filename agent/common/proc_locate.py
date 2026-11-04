@@ -1,6 +1,6 @@
 """过程「找不到」时代为排查:连的库对不对、执行账号有没有权限、过程本身在不在,并列出要用户回答的问题。
 
-现场(客户 2026-09-08 晚截图):procinfo 按三段名查 gmag.pckg_xxx.proc_maketext 得 0 行,脚本只报一句「找不到」;
+现场(2026-09-08 晚截图):procinfo 按三段名查 gmag.pckg_xxx.proc_maketext 得 0 行,脚本只报一句「找不到」;
 模型守住了「不要解释成不支持包」的规矩,但手里没有任何可继续查的工具,写了两条跑不了的 SQL 后把问题推回用户
 「确认拼写」。用户看到的是:过程明明在,skill 说没有。
 
@@ -242,7 +242,7 @@ def _hits_line(ref: ProcRef, loc: Locate) -> str:
 
 
 def with_adm(v: Verdict, loc: Locate, adm_denied: bool) -> Verdict:
-    """ADM_SOURCE 兜底因为没有读权限而失败时,在问题清单与 DBA 处理里补上授权一项 —— 授不授由客户 DBA 决定。"""
+    """ADM_SOURCE 兜底因为没有读权限而失败时,在问题清单与 DBA 处理里补上授权一项 —— 授不授由行方 DBA 决定。"""
     if not adm_denied:
         return v
     acct = loc.user or "<中间件执行账号>"

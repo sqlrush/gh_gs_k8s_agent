@@ -256,7 +256,7 @@ def test_flush_to_file_is_named_from_the_parameter():
 
 
 def test_old_whitelist_status_without_memory_rows_says_so():
-    """客户没重导白名单:旧版 asp_status 不返回内存样本那几行 —— 说清是脚本旧了,不说「没开」。"""
+    """行方没重导白名单:旧版 asp_status 不返回内存样本那几行 —— 说清是脚本旧了,不说「没开」。"""
     st = [r for r in _status(table=0, memory=0) if r["item"] not in ("memory_samples_in_window", "memory_first", "memory_last",
                                              "table_last", "asp_flush_mode", "asp_sample_num")]
     rep = aspchain.collect(FakeRunner(status=st), W_BEGIN, W_END)

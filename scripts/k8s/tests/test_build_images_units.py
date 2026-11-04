@@ -1,6 +1,6 @@
 """build-images.sh 的推送闸。
 
-2026-09-22 客户在 x86 服务器上拉 GHCR 上的镜像,三个标签全报:
+2026-09-22 行方在 x86 服务器上拉 GHCR 上的镜像,三个标签全报:
 
     no matching manifest for linux/amd64/v3 in the manifest list entries
 
@@ -9,7 +9,7 @@
 plain 标签按打包约定就是本机架构(amd64 那份在本地叫 `<TAG>-amd64`,从没推过)。
 
 推送方式本身没有任何报错:push 成功、标签能解析、在 Mac 上 pull 回来也正常 ——
-只有客户那台 x86 机器会失败。所以闸门放在「推之前」:
+只有行方那台 x86 机器会失败。所以闸门放在「推之前」:
   · `--push` 必须给 `--registry`,否则 tag 没有仓库前缀,推到哪里去都说不清;
   · `--push` 必须是多架构,除非显式写 `--single-arch` 认下这件事。
 """
@@ -63,7 +63,7 @@ def test_push_without_registry_is_refused(run):
 
 
 def test_single_arch_push_is_refused_unless_acknowledged(run):
-    """**这就是客户那次的形态。** 不带 --platform 的 --push 只推本机架构。"""
+    """**这就是行方那次的形态。** 不带 --platform 的 --push 只推本机架构。"""
     proc, calls = run("t1", "--push", "--registry", "ghcr.io/sqlrush")
     assert proc.returncode != 0
     out = proc.stderr + proc.stdout

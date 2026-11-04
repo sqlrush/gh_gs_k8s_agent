@@ -9,7 +9,7 @@
   · 否则按本次解析出的 schema(statement_history.schema_name / --schema / user_name 推测);
   · 都没有就不过滤(老行为);
   · 已知 schema 下一行都没有时退到 public(search_path 的兜底),再没有就全留——不把证据清空;
-  · 行里没有 schema 列(客户白名单还是老 SQL 正文)时不过滤,兼容未重灌的现场。
+  · 行里没有 schema 列(行方白名单还是老 SQL 正文)时不过滤,兼容未重灌的现场。
 """
 from __future__ import annotations
 

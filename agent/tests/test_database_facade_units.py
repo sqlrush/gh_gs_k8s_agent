@@ -7,7 +7,7 @@
     psycopg2  provides_session = True    单条持久连接
 
 于是 hypopg 虚拟索引验证这类依赖会话的功能，在「配了 gsql、实际兜底到
-psycopg2」的机器上能跑，在真用 gsql 的客户环境跑不了 —— 而且不报错。
+psycopg2」的机器上能跑，在真用 gsql 的现场环境跑不了 —— 而且不报错。
 
 改成严格生效后，配了什么就是什么。本机没有 gsql，就在 config.yaml 里
 配一条 driver: psycopg2 的连接，而不是靠兜底蒙混过去。
@@ -86,7 +86,7 @@ def test_unknown_driver_is_rejected(monkeypatch):
 
 
 def test_missing_driver_module_is_a_clean_dberror_not_a_traceback(monkeypatch):
-    """客户机器的 python3 没装 psycopg2 时,不能把 ModuleNotFoundError 的整条栈甩给用户
+    """行方机器的 python3 没装 psycopg2 时,不能把 ModuleNotFoundError 的整条栈甩给用户
     (模型级验收里 kimi 看到栈后自己去 pip install 了)。要的是一句中文:装哪个包、或改走 grmp。"""
     monkeypatch.setitem(sys.modules, "common.backends.psycopg2_backend", None)  # None ⇒ import 立刻 ImportError
     with pytest.raises(DBError) as ei:

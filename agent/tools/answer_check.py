@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""回答格式检查:一份回答是否照「回答模板」写(2026-10-26 回答模板化;评估用,不进客户环境)。
+"""回答格式检查:一份回答是否照「回答模板」写(2026-10-26 回答模板化;评估用,不进现场环境)。
 
     python3 tools/answer_check.py --kind health  --file answer.md
     python3 tools/answer_check.py --kind qa      < answer.md
@@ -35,7 +35,7 @@ SECTIONS = {
 }
 STATUS_BAND = {"health": "总体状态", "fault": "总体状态", "wdr": "总体状态", "sqltune": "验证状态", "proctune": "验证状态"}
 BOTH_VIEWS = ("health", "fault", "sqltune", "wdr")
-FORBIDDEN_IN_DIAGNOSIS = ("根据知识库", "知识库显示", "知识库检索", "客户知识库参照")
+FORBIDDEN_IN_DIAGNOSIS = ("根据知识库", "知识库显示", "知识库检索", "本行知识库参照")
 _FOLLOWUP = re.compile(r"需要(就|我|了解|看|对|把).{0,60}?[吗么][?？]")
 _FONT = re.compile(r"<font color=(#[0-9a-fA-F]{6})>(.*?)</font>", re.S)
 _AFTER = re.compile(r"\s{0,2}[(（]\s*引用自\s*([^)）]*?)\s+([A-Z][^\s,，;;:：、。)）]*)")

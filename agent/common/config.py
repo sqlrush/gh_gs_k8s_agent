@@ -22,7 +22,7 @@ _VALID_DRIVERS = frozenset({"gsql", "psycopg2", "grmp"})
 
 # 2026-09 直连驱动由 pg8000 整体换成 psycopg2,**不保留别名**。老配置里写着
 # driver: pg8000 的连接会在这里当场报错——泛泛一句 "must be one of" 不足以让
-# 客户知道该动哪一行,所以单独给一条带改法的提示。
+# 行方知道该动哪一行,所以单独给一条带改法的提示。
 _RETIRED_DRIVERS = {
     "pg8000": "psycopg2（直连驱动已整体更换，pg8000 不再受支持，也没有保留别名）",
 }
@@ -71,7 +71,7 @@ class ApiEndpoint:
     host: str
     port: int
     host_env: str = "GRMP_API_HOST"
-    token: str = ""             # 内联令牌（客户配置格式如此）
+    token: str = ""             # 内联令牌（行方配置格式如此）
     token_env: str = "GRMP_AUTH_TOKEN"
     # 2026-09-18 中间件加固:请求头再带 Appkey / Timestamp / Signature。appkey 为空 = 不签名。
     # sign 里是签名细节(credential / key_env / user_id / timestamp / format / encoding / payload),
@@ -84,8 +84,8 @@ class ApiEndpoint:
         """取令牌：环境变量优先于配置文件里的内联值。
 
         环境变量优先是有意的：内联令牌会随配置文件进版本库、进备份、被随手
-        cat；而客户环境里它是**长期有效、无重放保护**的静态凭据。支持内联
-        只是因为客户的配置格式就是这样，不代表推荐这么放。
+        cat；而现场环境里它是**长期有效、无重放保护**的静态凭据。支持内联
+        只是因为行方的配置格式就是这样，不代表推荐这么放。
         """
         return os.environ.get(self.token_env, "") or self.token
 
@@ -93,8 +93,8 @@ class ApiEndpoint:
         """取HOST IP：环境变量优先于配置文件里的内联值。
 
         环境变量优先是有意的：内联HOST随配置文件进版本库、进备份、被随手
-        cat；而客户环境里它是**长期有效、无重放保护**的静态凭据。支持内联
-        只是因为客户的配置格式就是这样，不代表推荐这么放。
+        cat；而现场环境里它是**长期有效、无重放保护**的静态凭据。支持内联
+        只是因为行方的配置格式就是这样，不代表推荐这么放。
         """
         return os.environ.get(self.host_env, "") or self.host
 
@@ -425,5 +425,5 @@ def resolve(name: Optional[str] = None) -> Connection:
     live = _session.current()
     if live is not None:
         return live
-    # 不列沙箱里有哪些会话、有几个:那是别人的登录(2026-09-11 客户反馈的越权)。
+    # 不列沙箱里有哪些会话、有几个:那是别人的登录(2026-09-11 行方反馈的越权)。
     raise ConfigError(_session.NOT_LOGGED_IN + "gsql 模式也可用 `-c <连接名>` 显式指定。")

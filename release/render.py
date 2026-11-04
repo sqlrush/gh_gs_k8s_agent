@@ -4,7 +4,7 @@
 把网络策略的网段改回占位值。这里的规矩:
   - ConfigMap:集群现值保留;新版本新增的键取新清单默认值;资源配置里填了的覆盖;镜像标签与仓库前缀由发版台管。
     agent-roles 整份沿用集群的。集群里有、清单里没有的键(例如 runtime-doctor --proxy 加的 HTTPS_PROXY)保留。
-  - 网络策略:集群里已有的策略,带 ipBlock 的外部规则(中间件、模型、apiserver、上游入口,以及客户加的其他出口)整条沿用,
+  - 网络策略:集群里已有的策略,带 ipBlock 的外部规则(中间件、模型、apiserver、上游入口,以及行方加的其他出口)整条沿用,
     产品内部规则(按标签选 Pod 的)取新清单;资源配置里明确填了网段的,覆盖对应的那一类。
   - 命名空间、PVC 只在首次部署时建;Secret 不在这里(见 steps)。
   - 池子:升级时只改 StatefulSet 模板里的镜像(池子规模、资源限额都保留),首次部署才调 render-pool.py。
@@ -46,7 +46,7 @@ CONFIG_KEYS: Dict[str, Tuple[str, str]] = {
     "gateway.runtime_mode": ("gateway-config", "RUNTIME_MODE"),
     "gateway.pull_policy": ("gateway-config", "PULL_POLICY"),
 }
-# 网络策略里客户要填的四类外部规则:配置字段 → (策略名, 方向, 认法)
+# 网络策略里行方要填的四类外部规则:配置字段 → (策略名, 方向, 认法)
 NET_FIELDS = {
     "net.grmp": ("runtime-policy", "egress", "grmp"),
     "net.model": ("runtime-policy", "egress", "model"),
@@ -201,7 +201,7 @@ def _external(rule: dict, direction: str) -> bool:
 
 def classify(rule: dict, direction: str, policy: str, grmp_port: str) -> str:
     """外部规则是哪一类:upstream(网关入站)/ apiserver(网关出站)/ model(443、80)/ grmp(中间件端口)。
-    认不出的(客户自己加的出口,例如测试环境访问宿主 Ollama 的 11434)返回空 —— 原样保留,资源配置也不覆盖它。"""
+    认不出的(行方自己加的出口,例如测试环境访问宿主 Ollama 的 11434)返回空 —— 原样保留,资源配置也不覆盖它。"""
     if not _external(rule, direction):
         return ""
     if direction == "ingress":

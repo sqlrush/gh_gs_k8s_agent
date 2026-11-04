@@ -389,7 +389,7 @@ def test_open_reports_missing_dir_and_bad_yaml_as_unattached(tmp_path):
 
 def test_empty_kb_stays_unattached_instead_of_a_section_full_of_none(tmp_path):
     """装完还没导入任何材料时,不要给每条发现挂一串「无对应条款 / 无相似案例」——
-    那是噪音,且与契约里「客户尚未导入就别提知识库」相抵触。空库 = 未接入(说明是空的)。"""
+    那是噪音,且与契约里「行方尚未导入就别提知识库」相抵触。空库 = 未接入(说明是空的)。"""
     (tmp_path / "kb.yaml").write_text("embeddings: {source: none}\n", encoding="utf-8")
     (tmp_path / "rules").mkdir()
     sess = query.KbSession.open(tmp_path)
@@ -421,7 +421,7 @@ def test_graph_label_explains_legacy_edges_without_status(tmp_path):
 def test_render_unattached_is_title_plus_reason_only(tmp_path):
     res = query.from_findings([_finding()], kb_dir=tmp_path / "nope")
     out = render.render_section(res)
-    assert out.startswith("## 客户知识库参照\n> 知识库未接入(")
+    assert out.startswith("## 本行知识库参照\n> 知识库未接入(")
     assert "贵行规范" not in out
 
 
@@ -448,7 +448,7 @@ def test_render_file_mode_status_line_names_mode_and_reason(tmp_path):
     finally:
         sess.close()
     out = render.render_section(res)
-    assert out.startswith("## 客户知识库参照\n> 知识库 v2026.09 · 模式:文件(还没建索引")
+    assert out.startswith("## 本行知识库参照\n> 知识库 v2026.09 · 模式:文件(还没建索引")
     assert "kb.py" not in out.split("\n")[1], "状态行会进诊断报告,诊断环境里没有导入命令,不能出现命令"
     assert "· 向量:未启用" in out and "· 图:图文件" in out
     assert f"- **历史相似** {CASE_ID}(结论强度:已确认,2025-02-24):处置 = 针对小表调大" in out

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""把交付文档转成**自带样式的单个 HTML**,给客户直接用浏览器打开或打印成 PDF。
+"""把交付文档转成**自带样式的单个 HTML**,给行方直接用浏览器打开或打印成 PDF。
 
   scripts/md2html.py docs/命令卡-测试环境搭建.md dist/命令卡.html
 

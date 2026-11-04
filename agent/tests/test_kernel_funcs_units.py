@@ -3,7 +3,7 @@
 纪律:
   · 探测永不抛:探测脚本本身跑不了(没注册、连不上)也只是「未知」,由调用方决定退不退回;
   · 「该有而没有」只对 GaussDB 成立:openGauss 从来没有这两个函数(og5 / og7 实测),不能对它报「缺失」;
-  · 运行态计划按探测到的签名二选一:505.2.1.SPC0600 实测是 gs_get_explain(bigint)(2026-09-08 客户 pg_catalog 截图),
+  · 运行态计划按探测到的签名二选一:505.2.1.SPC0600 实测是 gs_get_explain(bigint)(2026-09-08 行方 pg_catalog 截图),
     文档写的 (integer) 已过时;pid 是 64 位线程号,只有 integer 签名才需要范围检查。
 """
 import pathlib

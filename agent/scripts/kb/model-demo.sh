@@ -9,7 +9,7 @@ MODEL="${KB_DEMO_MODEL:-kimi/k3}"
 OUT="$HOME/kb-demo-out"; rm -rf "$OUT"; mkdir -p "$OUT"
 WORK="$HOME/kb-demo-cwd"; mkdir -p "$WORK"; cd "$WORK"      # 空目录:无 AGENTS.md,只靠 skill 契约
 DEMO="$ROOT/skills/gaussdb-kb-import/testdata/demo"
-ASK='用 gaussdb-health 检查连接 og(只读,不做任何变更)。然后只针对 INDEX_UNUSED 和 CACHE_LOW 两类发现各给一条处置建议,每条注明依据来源:来自客户知识库就写案例 ID 或条款 ID,没有就写"通用经验"。'
+ASK='用 gaussdb-health 检查连接 og(只读,不做任何变更)。然后只针对 INDEX_UNUSED 和 CACHE_LOW 两类发现各给一条处置建议,每条注明依据来源:来自本行知识库就写案例 ID 或条款 ID,没有就写"通用经验"。'
 
 run() {  # $1=文件名 $2=消息 [$3=-c]
   echo "===== $1 $(date +%H:%M:%S) ====="

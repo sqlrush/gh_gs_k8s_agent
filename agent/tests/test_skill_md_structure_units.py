@@ -2,7 +2,7 @@
 
 这 14 个文件是**交付物**，而且被脚本批量改过两次（连接指引、安全红线）。
 批量改的坏法很安静：正则少匹配一个文件、插错位置、把 YAML frontmatter 顶飞、
-或者把 kbimport 管理的契约块切成两半 —— 都不会让任何测试变红，只会在客户
+或者把 kbimport 管理的契约块切成两半 —— 都不会让任何测试变红，只会在行方
 那边表现成「某个 skill 行为跟别的不一样」。
 """
 import pathlib
@@ -76,8 +76,8 @@ _GLOBAL_REDLINES = (
 def test_global_redlines_live_in_agents_md():
     """AGENTS.md 里的「禁止行为」红线一条都不能少。
 
-    2026-08 曾把 14 个 SKILL.md 的公共红线集中到这里去重;2026-09-10 客户安全审查 diff SKILL.md 看到红线「被删了」
-    (安装脚本不拷 AGENTS.md,客户只换了 skill 目录)——于是改回**每份 SKILL.md 都带一份**,与 AGENTS.md 同一正文
+    2026-08 曾把 14 个 SKILL.md 的公共红线集中到这里去重;2026-09-10 行方安全审查 diff SKILL.md 看到红线「被删了」
+    (安装脚本不拷 AGENTS.md,行方只换了 skill 目录)——于是改回**每份 SKILL.md 都带一份**,与 AGENTS.md 同一正文
     (common/red_lines.md,tools/inject_red_lines.py 注入,tests/test_red_lines_units.py 保证逐字一致)。
     这里只守 AGENTS.md 自己那几条不消失;副本一致性在 test_red_lines_units 里。
     """
@@ -149,7 +149,7 @@ def test_data_skills_tell_the_model_to_carry_the_session_handle():
 
 
 def test_data_skills_never_offer_other_sessions():
-    """客户 09-11:不带句柄时列候选 / 唯一会话自动选用 = 越权。SKILL.md 不能再有这两句。"""
+    """行方 09-11:不带句柄时列候选 / 唯一会话自动选用 = 越权。SKILL.md 不能再有这两句。"""
     for path in sorted(_ROOT.glob("skills/gaussdb-*/SKILL.md")):
         text = path.read_text(encoding="utf-8")
         assert "只有一个会话时" not in text, path.name

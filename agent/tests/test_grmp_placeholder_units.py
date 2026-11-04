@@ -5,7 +5,7 @@
 不同的执行链路，测试本身失去意义。
 
 替换方式为**文本替换**而非绑定变量 —— 这是刻意的，见开发方案 §2.4：
-中间件的职责是复现客户行为，改用绑定变量会让标识符位的占位符静默失效。
+中间件的职责是复现行方行为，改用绑定变量会让标识符位的占位符静默失效。
 """
 import sys
 import pathlib
@@ -85,7 +85,7 @@ def test_boolean_accepts_only_lowercase_literals(raw):
 def test_boolean_rejects_other_spellings(raw):
     """文档只给了 true/false 两种写法，其余一律拒绝而不做宽容解析。
 
-    宽容解析会让「客户端传了 t、客户中间件拒绝、本地却接受」这类落差
+    宽容解析会让「客户端传了 t、现场中间件拒绝、本地却接受」这类落差
     到交付现场才暴露。
     """
     with pytest.raises(ph.ParamError):
@@ -111,7 +111,7 @@ def test_timestamp_accepts_both_documented_lengths(raw):
 
     但在文本替换方案下中间件并不解释单位 —— 它只把数字串原样贴进 SQL，
     秒/毫秒的判断责任在脚本作者（写 to_timestamp({{ts}}) 还是 /1000）。
-    所以这里两种长度都必须接受，不能替客户选一种。
+    所以这里两种长度都必须接受，不能替行方选一种。
     """
     ph.validate_value("TIMESTAMP", raw, Settings())
 
@@ -122,7 +122,7 @@ def test_timestamp_rejects_non_digits(raw):
         ph.validate_value("TIMESTAMP", raw, Settings())
 
 
-# --- String：引号责任未经客户环境证实，默认拒绝而不是猜一种 ---
+# --- String：引号责任未经现场环境证实，默认拒绝而不是猜一种 ---
 
 def test_string_param_is_substituted_as_is_by_default():
     """【推】接口文档「案例 2」把字符串与布尔型合并为同一个案例：
@@ -132,18 +132,18 @@ def test_string_param_is_substituted_as_is_by_default():
     若中间件按类型补引号，String 要补、Boolean 不能补，两类不可能合并。
     合并说明替换时不按类型分支 —— 纯文本替换，引号责任在脚本作者。
 
-    更直接的一条：**客户中间件不会拒绝 String 参数**。默认拒绝是我们
-    单方面加的行为，客户没有，属于「改良」，与保真原则相悖。
+    更直接的一条：**现场中间件不会拒绝 String 参数**。默认拒绝是我们
+    单方面加的行为，行方没有，属于「改良」，与保真原则相悖。
     """
     ph.validate_value("STRING", "zhangsan", Settings())
 
 
 def test_string_param_can_be_refused_when_policy_tightened():
-    """拿到反证（客户确实按类型补引号）时可切回拒绝，策略是显式配置。"""
+    """拿到反证（行方确实按类型补引号）时可切回拒绝，策略是显式配置。"""
     st = Settings(string_param_policy="refuse")
     with pytest.raises(ph.ParamError) as exc:
         ph.validate_value("STRING", "zhangsan", st)
-    assert "未经客户环境证实" in str(exc.value)
+    assert "未经现场环境证实" in str(exc.value)
 
 
 def test_string_param_value_is_not_quoted_by_the_middleware():
@@ -190,7 +190,7 @@ def test_extract_returns_empty_list_for_parameterless_sql():
 # ===========================================================================
 
 def test_render_substitutes_value_textually():
-    """【实】客户样例 where runtime > {{threshold_seconds}}，INTEGER 裸露无引号。"""
+    """【实】现场样例 where runtime > {{threshold_seconds}}，INTEGER 裸露无引号。"""
     sql = ph.render(
         "select 1 where runtime > {{threshold_seconds}}",
         _defs(("threshold_seconds", "INTEGER")),
@@ -215,7 +215,7 @@ def test_render_substitutes_in_identifier_position():
     """标识符位（ORDER BY 列名）用绑定变量会静默按常量排序，文本替换则正常。
 
     注册期会对这类脚本出具 IDENT_POSITION 风险标注，但不拦截 ——
-    拦了就偏离客户行为（客户环境这条脚本是能跑的）。
+    拦了就偏离行方行为（现场环境这条脚本是能跑的）。
     """
     sql = ph.render(
         "select * from t order by {{col}} desc",

@@ -18,7 +18,7 @@
 # 64 位，所以用 numeric 而不是 bigint 做中间类型，避免边界上溢出。
 #
 # 阈值用 `autovacuum_freeze_max_age` 这个库自己的配置做分母，而不是写死
-# 2^31：客户把它调小（常见做法）时，占比才反映"离 autovacuum 强制冻结还有多远"。
+# 2^31：行方把它调小（常见做法）时，占比才反映"离 autovacuum 强制冻结还有多远"。
 # 判定在 skills/gaussdb-vacuum/scripts/rules.py。
 name: vacuum.freeze_age
 description: 每个库的事务号回卷水位（frozenxid 落后当前快照多少）

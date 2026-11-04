@@ -118,7 +118,7 @@ def test_health_has_no_read_only_line_when_writable(tmp_path, capsys):
 
 def test_health_in_a_writable_kb_also_writes_the_shared_copy(tmp_path, monkeypatch):
     """导入环境(知识库可写)里查状态:个人报告写进 admins/<工号>/reports,大盘读的是诊断环境那份 —— 管理员照着大盘的提示
-    「在会话里查一次」却看不到(2026-11-03 客户反馈,测试环境复现)。所以可写时另写一份到共享知识库 index/health.json。"""
+    「在会话里查一次」却看不到(2026-11-03 行方反馈,测试环境复现)。所以可写时另写一份到共享知识库 index/health.json。"""
     import json
     monkeypatch.setenv("GSDB_REPORTS_DIR", str(tmp_path / "admin-reports"))
     kb = _kb(tmp_path)

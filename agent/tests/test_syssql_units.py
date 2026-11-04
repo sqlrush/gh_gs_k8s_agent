@@ -2,7 +2,7 @@
 
 用例里的语句大多是 2026-10-22 在 og5 的 dbe_perf.statement / statement_history 里实际取到的:
 内核 WDR 快照线程(WDRXdb)、我方智能体查系统视图、管理员 gsql 手工查询,以及 faultlab 的业务语句。
-方向:**拿不准一律保留** —— 误排除会把客户真正的慢 SQL 藏起来。
+方向:**拿不准一律保留** —— 误排除会把行方真正的慢 SQL 藏起来。
 """
 import pathlib
 import sys

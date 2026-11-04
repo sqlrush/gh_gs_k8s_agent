@@ -1,6 +1,6 @@
-"""客户代码扫描(SonarQube 规则集,CERT 规范)会扫我们的 Python 源码——这里把已知会被报的写法钉成闸门。
+"""行方代码扫描(SonarQube 规则集,CERT 规范)会扫我们的 Python 源码——这里把已知会被报的写法钉成闸门。
 
-现场(客户 2026-09-09 截图):S1764「Correct one of the identical sub-expressions on both sides of operator "!="」
+现场(2026-09-09 截图):S1764「Correct one of the identical sub-expressions on both sides of operator "!="」
 报在 calibrate.py / costmodel.py / selectivity.py 的 `x != x` 判 NaN 写法上。写法本身没错(NaN 是唯一不等于自己的值),
 但扫描器不认,而且 `math.isnan` 本来就更清楚。行为不能变:NaN 该抛的照抛、该退化的照退化。
 """
@@ -36,7 +36,7 @@ def test_no_self_comparison_in_shipped_python():
             for no, code in _code_lines(path):
                 if _SELF_CMP.search(code):
                     hits.append("%s:%d: %s" % (path.relative_to(_ROOT), no, code.strip()))
-    assert not hits, "客户扫描规则 S1764 会报这些行(判 NaN 请用 math.isnan):\n" + "\n".join(hits)
+    assert not hits, "行方扫描规则 S1764 会报这些行(判 NaN 请用 math.isnan):\n" + "\n".join(hits)
 
 
 def test_nan_handling_unchanged_after_rewrite():

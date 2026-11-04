@@ -118,7 +118,7 @@ def test_pem_private_key_and_der_signature_from_openssl(tmp_path):
     msg.write_bytes(b"/v1/validateByNorth/validate+1726650000000")
     pub = sm2.public_key(d)
     # OpenSSL 3 的 SM2 默认 distid 是**空串**,不是国标默认的 1234567812345678(Java BouncyCastle / hutool 默认是后者)。
-    # 两边都得能验——这正是 user_id 必须可配、必须跟客户确认的原因。
+    # 两边都得能验——这正是 user_id 必须可配、必须跟本行确认的原因。
     sig = subprocess.run([ssl, "dgst", "-sm3", "-sign", str(key), "-out", str(tmp_path / "sig.der"), str(msg)],
                          capture_output=True)
     if sig.returncode != 0:

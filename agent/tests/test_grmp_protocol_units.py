@@ -1,7 +1,7 @@
 """GRMP 协议契约测试 —— 断言全部引自接口规范说明的【实】【规】【例】三档证据。
 
 每个测试的 docstring 标注证据等级与出处小节：
-  【实】客户实际调用证实（权重最高，与文档冲突时以此为准）
+  【实】行方实际调用证实（权重最高，与文档冲突时以此为准）
   【规】接口文档明确规定
   【例】仅在文档示例中体现
 
@@ -23,7 +23,7 @@ from common.grmp.settings import Settings  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# golden 报文：逐字取自规范说明 §4.4 / §5.7，客户测试环境标识已剔除
+# golden 报文：逐字取自规范说明 §4.4 / §5.7，现场测试环境标识已剔除
 # ---------------------------------------------------------------------------
 
 GOLDEN_LIST_RESULT = {
@@ -164,7 +164,7 @@ def test_task_ids_are_unique_per_call():
 # ===========================================================================
 
 def test_page_info_reproduces_customer_golden_response():
-    """【实】客户真实响应的 result 必须被逐字段复现（单页单条的场景）。"""
+    """【实】行方真实响应的 result 必须被逐字段复现（单页单条的场景）。"""
     got = pagination.paginate(GOLDEN_LIST_RESULT["list"], page_num=1, page_size=10)
     assert got == GOLDEN_LIST_RESULT
 
@@ -276,7 +276,7 @@ def test_all_column_values_are_rendered_as_json_strings():
 
 
 def test_invoke_result_reproduces_customer_golden_row():
-    """【实】§5.7 客户真实响应的结果行必须被逐字段复现。"""
+    """【实】§5.7 行方真实响应的结果行必须被逐字段复现。"""
     st = Settings(bool_style="true_false")
     result = serialize.result_array(NATIVE_COLS, [NATIVE_ROW], st)
     assert result["type"] == "array"
@@ -362,9 +362,9 @@ def test_null_renders_as_empty_string_by_default():
 
 
 def test_null_and_empty_string_are_indistinguishable_by_design():
-    """【推】NULL 与空串渲染结果相同——这是客户中间件的信息损失，必须一并复刻。
+    """【推】NULL 与空串渲染结果相同——这是现场中间件的信息损失，必须一并复刻。
 
-    做得比客户更好（比如渲染成 null）会让本地测不出这个损失。
+    做得比行方更好（比如渲染成 null）会让本地测不出这个损失。
     """
     st = Settings()
     both = serialize.result_array(["x"], [(None,), ("",)], st)

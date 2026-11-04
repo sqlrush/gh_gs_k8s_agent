@@ -1,6 +1,6 @@
 """中间件路径：走 GRMP 的两个 HTTP 接口访问数据库。
 
-调用链与 agent 在客户环境必须做的事完全一致：
+调用链与 agent 在现场环境必须做的事完全一致：
     查命令清单 → 按 cmd_name 匹配逻辑名 → 取 id → invoke
 
 **不硬编码 id**：脚本 ID 是环境相关数据。硬编码的失败方式极其隐蔽 ——
@@ -113,7 +113,7 @@ class GrmpClient:
         if self._signer is not None:
             # 2026-09-18 起中间件还校验 Appkey / Timestamp / Signature(认应用、防重放、防改路径),每次请求现算
             headers.update(self._signer.headers(path))
-        # 2026-09-20 客户确认中间件要显式收调用人工号;头名由客户给,没配就不加
+        # 2026-09-20 本行确认中间件要显式收调用人工号;头名由行方给,没配就不加
         return userid.apply_headers(self._user_id, headers)
 
     def with_user_id(self, payload: Dict[str, Any]) -> Dict[str, Any]:

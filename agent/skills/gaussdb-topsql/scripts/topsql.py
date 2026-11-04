@@ -69,7 +69,7 @@ class StmtRow:
     total_sec: float
     avg_ms: float
     rows: int
-    # None = 取数脚本里没有这一列(客户还没重导白名单),不是 0 —— 当 0 会把每条都标成「全在等」
+    # None = 取数脚本里没有这一列(行方还没重导白名单),不是 0 —— 当 0 会把每条都标成「全在等」
     cpu_sec: Optional[float] = None
     io_sec: Optional[float] = None
 
@@ -118,7 +118,7 @@ def top_sql(runner, by: str, limit: int) -> list[StmtRow]:
 def _screener(runner, include_system: bool):
     """排行用的筛子:(排好序的行, 要几条) → Screening。include_system 时返回 None(不筛)。
 
-    2026-10-22 客户要求:Top SQL 排除 GaussDB 自己的系统 SQL(WDR 快照、监控采集、诊断工具查系统视图),
+    2026-10-22 行方要求:Top SQL 排除 GaussDB 自己的系统 SQL(WDR 快照、监控采集、诊断工具查系统视图),
     报告里写明排除了几条(common/syssql.py)。正文只有 80 字,长语句按 sql_id 补取全文再判。
     """
     if include_system:
@@ -149,7 +149,7 @@ def _now() -> str:
 
     两次采样都由同一个进程打时间戳,所以相隔多久是准的 —— 这正是增量需要的。
     没有去查数据库的 now():白名单里没有「只返回当前时间」的脚本,而为了一个时间戳
-    去加一条下发脚本、让客户重导,不值得。报告里会写明这是采样时刻。
+    去加一条下发脚本、让行方重导,不值得。报告里会写明这是采样时刻。
     """
     return reports.utc_stamp()
 

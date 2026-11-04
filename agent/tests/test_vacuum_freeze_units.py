@@ -37,7 +37,7 @@ def _row(name="postgres", age="2000000000", cap="4000000000"):
 def test_pct_is_against_this_databases_own_max_age():
     """分母用**这个库自己配的** autovacuum_freeze_max_age，不是写死的常数。
 
-    客户把它调小（常见做法，为了让冻结更早更分散）时，只有用它做分母，
+    行方把它调小（常见做法，为了让冻结更早更分散）时，只有用它做分母，
     占比才真正回答「离强制冻结还有多远」。
     """
     assert F.freeze_pct(_row(age="2000000000", cap="4000000000")) == pytest.approx(50.0)

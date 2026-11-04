@@ -1,10 +1,10 @@
-"""把 registry 里指定脚本按**客户真实 DML 形态**追加进 docs/delivery/scripts.sql。
+"""把 registry 里指定脚本按**行方真实 DML 形态**追加进 docs/delivery/scripts.sql。
 
-为什么单独有这个工具:scripts.sql 已不是 grmp_register 的输出——它在 main 上被手改成客户的
+为什么单独有这个工具:scripts.sql 已不是 grmp_register 的输出——它在 main 上被手改成行方的
 DML 形态(单层 grmp.script_config、id 走 script_config_seq.nextval、create_user 填工号、多一列 uuid),
-而生成器 grmp_mock/dml.py 仍出老形态;重新生成会把客户要的形态抹掉。改了 registry 之后只能
+而生成器 grmp_mock/dml.py 仍出老形态;重新生成会把行方要的形态抹掉。改了 registry 之后只能
 按这份的形态逐条追加。本工具就是「逐条追加」的确定性版本:SQL 正文与 parameter_config 直接取自
-registry(ScriptRecord.parameter_config 与客户样例逐字一致),其余列照抄同族既有行。
+registry(ScriptRecord.parameter_config 与现场样例逐字一致),其余列照抄同族既有行。
 
 用法:
     python3 tools/append_delivery_rows.py explain.kernel_funcs vacuum.kernel_info ...

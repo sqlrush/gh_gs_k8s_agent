@@ -353,6 +353,10 @@ _SKILLS = "/data/config/opencode/skills"
     "python3 %s/gaussdb-health/scripts/health.py --session abc 2>&1" % _SKILLS,
     "python3 %s/gaussdb-kb/scripts/kb.py health > /dev/null" % _SKILLS, "ls 2>/dev/null", "cat a.md 2> /dev/null",
     "cd /nas/kb", "stat /nas/kb/kb.yaml", "which python3", "true", "find /nas/kb -name '*.md'",
+    # 根规范检索(本行知识库不可用或查不到时)
+    "python3 /workspace/search_docs.py 锁等待 变更窗口", "python3 /workspace/search_docs.py --list",
+    "python3 /workspace/search_docs.py --show /workspace/docs/根规范-1.md --from 40 2>&1", "python /workspace/search_docs.py DDL",
+    "cat /workspace/docs/根规范-1.md", "grep -n DDL /workspace/docs/根规范-2.md",
 ])
 def test_bash_allows_skill_scripts_and_read_only_commands(cmd):
     assert _opencode_decides(podctl.opencode_permissions({})["bash"], cmd) == "allow", cmd
@@ -372,6 +376,9 @@ def test_bash_allows_skill_scripts_and_read_only_commands(cmd):
     "python3 -c 'print(1)' 2>&1", "ls > /tmp/x", "ls x > /dev/null 2>&1",
     "python3 %s/gaussdb-x/s.py > /tmp/out.txt" % _SKILLS, "ls 2>/tmp/err.txt",
     "find / -name x -delete", "find . -exec cat {} ;", "find . -fprint /tmp/list 2>/dev/null",
+    # /workspace 下只放行检索脚本这一个
+    "python3 /workspace/other.py", "python3 /workspace/docs/x.py", "python3 /workspace/search_docs.py x > /tmp/out",
+    "python3 /workspace/search_docs.py/../../../tmp/evil.py", "python3 /workspace/search_docs.py.bak",
 ])
 def test_bash_denies_env_reads_writes_and_anything_else(cmd):
     assert _opencode_decides(podctl.opencode_permissions({})["bash"], cmd) == "deny", cmd

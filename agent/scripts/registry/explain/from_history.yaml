@@ -3,7 +3,7 @@
 #
 # 正文与 sqlfetch.from_history 逐字相同（common/sql.py 里 skill_sqltune_005 与
 # skill_sqlfetch_001 本来就是两份相同的常量）。**刻意不复用同一个逻辑名**：
-# 逻辑名按 skill 分域，客户侧按域审批/作废；共用一条会让「作废 sqlfetch 的
+# 逻辑名按 skill 分域，行方按域审批/作废；共用一条会让「作废 sqlfetch 的
 # 脚本」顺手把 sqltune 打断，而这条依赖在任何一侧都看不出来。
 name: explain.from_history
 description: 按 unique_query_id 从 SQL 历史里取最近一条完整语句

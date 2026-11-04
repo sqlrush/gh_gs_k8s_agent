@@ -1,11 +1,11 @@
 """deploy.sh 的端到端测试 —— 真跑脚本，不是 dry-run。
 
-这是客户装完拿到手第一个执行的东西，270 行、5 步交互，此前只用
+这是行方装完拿到手第一个执行的东西，270 行、5 步交互，此前只用
 `--dry-run` 喂 `yes y` 跑过。dry-run 把每条会改动系统的命令都换成打印，
 恰恰把所有真正会出问题的地方跳过了。
 
 而 shell 在 `set -u` 下的典型坏法就是**没走到的分支才炸**：某个变量只在
-另一条路上赋值，这条路上一引用就是 unbound。所以这里按「客户会怎么点」
+另一条路上赋值，这条路上一引用就是 unbound。所以这里按「行方会怎么点」
 把分支一条条走一遍，HOME / 安装目录 / $GSDB_HOME 全部重定向到临时目录。
 """
 import os
@@ -40,7 +40,7 @@ def _run(tmp, answers, *args, env_extra=None):
         ["bash", str(_DEPLOY), *args],
         input="\n".join(answers) + "\n",
         capture_output=True, text=True, cwd=str(_ROOT), env=env, timeout=300)
-    # 未捕获异常一律是 BUG —— 客户看到的应该是能照做的提示，不是一段栈。
+    # 未捕获异常一律是 BUG —— 行方看到的应该是能照做的提示，不是一段栈。
     assert "Traceback" not in proc.stdout + proc.stderr, proc.stdout + proc.stderr
     assert "unbound variable" not in proc.stdout + proc.stderr, \
         "set -u 下引用了没赋值的变量：\n" + proc.stdout + proc.stderr
@@ -113,7 +113,7 @@ def test_generated_config_carries_no_plaintext_password(box):
     """**配置文件里绝不允许出现明文口令。**
 
     这是 v4 的硬约束，config.py 加载时会直接拒绝。部署脚本自己生成的配置
-    要是带了 password，客户第一次调 skill 就会被自己的部署脚本坑到。
+    要是带了 password，行方第一次调 skill 就会被自己的部署脚本坑到。
     """
     _run(box["tmp"], _gsql_answers(box["dest"], box["ghome"], box["rc"]))
     text = (box["ghome"] / "config.yaml").read_text(encoding="utf-8")
@@ -219,7 +219,7 @@ def test_keeping_an_existing_api_config_still_tests_api(box):
     """**保留已有配置时，连通性测试要按配置文件里的模式走。**
 
     MODE_SEL 只在「重新生成配置」那条路上赋值。选了不覆盖，它就没有值，
-    兜底成 gsql —— 于是保留着 api 配置的客户，会看到脚本拿一个编出来的
+    兜底成 gsql —— 于是保留着 api 配置的行方，会看到脚本拿一个编出来的
     连接名 og-prod 去直连数据库，报一堆指向错误方向的红。
     """
     _run(box["tmp"], _api_answers(box["dest"], box["ghome"], box["rc"]))

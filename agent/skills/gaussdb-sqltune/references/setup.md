@@ -52,7 +52,7 @@ ALTER SYSTEM SET track_stmt_parameter = on;     -- 字面 SQL(否则归一化)
 
 | 症状                                     | 处理 |
 |----------------------------------------|---|
-| 退出码 2 / 「该能力在白名单模型下不可用」        | 该连接的 driver 是 `grmp`(走中间件),中间件只执行预注册脚本、且每次调用独立连接。sqltune/verify 要 EXPLAIN 用户临时给的任意 SQL,并在同一会话里做 hypopg 虚拟索引验证,两件事都做不到。**改用 driver 为 `psycopg2` 的连接**;若客户环境只有中间件通道,如实说明本 skill 当前无此能力并停止,不要凭表/索引/统计信息编调优结论。只看 SQL 原文或慢 SQL 清单可改用 gaussdb-sqlfetch / gaussdb-topsql / gaussdb-slowsql / gaussdb-health(这些已全量走中间件) |
+| 退出码 2 / 「该能力在白名单模型下不可用」        | 该连接的 driver 是 `grmp`(走中间件),中间件只执行预注册脚本、且每次调用独立连接。sqltune/verify 要 EXPLAIN 用户临时给的任意 SQL,并在同一会话里做 hypopg 虚拟索引验证,两件事都做不到。**改用 driver 为 `psycopg2` 的连接**;若现场环境只有中间件通道,如实说明本 skill 当前无此能力并停止,不要凭表/索引/统计信息编调优结论。只看 SQL 原文或慢 SQL 清单可改用 gaussdb-sqlfetch / gaussdb-topsql / gaussdb-slowsql / gaussdb-health(这些已全量走中间件) |
 | 退出码 2 / connection refused             | 查 host/port/防火墙;用脚本跑 `SELECT 1` 验证 |
 | 退出码 2 / password authentication        | 重建凭据(见「添加连接」),或设 `GSDB_PASSWORD`(旧 `GDAA_PASSWORD` 仍兼容) |
 | 退出码 3 / permission denied for dbe_perf | 授 monadmin(上面 SQL) |

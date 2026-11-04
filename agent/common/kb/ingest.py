@@ -69,7 +69,7 @@ def _decode(raw: bytes) -> str:
 def fit_rows(headers: Sequence[str], rows: Sequence[Sequence[str]], name: str = "") -> List[List[str]]:
     """把每行对齐到表头宽度:短了补空,**长了把多出的格并进最后一列**——绝不静默丢内容。
 
-    没加引号的导出里字段内的逗号会把一行拆成十几格,丢掉就是丢客户的处置过程。
+    没加引号的导出里字段内的逗号会把一行拆成十几格,丢掉就是丢行方的处置过程。
     """
     width = len(headers)
     out: List[List[str]] = []
@@ -260,7 +260,7 @@ def _std_document_item(text: str, locator_prefix: str, stem: str) -> Optional[It
 def split_text_items(text: str, locator_prefix: str, stem: str) -> List[Item]:
     """md/txt:用 `\\n---\\n` 分隔多单;没有分隔符就是一单。标题取首个非空行。
 
-    标准化(std)块另按它自己的已定字段走:id 用原始工单号、出处指回**客户原件**,
+    标准化(std)块另按它自己的已定字段走:id 用原始工单号、出处指回**原件**,
     我们的中间定位记进 `ingested_from`。否则案例的 source 会指向中间文件,追溯链断在自己手里。
     """
     whole = _std_document_item(text, locator_prefix, stem)

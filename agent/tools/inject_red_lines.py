@@ -1,7 +1,7 @@
 """把公共安全红线(common/red_lines.md)注入每个 SKILL.md 的「## 安全红线」与 AGENTS.md。
 
 为什么是「每份一个副本」而不是「AGENTS.md 一份」:2026-09-02 把 14 份公共红线抽到 AGENTS.md 去重,而安装脚本不拷 AGENTS.md,
-客户只换了 skill 目录,安全审查 diff SKILL.md 看到红线整段消失(09-10 反馈)。银行客户要的是每个交付文件里看得见。
+行方只换了 skill 目录,安全审查 diff SKILL.md 看到红线整段消失(09-10 反馈)。银行要的是每个交付文件里看得见。
 所以正文只有一份,副本由本工具注入、由 tests/test_red_lines_units.py 保证逐字一致。
 
 用法:
@@ -21,6 +21,7 @@ CANON = "common/red_lines.md"
 BEGIN = "<!-- RED-LINES:BEGIN — 公共安全红线,正文在 common/red_lines.md,由 tools/inject_red_lines.py 注入,块内修改会被覆盖 -->"
 END = "<!-- RED-LINES:END -->"
 AGENTS_SCRIPT = "<skill>.py"          # AGENTS.md 不属于某一个 skill,最后一条写成泛指
+ROOT_PROMPTS = ("AGENTS.md", "AGENTS-kb-import.md")
 _SECTION = "## 安全红线"
 _KB_BLOCK = "<!-- KB-CONTRACT:BEGIN"
 _BLOCK_RE = re.compile(re.escape(BEGIN) + r"\n(.*?)\n" + re.escape(END), re.S)
@@ -68,9 +69,10 @@ def _with_block(text: str, body: str, anchor_after_heading: bool) -> str:
 def _targets(root: pathlib.Path):
     for path in sorted((root / "skills").glob("gaussdb-*/SKILL.md")):
         yield path, render(main_script(path.parent), root), True
-    agents = root / "AGENTS.md"
-    if agents.exists():
-        yield agents, render(AGENTS_SCRIPT, root), False
+    for name in ROOT_PROMPTS:                    # 根提示词:诊断环境一份,容器版的知识库导入环境另一份
+        agents = root / name
+        if agents.exists():
+            yield agents, render(AGENTS_SCRIPT, root), False
 
 
 def _agents_with_block(text: str, body: str) -> str:

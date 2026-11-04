@@ -12,7 +12,7 @@
 `synchronous_commit=on` + `synchronous_standby_names='*'` + 零个备库，按
 PostgreSQL 的语义该无限等待，但 og5 写入完全正常 —— openGauss 的同步复制要靠
 `replconninfo` 定义对端才生效。只看那两个 GUC 就报警，会在**每一个单机库**上
-乱报，而单机库是客户环境里最多的一类。虚报一次，真配错时就没人看这条了。
+乱报，而单机库是现场环境里最多的一类。虚报一次，真配错时就没人看这条了。
 """
 from __future__ import annotations
 

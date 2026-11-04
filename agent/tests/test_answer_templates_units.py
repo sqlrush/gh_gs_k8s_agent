@@ -72,11 +72,11 @@ def test_agents_md_carries_routing_and_cross_skill_parts_before_output_format():
 
 
 def test_agents_md_dropped_the_formats_that_fight_the_template():
-    """D17:客户原有的引用格式、兜底说法、诊断 / 问答输出与新模板冲突,同一份提示词里两套格式,模型会随机挑一套。"""
+    """D17:行方原有的引用格式、兜底说法、诊断 / 问答输出与新模板冲突,同一份提示词里两套格式,模型会随机挑一套。"""
     text = _AGENTS.read_text(encoding="utf-8")
     for stale in ("依据《文档名称》", "以下内容未在本地规范文档中找到", "〔类型 ID〕", "- 故障现象描述", "- 直接回答问题"):
         assert stale not in text, "AGENTS.md 还留着旧写法:%s" % stale
-    # SQL 审查保持客户原有格式(D18)
+    # SQL 审查保持行方原有格式(D18)
     assert "### SQL 审查输出" in text and "- 问题列表（逐项说明）" in text
 
 

@@ -8,6 +8,7 @@ Each of those has a test here.
 """
 import importlib.util
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -257,7 +258,7 @@ def test_split_frontmatter():
 
 def test_slugify_never_escapes_the_kb_directory():
     assert kb.slugify("../../etc/passwd") == "etc-passwd"
-    assert kb.slugify("客户规范 v2.1") == "客户规范-v2-1"
+    assert kb.slugify("行内规范 v2.1") == "行内规范-v2-1"
     assert kb.slugify("!!!") == "imported"
 
 
@@ -327,7 +328,7 @@ def test_every_contracted_skill_carries_the_current_block():
 KB_MARK = '<font color=#2f6fdb>'
 
 
-# 2026-10-26 回答模板化:官方文档集换青色,与客户知识分开;句后括号注明出处(引用自 xxx 库 编号)。
+# 2026-10-26 回答模板化:官方文档集换青色,与本行知识分开;句后括号注明出处(引用自 xxx 库 编号)。
 OFFICIAL_MARK = '<font color=#0f7c86>'
 
 
@@ -363,7 +364,7 @@ def test_fetch_only_skills_stay_clean():
 # KB 落点：与 skill 装在一起（skills/ 的同级目录，不是 skill 目录内部）
 #
 # 不能放 skills/<name>/kb —— install-opencode.sh 每次重装 `rm -rf` 整个 skill
-# 目录，客户导入的知识库会被删光。同级目录 install 从不触碰(已实测)。
+# 目录，本行导入的知识库会被删光。同级目录 install 从不触碰(已实测)。
 # --------------------------------------------------------------------------
 import os
 
@@ -422,7 +423,7 @@ def test_contract_uses_a_placeholder_the_installer_substitutes():
 #
 # 消费者 skill 走的是契约块里的 `grep -rn "<关键词>" <kb>/...`。grep 拿 LLM 敲的
 # UTF-8 字节去比对一个 GB18030 文件,字节层面对不上——**不报错,就是"没找到"**。
-# 于是客户明明把规范写进了库里,模型却回「知识库未覆盖,以下为通用经验」,
+# 于是行方明明把规范写进了库里,模型却回「知识库未覆盖,以下为通用经验」,
 # 正是本 skill 要防的那种谎话。validate 必须在导入时就把它拦下来。
 # --------------------------------------------------------------------------
 _GBK_RULE = "- id: GS-IDX-001\n  severity: warn\n  check: deterministic\n  rule: 索引命名\n"
@@ -455,9 +456,9 @@ def test_validate_accepts_utf8_files(tmp_path):
 
 
 def test_original_snapshots_keep_their_encoding(tmp_path):
-    """sources/ 是原文快照,本来就该保留客户给的编码;检索也不扫它,不该报错。"""
+    """sources/ 是原文快照,本来就该保留行方给的编码;检索也不扫它,不该报错。"""
     d = _kb_dir(tmp_path)
-    (d / "sources" / "客户规范.txt").write_bytes("索引命名".encode("gb18030"))
+    (d / "sources" / "行内规范.txt").write_bytes("索引命名".encode("gb18030"))
     findings = []
     kb.validate_encoding(d, findings)
     assert findings == []
@@ -491,7 +492,7 @@ def test_encoding_error_suggests_a_command_that_actually_runs(tmp_path):
 #     grep -rn "<关键词>" <kb>/errata <kb>/rules <kb>/guides
 # 定位条款。grep -rn 只输出**命中行**,所以一条标了 status: deprecated 的条款,
 # 模型搜「外键」时看到的是 `rules/t.yaml:12: rule: 禁止使用外键约束` —— 它
-# 看不到 status 那一行,照样会按已废止的规范判客户违规。
+# 看不到 status 那一行,照样会按已废止的规范判行方违规。
 #
 # 所以废止必须是**物理隔离**:条款移进 archive/,而 archive/ 不在 grep 范围内。
 # status 字段的作用是让 validate 能双向校验「移了没标」和「标了没移」。
@@ -872,7 +873,7 @@ def test_contract_leads_with_the_listing_not_keyword_grep(tmp_path):
 #
 # 陷阱:扫描件 PDF 里的字是图片,没有任何文本操作符。pdftotext 对它
 # **成功退出(returncode 0)、输出空字符串**。照抄 .doc 那套「退出码 0 = 成功」
-# 会写出一个空的 source.md,模型对着空文档说「这份规范没有条款」—— 而客户的
+# 会写出一个空的 source.md,模型对着空文档说「这份规范没有条款」—— 而行方的
 # 规范明明白白印在那 30 页图片里。不报错、不崩溃,只是悄悄什么都没做。
 #
 # 中文规范文档里扫描件比例很高(盖了红章的基本都是扫的),所以质量闸门比
@@ -1113,10 +1114,12 @@ def test_ingest_local_machine_path_tells_user_to_upload(tmp_path, capsys, monkey
     assert "沙箱" in text and "上传" in text and str(tmp_path / "kb" / "inbox" / "uploads") in text
 
 
-def test_agents_md_does_not_send_the_model_to_paths_that_do_not_exist():
-    """容器里没有 /workspace,也没有 search_docs.py。2026-10-24 测试环境:模型照 AGENTS.md 的旧检索流程猜出
-    python3 /workspace/kb.py,被权限规则拦下,界面显示「shell 失败」。检索走知识库 skill,路径以 skill 给的为准。"""
+def test_agents_md_only_sends_the_model_to_paths_that_exist():
+    """2026-10-24 测试环境:模型照 AGENTS.md 的旧检索流程猜出 python3 /workspace/kb.py,被权限规则拦下,界面显示「shell 失败」。
+    后来写成「本环境没有 /workspace」;2026-11-04 现场要求按原路径检索根规范 —— 镜像里现在真有 /workspace/search_docs.py
+    与 /workspace/docs/(docker/Dockerfile 公共阶段),权限也放行它(docker/podctl.py)。提示词里的路径只能是这两个。"""
     text = (_ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    assert "search_docs.py" not in text and "/workspace/docs" not in text
+    assert "本环境没有 `/workspace`" not in text
+    assert set(re.findall(r"/workspace/[\w./-]*", text)) <= {"/workspace/search_docs.py", "/workspace/docs/"}
     assert "不要猜路径" in text and "kb.py query" in text and "kb.py show" in text
     assert "看文件内容用 read 工具" in text, "模型用 sed -n 看文件片段被拦(同一次测试),要指给它能用的办法"

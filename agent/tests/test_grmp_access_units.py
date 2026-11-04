@@ -4,7 +4,7 @@
     rows = runner.run("slowsql.slow_sql", {"threshold_ms": 200, ...})
 
 skill 不感知自己走的是中间件还是直连。这一点是本阶段的全部价值：
-skill 代码在本地与客户环境完全相同，不需要为两边各留一套。
+skill 代码在本地与现场环境完全相同，不需要为两边各留一套。
 """
 import re
 import sys
@@ -130,8 +130,8 @@ def test_unsupported_type_is_rejected_rather_than_stringified(bad):
 def test_direct_runner_renders_and_returns_stringified_rows(tmp_path):
     """直连路径同样把结果字符串化 —— 与中间件路径形状一致。
 
-    保留原生类型会让本地写出的解析代码到客户环境全部失效：
-    客户那边拿到的一律是字符串。
+    保留原生类型会让本地写出的解析代码到现场环境全部失效：
+    行方那边拿到的一律是字符串。
     """
     db = FakeDB(cols=("datname", "oid"), rows=[("postgres", 16384)])
     runner = DirectRunner(
@@ -308,7 +308,7 @@ def test_whitelist_path_says_out_loud_that_it_cannot_enforce_timeout(monkeypatch
     """中间件设不了超时（协议没这个旋钮），显式指定时必须说一声。
 
     收下参数然后当没看见才是真正危险的：用户以为查询 5 秒会被掐断，
-    实际它能在客户生产库上一直跑。
+    实际它能在生产库上一直跑。
     """
     monkeypatch.setenv("GRMP_AUTH_TOKEN", "x" * 32)
     access.runner_for(_timeout_conn(driver="grmp"), timeout=5)

@@ -128,7 +128,7 @@ fi
 if [ "${SKIP_CFG:-0}" = "0" ]; then
   say "  两种接入方式："
   say "    ${BOLD}1) gsql${RST}  直连数据库（本机/内网可直达）"
-  say "    ${BOLD}2) api${RST}   走 GRMP 中间件（客户生产环境通常是这个）"
+  say "    ${BOLD}2) api${RST}   走 GRMP 中间件（行方生产环境通常是这个）"
   ask "选哪种" "1"; MODE_SEL="$REPLY_VAL"
 
   if [ "${MODE_SEL:-1}" = "2" ]; then
@@ -203,7 +203,7 @@ fi
 
 # 保留了已有配置时，MODE_SEL / APP / CNAME 这一轮**根本没被赋值** —— 下面
 # 第 5 步的 ${MODE_SEL:-1} 会兜底成 gsql，${CNAME:-og-prod} 兜底成一个编出来
-# 的连接名。于是保留着 api 配置的客户，会看到脚本拿 og-prod 去直连数据库并
+# 的连接名。于是保留着 api 配置的行方，会看到脚本拿 og-prod 去直连数据库并
 # 报一串红：既不是他的环境问题，也不是代码问题，纯粹是这里猜错了模式。
 # 按文件里实际写的来。
 if [ "${SKIP_CFG:-0}" = "1" ]; then

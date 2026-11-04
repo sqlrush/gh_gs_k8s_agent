@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mac 本地验证:让 Pod 打到的中间件 mock 开着签名校验(客户 2026-09-18 加固)。
+# Mac 本地验证:让 Pod 打到的中间件 mock 开着签名校验(2026-09-18 加固)。
 #   1. 测试密钥对放 ~/kf-verify/.grmp-sm2/{private.hex,public.hex}(0600;没有就生成)
 #   2. 起 grmp_mock 8782(--appkey gaussdb-agent --sm2-public-key),把 8781 的转发指向它(Pod 仍打 host.docker.internal:8781)
 #   3. 用私钥创建 / 更新 Secret grmp-sm2(经 stdin,不打印)

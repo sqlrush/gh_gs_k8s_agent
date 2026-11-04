@@ -119,17 +119,17 @@ def test_configmap_keys_are_all_consumed_by_the_deployment():
 def test_nfs_address_lives_in_the_pv_example_not_in_the_pvc():
     """**NFS 地址在 PV 里,不在 PVC 里;文档不能让人去 PVC 里找 nfs:。**
 
-    2026-09-22 客户问「nas-pvc.yaml 是配 NAS 的吗」时翻出来:两份手册都写着
+    2026-09-22 行方问「nas-pvc.yaml 是配 NAS 的吗」时翻出来:两份手册都写着
     「编辑 k8s/base/nas-pvc.yaml,把 nfs: 那几行改成…」,而那个文件从头到尾只有一个
     PersistentVolumeClaim,根本没有 nfs: —— PVC 是申请,供给在 PV / StorageClass。
-    仓库里给客户用的 PV 样例当时也不存在(只有 Mac 用的 hostPath 那份)。
-    客户照着做要么找不到那几行,要么把 nfs: 塞进 PVC 让 apply 报未知字段。
+    仓库里给行方用的 PV 样例当时也不存在(只有 Mac 用的 hostPath 那份)。
+    行方照着做要么找不到那几行,要么把 nfs: 塞进 PVC 让 apply 报未知字段。
     """
     pvc = (_ROOT / "k8s" / "base" / "nas-pvc.yaml").read_text(encoding="utf-8")
     assert "kind: PersistentVolumeClaim" in pvc and "nfs:" not in pvc.replace("nas-pv-nfs", "")
 
     pv = _ROOT / "k8s" / "base" / "nas-pv-nfs.example.yaml"
-    assert pv.is_file(), "给客户用的静态 PV 样例不存在"
+    assert pv.is_file(), "给行方用的静态 PV 样例不存在"
     body = pv.read_text(encoding="utf-8")
     assert "kind: PersistentVolume\n" in body and "\n  nfs:\n" in body
     assert "local_lock=all" in body, "mountOptions 少了 local_lock=all —— 目录独占靠它"
@@ -184,8 +184,8 @@ def test_gateway_rbac_has_no_exec():
 def test_user_image_tag_matches_the_gateway_image():
     """清单里两处版本必须是同一个:网关镜像、给用户建 Pod 的 USER_IMAGE_TAG。
 
-    2026-09-24 客户现场:网关的标签每次发版都跟着改,USER_IMAGE_TAG 却一直停在 v0.9.3,
-    客户照清单部署,网关就在给用户建一个旧版本的 Pod。
+    2026-09-24 现场:网关的标签每次发版都跟着改,USER_IMAGE_TAG 却一直停在 v0.9.3,
+    行方照清单部署,网关就在给用户建一个旧版本的 Pod。
     """
     import re
     base = _ROOT / "k8s" / "base"

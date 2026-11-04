@@ -124,7 +124,7 @@ def collect_slowsql(runner, th: Thresholds, top: int) -> DimResult:
 
 
 def _completed_slowsql(runner, th: Thresholds, top: int, fetched) -> DimResult:
-    # 2026-10-22 客户要求:排除 GaussDB 自己的系统 SQL(common/syssql.py),标题里写明排除了几条
+    # 2026-10-22 行方要求:排除 GaussDB 自己的系统 SQL(common/syssql.py),标题里写明排除了几条
     screening = syssql.screen(fetched, want=top, sql_id=lambda r: r["unique_sql_id"], text=lambda r: r["query"],
                               shown_chars=SLOWSQL_QUERY_CHARS, full_text=syssql.full_text_lookup(runner),
                               seconds=lambda r: _f(r["total_sec"]), cache=syssql.verdict_cache())
@@ -456,7 +456,7 @@ def _sync_commit(runner, d: DimResult, repl_rows: list) -> str:
     无限等待,但 og5 写入完全正常。原因是 openGauss 的同步复制要靠
     `replconninfo1..N` 定义对端才生效,而单机部署上那些全是空的。
 
-    所以只看两个 GUC 就报警,会在**每一个单机库上乱报** —— 而单机库是客户
+    所以只看两个 GUC 就报警,会在**每一个单机库上乱报** —— 而单机库是行方
     环境里最多的一类。虚报一次之后,真的配错时也没人会再看这条。
     """
     try:

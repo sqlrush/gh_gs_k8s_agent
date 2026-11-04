@@ -59,7 +59,7 @@ def _i(x) -> int:
 # 于是负载维度被判成「健康」。
 #
 # 现在改取 snap_global_instance_time 的 DB_TIME / CPU_TIME 增量(注册脚本
-# waitevent.instance_time,**早就在白名单里**,客户不需要重新导入)。它是实例级累计
+# waitevent.instance_time,**早就在白名单里**,行方不需要重新导入)。它是实例级累计
 # 计数器,没有「集合会变」的问题。判定规则与 gaussdb-waitevent/scripts/dbtime.py
 # 一致(那边是这套取数的参考实现,连重启判定一起):
 #   · 取不到 / 缺项 / 值是 NULL  → 整个维度降级,绝不当 0;
@@ -312,7 +312,7 @@ def collect_topsql(runner, opt: Options) -> DimResult:
     fetched = [(str(r["sid"]), str(r["query"]), _i(r["calls"]), _i(r["elapsed_us"]),
                 _i(r["cpu_us"]), _i(r["spill_kb"]), _i(r["phys_blocks"]))
                for r in rows]
-    # 2026-10-22 客户要求:排除 GaussDB 自己的系统 SQL(common/syssql.py)。这里的正文是全文,
+    # 2026-10-22 行方要求:排除 GaussDB 自己的系统 SQL(common/syssql.py)。这里的正文是全文,
     # 只有被内核截断(track_activity_query_size)的才按 sql_id 补取。榜单、元凶、附录都只看排除后的;
     # 落盘总量仍按全部语句算 —— 系统 SQL 落的盘也是「能归到语句的」。
     screening = syssql.screen(fetched, sql_id=lambda it: it[0], text=lambda it: it[1],
@@ -473,7 +473,7 @@ def _off_list(champs: dict, shown: set) -> list:
 # 这一维只给了「LWLOCK_EVENT 50%」一行,看不出是 WAL 相关,只能另跑 waitevent 才知道。
 # 事件级增量取 waitevent.events:与 wdr.waits 同源(snap_global_wait_events 两端快照相减)、
 # 排除 STATUS/NONE 的谓词逐字一致,两边的总量对得上;它早就在白名单里(gaussdb-waitevent 用),
-# 客户不需要重新导入。取不到只影响事件名这一列,等待类照常出。
+# 行方不需要重新导入。取不到只影响事件名这一列,等待类照常出。
 
 WAIT_EVENTS_SCRIPT = "waitevent.events"
 WAIT_EVENTS_TOP = 30          # 事件取前 30:够每个主要等待类摊到几个,又不把这一维撑大
@@ -725,7 +725,7 @@ def collect_plans(runner, ev: Evidence) -> dict:
 
     2026-10-21 测试:附录的计划原来只靠模型调 explain 取,文本是归一化的就取不到,附录写「本次未取到」,
     而 statement_history 里窗口内 34 次执行都记着真实计划。取不到也记原因,附录如实写。
-    白名单里没有这条脚本(旧版本客户)时第一条就失败,后面不再试。
+    白名单里没有这条脚本(旧版本行方)时第一条就失败,后面不再试。
     """
     wanted = []
     for f in ev.findings:

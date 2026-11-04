@@ -2,7 +2,7 @@
 
 faultlab L1(2026-10-24 og5,快照 3149→3150):提交风暴造出的是 WALFlushWait,waitevent 第 1 窗口
 排第一的就是它(315 秒);wdr collect 同一窗口只给了 LWLOCK_EVENT 50% 一行等待类聚合,看不出是 WAL 相关。
-事件级增量用白名单里早就有的 waitevent.events(与 wdr.waits 同源、同一谓词),客户不用重导白名单。
+事件级增量用白名单里早就有的 waitevent.events(与 wdr.waits 同源、同一谓词),行方不用重导白名单。
 """
 import pathlib
 import sys

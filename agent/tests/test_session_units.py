@@ -1,6 +1,6 @@
 """common.session —— 会话按句柄分文件;多会话又没给句柄时拒绝,不猜。
 
-现场缺陷(2026-09-07 客户反馈):多个用户共用一个沙箱、一个 GSDB_HOME、一个 session.yaml,
+现场缺陷(2026-09-07 行方反馈):多个用户共用一个沙箱、一个 GSDB_HOME、一个 session.yaml,
 谁最后登录所有人就连谁的库,退出码 0、不报错、报告抬头写着别人的库——静默串库。
 修法是把「一个沙箱一张便签」改成「一次登录一个句柄一张便签」。这里钉住的行为:
 
@@ -51,7 +51,7 @@ def test_each_login_gets_its_own_file(home):
 
 
 def test_no_handle_means_not_logged_in_even_with_one_session(home):
-    """客户 09-11 反馈的越权:A 登录后 C 进来什么都不带就直接跑在 A 的库上。会话只属于创建它的对话,没句柄就是没登录。"""
+    """行方 09-11 反馈的越权:A 登录后 C 进来什么都不带就直接跑在 A 的库上。会话只属于创建它的对话,没句柄就是没登录。"""
     session.save(_conn("10.0.0.9", "core"))
     assert session.current() is None and session.current_handle() is None
 

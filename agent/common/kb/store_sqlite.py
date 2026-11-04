@@ -1,6 +1,6 @@
 """知识库的派生索引:<kb>/index/store.sqlite 一个文件 —— 切块 + 词法倒排 + 向量 + 节点向量。
 
-2026-10-22 客户要求:向量库改为 sqlite-vec,GaussDB 向量库下线(原 store_pg.py 与 vectordb 组件)。
+2026-10-22 行方要求:向量库改为 sqlite-vec,GaussDB 向量库下线(原 store_pg.py 与 vectordb 组件)。
 文件才是真相,这个库随时可以 `kb.py index --rebuild` 重建。
 
   · 读:`mode=ro&immutable=1` 打开 —— 诊断容器把知识库只读挂载,不能建锁文件 / WAL;

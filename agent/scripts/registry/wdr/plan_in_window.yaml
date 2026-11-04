@@ -6,7 +6,7 @@
 # 附录照样空着 —— 文本是归一化的,explain 不读 query_plan。
 #
 # 限定在窗口内:报告讲的是这段时间,计划也要是这段时间执行时的那一个。与 explain.plan_from_history
-# 正文相近,**刻意不复用同一个逻辑名**(逻辑名按 skill 分域,客户侧按域审批 / 作废)。
+# 正文相近,**刻意不复用同一个逻辑名**(逻辑名按 skill 分域,行方按域审批 / 作废)。
 name: wdr.plan_in_window
 description: 按 unique_query_id 取 WDR 窗口内最近一次真实执行计划(含执行时间、耗时、返回行数)
 readonly: true

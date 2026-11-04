@@ -11,7 +11,7 @@
 ③ **活动时间在转发字节时更新,不是按请求计数。** 用户开着页面发呆时只有心跳,
    没有新请求;按请求计数判闲置会把正在用的人的 Pod 收掉。
 
-口令只在网关内存里,从 Secret 读出来后注入 Authorization 头;客户的 SSO 层
+口令只在网关内存里,从 Secret 读出来后注入 Authorization 头;行方的 SSO 层
 永远看不到它,少一个泄露面。
 """
 from __future__ import annotations
@@ -59,7 +59,7 @@ def forward_headers(incoming: Iterable[Tuple[str, str]], password: Optional[str]
 
 def response_headers(raw: Iterable[Tuple[str, str]]) -> List[Tuple[str, str]]:
     """回给客户端的头:同样去掉逐跳头。`x-accel-buffering: no` 若后端带了就保留 ——
-    再往外还可能有一层客户的 nginx,那一层要靠它关缓冲。"""
+    再往外还可能有一层行方的 nginx,那一层要靠它关缓冲。"""
     return [(k, v) for k, v in raw if k.lower() not in _HOP_BY_HOP]
 
 

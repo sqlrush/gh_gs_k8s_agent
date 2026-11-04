@@ -5,7 +5,7 @@
 
 skill 不感知自己走的是中间件还是直连，两条路径返回相同形状
 （全字符串化的行字典）。这一点就是本层的全部价值：skill 代码在本地
-与客户环境完全相同，不需要为两边各留一套。
+与现场环境完全相同，不需要为两边各留一套。
 
     driver: psycopg2 / gsql  →  直连路径
     driver: grmp           →  中间件路径
@@ -44,7 +44,7 @@ DIRECT_DRIVERS = frozenset({"gsql", "psycopg2"})
 # 驱动的能力位
 #
 # skill 表达「我需要什么能力」，由这里回答给不给得了 —— 所以 skill 代码里
-# 不该出现任何 driver 名字。explain 曾经写死 `driver == "grmp"`：将来客户
+# 不该出现任何 driver 名字。explain 曾经写死 `driver == "grmp"`：将来行方
 # 换一种白名单型中间件，那句判断会静默放行，错报到中间件那边去，
 # 排查方向整个被带偏。要加新访问方式，只在这两行里加。
 #
@@ -130,9 +130,9 @@ def session_for_conn(conn: Connection, read_only: bool = True):
         raise SessionUnavailable(
             "连接 %s 的 driver 是 grmp：中间件的执行接口每次调用都是独立连接，"
             "不提供跨语句的持久会话。\n"
-            "依赖会话的流程（hypopg 虚拟索引验证等）在客户的白名单模型下"
+            "依赖会话的流程（hypopg 虚拟索引验证等）在行方的白名单模型下"
             "本来就跑不了 —— 需要为这类诊断单独保留一条直连通道，"
-            "或在客户环境不提供该能力。" % conn.name
+            "或在现场环境不提供该能力。" % conn.name
         )
     db = _open_database(conn, read_only=read_only)
     if not getattr(db, "provides_session", False):
@@ -169,7 +169,7 @@ def whitelist_only(name: str) -> bool:
     """这条访问路径是不是只执行预注册脚本的白名单型通道。
 
     给的是**措辞**的依据，不是能力的依据：同一句「拿不到 hypopg 背书」，
-    本机调试时下一步是「换 driver: psycopg2 重跑」，而客户的白名单部署里
+    本机调试时下一步是「换 driver: psycopg2 重跑」，而行方的白名单部署里
     压根没有直连通道 —— 那句话在那边不是建议，是噪音，还会把人往
     「绕过白名单」的方向引。
     """
@@ -216,7 +216,7 @@ def runner_for(
 
     中间件路径设不了超时(协议没这个旋钮)。这时如果调用方**显式**要了一个
     超时值,就在 stderr 说一声 —— 收下参数然后当没看见,才是真正危险的:
-    用户以为查询 5 秒会被掐断,实际它能在客户生产库上一直跑。
+    用户以为查询 5 秒会被掐断,实际它能在生产库上一直跑。
     只在显式指定时提示,默认值不吭声,否则每次调用都刷一行,提示很快
     就没人看了。
     """
@@ -278,7 +278,7 @@ def runner_for(
             sign_settings = signing.settings_from(os.environ, api_endpoint_if_configured())
         except ConfigError as exc:
             raise AccessError("连接 %s 使用 grmp 驱动，签名配置有误：%s" % (conn.name, exc)) from exc
-        # 2026-09-20 客户要中间件显式收工号。配了字段名却没有工号要在这里就报——
+        # 2026-09-20 行方要中间件显式收工号。配了字段名却没有工号要在这里就报——
         # 拖到第一次请求会发出一个空工号,中间件那边有调用无身份,我方还是退出码 0。
         try:
             user_id_settings = userid.settings_from(os.environ)

@@ -1,4 +1,4 @@
-"""诊断 skill 脚本层接入「客户知识库参照」——接入不可静默(无库)。
+"""诊断 skill 脚本层接入「本行知识库参照」——接入不可静默(无库)。
 
 九个接入的脚本:health / sqltune / lockwait,以及走 common/kbsection.py 的 waitevent / vacuum / wdr /
 memanalyze / proctune / sqlreview。两条断言贯穿:① 知识库不存在时小节仍在,只是「未接入(原因)」,
@@ -80,10 +80,10 @@ def test_health_report_has_kb_section_even_when_unattached(monkeypatch, load):
     model = sys.modules["model"]
     ev = model.HealthEvidence(conn="og", dims=[], findings=[_finding()], overall=Severity.WARN)
     out = report.render_health(ev)
-    assert "## 客户知识库参照" in out
+    assert "## 本行知识库参照" in out
     assert "> 知识库未接入(" in out and "不存在" in out
     # 位置:两段固定小节之后、Deterministic Findings 之前
-    assert out.index("## 未纳入汇总的能力") < out.index("## 客户知识库参照") < out.index("## Deterministic Findings")
+    assert out.index("## 未纳入汇总的能力") < out.index("## 本行知识库参照") < out.index("## Deterministic Findings")
     import json
     d = json.loads(report.render_health_json(ev))
     assert d["kb_refs"]["status"]["attached"] is False
@@ -126,8 +126,8 @@ def test_sqltune_report_places_kb_section_before_verified_indexes(monkeypatch, l
     monkeypatch.setattr(sqltune, "evidence_report", lambda ev: "## Evidence\n\n")
     monkeypatch.setattr(kbquery, "from_findings", _canned)
     out = sqltune.sqltune_report(_tr())
-    assert "## 客户知识库参照" in out
-    assert out.index("## Evidence") < out.index("## 客户知识库参照") < out.index("## Verified Index Candidates")
+    assert "## 本行知识库参照" in out
+    assert out.index("## Evidence") < out.index("## 本行知识库参照") < out.index("## Verified Index Candidates")
     assert "### 对 🟠 SQL" in out and "### 对 🟠 PLAN_SEQ_SCAN" in out
     assert "kb_refs" in sqltune._to_jsonable(_tr())
 
@@ -148,7 +148,7 @@ def test_lockwait_report_has_kb_section_even_when_empty(monkeypatch, load):
     lockwait = load("gaussdb-lockwait", "lockwait")
     rep = lockwait.LockReport(pairs=[], edges=[], deadlocks=[], findings=[])
     out = lockwait.render_markdown(rep)
-    assert "当前无锁等待" in out and "## 客户知识库参照" in out and "> 知识库未接入(" in out
+    assert "当前无锁等待" in out and "## 本行知识库参照" in out and "> 知识库未接入(" in out
 
 
 def test_lockwait_report_renders_hits_before_detail(monkeypatch, load):
@@ -163,8 +163,8 @@ def test_lockwait_report_renders_hits_before_detail(monkeypatch, load):
                 value="1", threshold="0", evidence="idle in transaction 40s cbst-batch-adjust")
     rep = lockwait.LockReport(pairs=[pair], edges=[(2, 1)], deadlocks=[], findings=[f])
     out = lockwait.render_markdown(rep)
-    assert "## 客户知识库参照" in out and "### 对 🟠 LOCK_ROOT_IDLE_XACT" in out
-    assert out.index("## 客户知识库参照") < out.index("## 阻塞明细")
+    assert "## 本行知识库参照" in out and "### 对 🟠 LOCK_ROOT_IDLE_XACT" in out
+    assert out.index("## 本行知识库参照") < out.index("## 阻塞明细")
 
 
 # ---------------------------------------------------------------- 公共入口 common/kbsection.py
@@ -181,7 +181,7 @@ def test_kbsection_degrades_when_common_kb_is_missing(monkeypatch):
     from common import kbsection
     monkeypatch.setitem(sys.modules, "common.kb", None)          # 旧安装:import common.kb 失败
     text, d = kbsection.section([_finding()])
-    assert text.startswith("## 客户知识库参照\n> 知识库未接入(common/kb 未安装")
+    assert text.startswith("## 本行知识库参照\n> 知识库未接入(common/kb 未安装")
     assert d["status"]["attached"] is False and d["items"] == []
 
 
@@ -207,8 +207,8 @@ def test_waitevent_markdown_has_kb_section_with_hits(monkeypatch, load):
     monkeypatch.setattr(kbquery, "from_findings", _canned)
     out = waitevent.render_markdown(waitevent.WaitReport(windows=[], findings=[_wait_finding()]))
     assert out.startswith("# DB Time 分解与等待事件下钻")
-    assert "## 客户知识库参照" in out and "### 对 🟠 WAIT_LWLOCK_HEAVY" in out
-    assert out.index("gaussdb-lockwait") < out.index("## 客户知识库参照")      # 放在报告末尾
+    assert "## 本行知识库参照" in out and "### 对 🟠 WAIT_LWLOCK_HEAVY" in out
+    assert out.index("gaussdb-lockwait") < out.index("## 本行知识库参照")      # 放在报告末尾
 
 
 def test_waitevent_markdown_unattached_still_renders(monkeypatch, load):
@@ -231,7 +231,7 @@ def test_waitevent_json_for_health_does_not_query_the_kb(monkeypatch, load, caps
     assert json.loads(capsys.readouterr().out)["findings"][0]["code"] == "WAIT_LWLOCK_HEAVY"
     assert calls == []
     assert waitevent.main(["-c", "x"]) == 0
-    assert "## 客户知识库参照" in capsys.readouterr().out and len(calls) == 1
+    assert "## 本行知识库参照" in capsys.readouterr().out and len(calls) == 1
 
 
 # ---------------------------------------------------------------- vacuum
@@ -241,7 +241,7 @@ def test_vacuum_markdown_places_kb_section_before_manual_cleanup(monkeypatch, lo
     monkeypatch.setattr(kbquery, "from_findings", _canned)
     out = vacuum.render_markdown(vacuum.VacuumReport(findings=[_finding("VACUUM_DEAD_RATIO")]))
     assert "### 对 🟠 VACUUM_DEAD_RATIO" in out
-    assert out.index("## autovacuum 近期运行情况") < out.index("## 客户知识库参照") < out.index("## 手工清理评估")
+    assert out.index("## autovacuum 近期运行情况") < out.index("## 本行知识库参照") < out.index("## 手工清理评估")
 
 
 def test_vacuum_markdown_unattached_still_renders(monkeypatch, load):
@@ -259,7 +259,7 @@ def test_vacuum_json_for_health_does_not_query_the_kb(monkeypatch, load, capsys)
     monkeypatch.setattr(vacuum.access, "for_conn", lambda *a, **k: object())
     monkeypatch.setattr(vacuum, "collect", lambda *a, **k: vacuum.VacuumReport(findings=[_finding("VACUUM_DEAD_RATIO")]))
     assert vacuum.main(["-c", "x", "--format", "json"]) == 0
-    assert "客户知识库" not in capsys.readouterr().out and calls == []
+    assert "本行知识库" not in capsys.readouterr().out and calls == []
 
 
 # ---------------------------------------------------------------- wdr(collect 的证据包)
@@ -277,7 +277,7 @@ def test_wdr_evidence_places_kb_section_after_findings(monkeypatch, load):
     ev = _wdr_ev(model)
     out = report.render_evidence(ev)
     assert "### 对 🟠 WDR_DEADLOCK" in out
-    assert out.index("## Deterministic Findings") < out.index("## 客户知识库参照") < out.index("## Collection Notes")
+    assert out.index("## Deterministic Findings") < out.index("## 本行知识库参照") < out.index("## Collection Notes")
     assert "kb_refs" not in report.render_evidence_json(ev)          # 证据包 JSON 是 render 的输入,形状不变
 
 
@@ -302,7 +302,7 @@ def test_memanalyze_places_kb_section_after_findings(monkeypatch, load):
     dim = model.DimResult(dimension="SQL 级", available=True, headline="h")
     out = report.render_markdown(model.MemEvidence(conn="og", dims=[dim], findings=[_mem_finding()]))
     assert "### 对 🟠 MEM_SQL_SPILL" in out
-    assert out.index("## Deterministic Findings") < out.index("## 客户知识库参照") < out.index("## SQL 级")
+    assert out.index("## Deterministic Findings") < out.index("## 本行知识库参照") < out.index("## SQL 级")
     assert "kb_refs" not in report.render_json(model.MemEvidence(conn="og", findings=[_mem_finding()]))
 
 
@@ -337,7 +337,7 @@ def test_proctune_collect_items_and_section(monkeypatch, load):
     calls = []
     monkeypatch.setattr(kbquery, "from_findings", _recording(calls))
     out = proctune.proc_collect_report(pe)
-    assert out.index("## Key Parameters (GUC)") < out.index("## 客户知识库参照")
+    assert out.index("## Key Parameters (GUC)") < out.index("## 本行知识库参照")
     assert "### 对 🟠 PROC" in out and [f.code for f in calls[0]] == codes
 
 
@@ -375,9 +375,9 @@ def test_sqlreview_one_item_per_rule_and_section_at_end(monkeypatch, load):
     assert items[0].value == "2 处" and "stmt#1 stmt#2" in items[0].evidence and items[1].severity == "advisory"
     monkeypatch.setattr(kbquery, "from_findings", _canned)
     out = report.render_markdown(res)
-    assert out.index("## Advisory") < out.index("## 客户知识库参照")
+    assert out.index("## Advisory") < out.index("## 本行知识库参照")
     assert "### 对 🟠 SEL001" in out and "### 对 🟠 IDX005" in out
-    assert "客户知识库" not in report.render_json(res)
+    assert "本行知识库" not in report.render_json(res)
 
 
 def test_sqlreview_unattached_still_renders(monkeypatch, load):

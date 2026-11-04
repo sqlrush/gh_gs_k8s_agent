@@ -7,7 +7,7 @@
       pages/<页>.md      L3 原页(整页 markdown)
       plan/              构建配方:plan.yaml(元数据与范围)、topic-map.yaml(专题映射与人工覆盖)、
                          ids.yaml(doc_key → ID,永不复用)、summaries.yaml(模型精修过的摘要)
-      index.sqlite       这一套文档自己的检索索引(与客户知识库的 index/store.sqlite 分开,检索时分池)
+      index.sqlite       这一套文档自己的检索索引(与本行知识库的 index/store.sqlite 分开,检索时分池)
 
 流程:scan(解包、读目录、出范围清单)→ plan(元数据、专题映射表、样例)→ apply(写条目,原子换上)→ kb.py index。
 同一份 CHM + 同一套 plan/ 重放 apply,结果逐条一致——发版本靠它,不再调用模型。

@@ -10,8 +10,8 @@
     proctune.column_stats / sqltune.column_stats
     proctune.db_version / sqltune.version
 
-**不合并**是有意的：客户只能通过发布 DML 往 script_config 里灌脚本，
-没有脚本管理接口。各 skill 自带全套脚本，客户才能单独上线某一个 skill；
+**不合并**是有意的：行方只能通过发布 DML 往 script_config 里灌脚本，
+没有脚本管理接口。各 skill 自带全套脚本，行方才能单独上线某一个 skill；
 合并成公共命名空间后，装 sqlfetch 就得连带把 proctune 的脚本一起灌进去。
 
 但重复带来一个真实风险：在一份里修了 bug，另外两份还坏着，而两条路径
@@ -75,7 +75,7 @@ _GROUPS = {
         "proctune/source_adm.yaml",
     ],
     # 先切 search_path 再 EXPLAIN 的两语句模板(现场 400 的修法);analyze 名下的那份 SQL 相同,
-    # 因为现场按客户只读要求 ANALYZE 固定关闭
+    # 因为现场按行方只读要求 ANALYZE 固定关闭
     "带 search_path 的 EXPLAIN TEXT 模板": [
         "explain/plan_text_schema.yaml",
         "explain/plan_text_analyze_schema.yaml",

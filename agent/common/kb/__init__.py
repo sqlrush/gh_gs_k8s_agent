@@ -1,4 +1,4 @@
-"""common.kb —— 客户知识库的共享层,所有 skill 都从这里查库。
+"""common.kb —— 本行知识库的共享层,所有 skill 都从这里查库。
 
 真相在 <kb>/ 下的文件;<kb>/index/store.sqlite(向量 + 词法)与 Neo4j(图,可选)是可重建的派生索引。
 2026-10-23 起向量库是 SQLite + sqlite-vec(原高斯 DataVec / PG pgvector 向量库下线)。
@@ -14,5 +14,5 @@
     store_graph Neo4j HTTP Query API
     embed       OpenAI 兼容 /v1/embeddings 客户端
     query       混合检索编排
-    render      「客户知识库参照」小节
+    render      「本行知识库参照」小节
 """

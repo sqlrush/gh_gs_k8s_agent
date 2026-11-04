@@ -1,7 +1,7 @@
 """script_config 存储（SQLite）。
 
 不建在 og 上：og 有 200 万行 demo 数据，不希望被测试元数据污染；
-中间件的元数据本来就属于中间件自己，客户那边 GRMP 也有独立的库。
+中间件的元数据本来就属于中间件自己，行方那边 GRMP 也有独立的库。
 """
 import sys
 import pathlib
@@ -35,7 +35,7 @@ def store(tmp_path):
 # ===========================================================================
 
 def test_table_has_all_twenty_one_customer_columns(store):
-    """导出的 DML 要能直接用于客户环境，本地表就得保留 21 列全集。"""
+    """导出的 DML 要能直接用于现场环境，本地表就得保留 21 列全集。"""
     assert set(store.columns()) == set(sc.SCRIPT_CONFIG_COLUMNS)
 
 
@@ -127,11 +127,11 @@ def test_round_trip_preserves_params_and_types(store):
 
 
 def test_round_trip_loses_param_description(store):
-    """parameter_config 的四个键里没有描述位 —— 客户的数据模型就是这样。
+    """parameter_config 的四个键里没有描述位 —— 行方的数据模型就是这样。
 
     这不是 bug，是必须复刻的信息损失：响应中 OperationParam.description
-    在客户环境同样无处可取。若我们额外存一份描述，本地 API 会返回
-    客户 API 给不出的信息，调用方就会写出到客户环境失效的代码。
+    在现场环境同样无处可取。若我们额外存一份描述，本地 API 会返回
+    行方 API 给不出的信息，调用方就会写出到现场环境失效的代码。
     """
     store.register(_rec())
     found = store.find_by_name("slowsql.slow_sql")
@@ -177,7 +177,7 @@ def test_writable_script_round_trips(store):
 
 def test_readonly_flag_does_not_add_a_column_to_script_config(store):
     """21 列是交付契约。只读标记是我们自己加的概念，客户数据模型里没有，
-    塞进 script_config 会让导出的 DML 到客户环境用不了。"""
+    塞进 script_config 会让导出的 DML 到现场环境用不了。"""
     store.register(sc.ScriptRecord(
         script_name="ddl.one", script_content="create index i on t(a);",
         readonly=False))

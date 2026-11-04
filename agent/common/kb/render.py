@@ -1,4 +1,4 @@
-"""「客户知识库参照」固定小节 —— 所有接入 skill 共用同一个渲染器。
+"""「本行知识库参照」固定小节 —— 所有接入 skill 共用同一个渲染器。
 
 纪律(设计稿 §5.1):
   · 每条发现一段;没命中就明写「无对应条款 / 无相似案例 / 路径:无」——省略和「没查」分不清;
@@ -16,7 +16,7 @@ from typing import Sequence
 from . import supersede as kbsup
 from .query import FindingRefs, KbStatus, QueryResult, Ref
 
-SECTION_TITLE = "## 客户知识库参照"
+SECTION_TITLE = "## 本行知识库参照"
 NOT_ATTACHED = "> 知识库未接入"
 
 

@@ -1,4 +1,4 @@
-"""官方文档集的检索索引:docsets/<代号>/items/*.md → docsets/<代号>/index.sqlite(与客户知识库的索引分开)。
+"""官方文档集的检索索引:docsets/<代号>/items/*.md → docsets/<代号>/index.sqlite(与本行知识库的索引分开)。
 
 切块:摘要一块(GUC 参数名作信号 token);其余小节各自滑动切;错误码页按错误码一码一块、只建关键词(novec)。
 增量:按条目文件内容哈希,没变的不重写、不重算向量。

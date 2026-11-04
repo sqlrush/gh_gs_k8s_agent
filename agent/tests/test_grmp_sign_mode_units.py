@@ -1,10 +1,10 @@
-"""过渡期:只带 Appkey + Timestamp,先不带 Signature(客户 2026-09-20)。
+"""过渡期:只带 Appkey + Timestamp,先不带 Signature(2026-09-20)。
 
-客户的要求:密钥审批周期紧,先在调用 api 时请求头增加 Appkey 和 Timestamp 字段;Appkey 用中间件给的值,
+行方的要求:密钥审批周期紧,先在调用 api 时请求头增加 Appkey 和 Timestamp 字段;Appkey 用中间件给的值,
 Timestamp 用系统时间戳,单位秒,例如 1758431954。
 
 原先只有两档——没配 Appkey 就什么都不发,配了 Appkey 就**必须**有 SM2 私钥,拿不到直接报错。
-中间没有档位,而客户要的正好是中间那一档。
+中间没有档位,而行方要的正好是中间那一档。
 
 **为什么用显式开关而不是「没私钥就自动降级」**:生产上 Secret 挂载失败、私钥文件权限不对,
 都会让「全签」悄悄变成「不签」。中间件开了校验就整体拒绝(至少还能看出来),没开的话就是
@@ -69,7 +69,7 @@ def test_full_mode_sends_three_headers():
     assert set(signing.RequestSigner(st).headers("/v1/x")) == {"Appkey", "Timestamp", "Signature"}
 
 
-# --- 客户给的具体形态 ---------------------------------------------------------
+# --- 行方给的具体形态 ---------------------------------------------------------
 
 def test_customer_shape_seconds_ten_digits():
     """Timestamp 单位秒,形如 1758431954(10 位)。"""
@@ -77,7 +77,7 @@ def test_customer_shape_seconds_ten_digits():
         {"GRMP_APPKEY": APPKEY, "GRMP_SIGN_MODE": "headers-only", "GRMP_SIGN_TIMESTAMP": "s"},
         None, load_secret=_boom)
     ts = signing.RequestSigner(st).headers("/v1/x")["Timestamp"]
-    assert re.fullmatch(r"\d{10}", ts), "客户要的是秒级 10 位,拿到 %r" % ts
+    assert re.fullmatch(r"\d{10}", ts), "行方要的是秒级 10 位,拿到 %r" % ts
 
 
 def test_milliseconds_would_be_thirteen_digits():
@@ -90,7 +90,7 @@ def test_milliseconds_would_be_thirteen_digits():
 # --- 配错了要报得能看懂 -------------------------------------------------------
 
 def test_full_mode_without_key_names_the_transition_option():
-    """报错里要指出过渡档,否则客户拿着「必须有私钥」的错误没法自己往下走。"""
+    """报错里要指出过渡档,否则行方拿着「必须有私钥」的错误没法自己往下走。"""
     with pytest.raises(ConfigError) as exc:
         signing.settings_from({"GRMP_APPKEY": APPKEY}, None,
                               load_secret=lambda n: (_ for _ in ()).throw(
@@ -138,7 +138,7 @@ def test_mock_still_rejects_wrong_appkey_without_signature():
 
 
 def test_mock_default_still_demands_signature():
-    """默认不变:客户密钥批下来后把 require_signature 打开,缺签名立刻被拒。"""
+    """默认不变:行方密钥批下来后把 require_signature 打开,缺签名立刻被拒。"""
     policy = _policy()
     assert "Signature" in (policy.check("/v1/x", _client_headers(GRMP_SIGN_MODE="headers-only")) or "")
 

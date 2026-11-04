@@ -56,7 +56,7 @@ def test_zero_is_not_null():
 
 
 def test_null_and_empty_string_are_indistinguishable_by_design():
-    """这是客户中间件自带的信息损失，不是我们能修的 ——
+    """这是现场中间件自带的信息损失，不是我们能修的 ——
     NULL 与真正的空串渲染结果相同，只能一并当作「无值」。"""
     assert is_null("") == is_null(None)
 

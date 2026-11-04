@@ -410,7 +410,7 @@ class KbSession:
         if not fs.has_index() and not has_docsets:
             # 装完还没导入任何材料:整节写「未接入(空库)」就够了,不要给每条发现挂一串「无」。
             return cls(cfg, None, None, None, reason=f"知识库是空的(还没导入任何规范或工单;{reason})")
-        # 客户库还没索引、但标准知识库(官方文档集)装好了:官方文档照样能查,向量按配置用(客户池走文件模式)
+        # 行方库还没索引、但标准知识库(官方文档集)装好了:官方文档照样能查,向量按配置用(行方池走文件模式)
         embedder: Optional[Embedder] = None
         if has_docsets:
             try:
@@ -594,7 +594,7 @@ class KbSession:
 
     def _docset_hits(self, tokens: Sequence[str], emb: Optional[List[float]], free_text: bool, th: Any
                      ) -> List[Tuple[float, spg.Hit]]:
-        """官方文档集的候选池:每套单独取「关键词前 12 + 向量前 12」,门槛与客户池同一套,相对门槛只在本池里比。"""
+        """官方文档集的候选池:每套单独取「关键词前 12 + 向量前 12」,门槛与行方池同一套,相对门槛只在本池里比。"""
         out: List[Tuple[float, spg.Hit]] = []
         for ds, store, vec_ok in self.docsets:
             lex = self._safe(lambda: store.search_chunks_lexical(tokens, k=12)) or []
@@ -647,7 +647,7 @@ class KbSession:
         查询 token(或覆盖率达标)。相对门槛(同类最高分的比例)由调用方在幸存者里做。
 
         用户自己问的短问题(≤ SHORT_QUERY_TOKENS 个词、至少一个中文二元组或整词)词全部命中也算:
-        「死锁」「连接数」「主从切换」没有强 token,不开向量时(客户现场的默认)以前一条都查不到。
+        「死锁」「连接数」「主从切换」没有强 token,不开向量时(现场的默认)以前一条都查不到。
         诊断发现生成的查询是长证据,不走这一条 —— 泛词误召回的防线照旧。"""
         th = self.cfg.thresholds if self.cfg else kbconfig.Thresholds()
         if vec_s >= th.vector_min:

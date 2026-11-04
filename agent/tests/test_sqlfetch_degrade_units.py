@@ -99,7 +99,7 @@ def test_sqltune_statement_fallback_guesses_the_schema_from_user_name():
 
 
 def test_sqlfetch_report_points_to_by_id_and_carries_the_schema():
-    """现场(客户 09-09 早):模型按 sqlfetch → explain --sql-stdin 贴文本,schema 在这一步丢了 → 400。
+    """现场(09-09 早):模型按 sqlfetch → explain --sql-stdin 贴文本,schema 在这一步丢了 → 400。
     sqlfetch 的收尾提示是模型下一步的直接依据:要指向按 id 的入口,贴文本时必须把 Schema 带成 --schema,不许猜。"""
     mod = _load("sqlfetch")
     r = mod.FetchResult(sql_id="1568852919", sql="select 1 from batch_job_status", schema="gmag",

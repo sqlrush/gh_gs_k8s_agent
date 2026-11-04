@@ -1,6 +1,6 @@
 """取存储过程源码:先 pg_proc,取不到再 ADM_SOURCE —— procinfo / proctune 共用。
 
-为什么要有 ADM_SOURCE 这一路(客户 2026-10-29 需求):开了对象隔离(ENABLE PRIVATE OBJECT)的库,数据库给
+为什么要有 ADM_SOURCE 这一路(2026-10-29 需求):开了对象隔离(ENABLE PRIVATE OBJECT)的库,数据库给
 PG_PROC、PG_NAMESPACE 加了行级访问控制,普通账号联表查询 0 行(2026-09-08 现场:过程明明在,skill 说找不到)。
 ADM_SOURCE 是管理员视角的视图,执行账号能读它(系统管理员,或 DBA 授了权)时看得到全部定义。
 

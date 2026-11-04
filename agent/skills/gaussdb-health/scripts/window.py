@@ -437,7 +437,7 @@ def _spill_extra(runner, cov: timewin.Coverage, temp_bytes: float) -> Tuple[str,
         except (KeyError, TypeError, ValueError):
             continue
         items.append(it)
-        # 冠军不从内核系统 SQL 里挑(2026-10-22 客户要求);它们的落盘仍算进「能归到语句的」总量
+        # 冠军不从内核系统 SQL 里挑(2026-10-22 行方要求);它们的落盘仍算进「能归到语句的」总量
         q = str(r.get("query") or "")
         if syssql.classify(q, not syssql.looks_cut(q)) != syssql.SYSTEM:
             pool.append(it)

@@ -167,7 +167,7 @@ def history_plan(runner, sid: int):
 
     L2 跟踪下 statement_history.query 是带占位符的归一化文本,EXPLAIN 不了;同一行的 query_plan
     却是当时执行的**真实计划**(带 actual time)。2026-10-21 测试:sql_id 3091214944 有 34 次执行、
-    34 条都有计划,explain 却只读文本、遇到占位符就停下。白名单里没有这条脚本(旧版本客户)时退回原来的指路。
+    34 条都有计划,explain 却只读文本、遇到占位符就停下。白名单里没有这条脚本(旧版本行方)时退回原来的指路。
     """
     try:
         rows = runner.run(PLAN_HISTORY_SCRIPT, {"sid": int(sid)})

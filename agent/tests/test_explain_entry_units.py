@@ -292,7 +292,7 @@ class _PlanRunner:
 
 
 def test_analyze_requested_but_plan_is_an_estimate_is_said_out_loud(monkeypatch, capsys):
-    """现场脚本按客户只读要求把 ANALYZE 固定关闭:用户要了 --analyze,拿到的仍是估算计划。
+    """现场脚本按行方只读要求把 ANALYZE 固定关闭:用户要了 --analyze,拿到的仍是估算计划。
     报告不能沉默——来源行与说明都要写明「这是估算」,JSON 里 analyzed 必须是 false。"""
     monkeypatch.setattr(explain_mod.access, "for_conn",
                         lambda *a, **k: _PlanRunner("Seq Scan on t  (cost=0.00..1.00 rows=1 width=4)"))
@@ -368,7 +368,7 @@ def test_schema_option_rejects_a_non_identifier_cleanly(monkeypatch, capsys):
     assert "schema" in err and "Traceback" not in err
 
 
-# ---------------------------------------------------------------- --sql-id(客户 09-09 早截图:贴文本那条路 schema 会丢)
+# ---------------------------------------------------------------- --sql-id(09-09 早截图:贴文本那条路 schema 会丢)
 
 class _IdRunner(_Runner):
     """from_history 给出 SQL 与它当初执行的 schema;探测脚本说两条语句不行;单语句模板记下收到的 SQL。"""

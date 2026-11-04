@@ -1,7 +1,7 @@
 """短问题与「后配 embedding」(2026-10-24 测试环境语义检索验收时发现)。
 
 一、查询分词把含「等」「对」「从」…的二元组整个丢掉:「锁等待」一个词都不剩,「对象」「主从」「对账」也没了。
-二、用户自己问的很短的问题(「死锁」「连接数」)没有强 token,不开向量时(客户现场的默认)一条都查不到。
+二、用户自己问的很短的问题(「死锁」「连接数」)没有强 token,不开向量时(现场的默认)一条都查不到。
 三、已有知识库新配上 embedding 后跑 index,文档没变就不重新切块,覆盖率停在 0 —— 要记得加 --fill-missing。
 这里用仓库里的样例知识库与真的 SQLite 索引核对,不用假存储。
 """
@@ -37,7 +37,7 @@ def _load(name: str):
 
 @pytest.fixture(scope="module")
 def sample_kb(tmp_path_factory):
-    """样例知识库建好索引(不开向量 = 客户现场的默认)。"""
+    """样例知识库建好索引(不开向量 = 现场的默认)。"""
     kb = _load("kb")
     d = tmp_path_factory.mktemp("skb") / "kb"
     shutil.copytree(_SAMPLE, d)

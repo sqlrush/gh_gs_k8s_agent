@@ -82,7 +82,7 @@ class Catalog:
         return self.of_type("profile")
 
     def customer(self) -> List[Entry]:
-        """客户知识库自己的条目(不含官方文档集)。"""
+        """本行知识库自己的条目(不含官方文档集)。"""
         return [e for e in self.entries if not e.meta.get("docset")]
 
     def from_docset(self, code: str = "") -> List[Entry]:

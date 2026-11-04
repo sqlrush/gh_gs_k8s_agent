@@ -1,6 +1,6 @@
 """Neo4j —— 经 HTTP Query API(POST /db/<db>/query/v2)跑 Cypher,urllib 实现,零新依赖。
 
-图里只有客户专属、强类型、带出处的关系:节点标签 = kind,关系类型 = rel,
+图里只有行方专属、强类型、带出处的关系:节点标签 = kind,关系类型 = rel,
 关系属性 confidence / status / source / case_id / valid_from / valid_to。**没有共现边。**
 进「本行处置路径」的边必须 status = accepted 且 confidence ≥ 1.0(见 confirmed())。
 边的身份是 (src, rel, dst, source):同一条因果由两份材料各自佐证时是两条边,
@@ -37,7 +37,7 @@ def confirmed(status: str, confidence: float, min_confidence: float = 1.0) -> bo
     """边能否进确定性推理:status = accepted **且** confidence ≥ min,两个条件缺一不可。
 
     只看置信度不够:正常导入流程里只有用户接受的边记 1.0,但有人手工改 graph/*.yaml、把候选边的
-    confidence 写成 1.0 时,它就混进了「本行处置路径」,而读者以为那是客户确认过的因果链。
+    confidence 写成 1.0 时,它就混进了「本行处置路径」,而读者以为那是本行确认过的因果链。
     graphfiles.Triple.in_path、FileGraph、Neo4j 的 Cypher 都按这一个口径。
     """
     return status == PATH_STATUS and float(confidence) >= float(min_confidence)
@@ -334,6 +334,6 @@ class GraphStore:
         out["edges.confirmed"] = sum(v for k, v in out.items() if k.endswith(".confirmed"))
         if legacy:
             # 旧版索引写的边不带 status,一律不进路径;状态行据此提示「重建索引后恢复」,
-            # 否则路径小节突然全是「无」,看起来像客户没有先例。
+            # 否则路径小节突然全是「无」,看起来像行方没有先例。
             out["edges.no_status"] = legacy
         return out

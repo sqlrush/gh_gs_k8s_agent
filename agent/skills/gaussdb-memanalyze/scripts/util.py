@@ -52,7 +52,7 @@ HINT_MARK = "\n提示:"   # common/grmp/hints.with_hint 追加的中文提示,�
 def summarize_err(exc) -> str:
     """First line of a DBError, trimmed — enough to say why a layer went blind.
 
-    只取第一行会把 with_hint 追加在第二行的「提示:…」整段丢掉,那段才是客户能照做的内容:
+    只取第一行会把 with_hint 追加在第二行的「提示:…」整段丢掉,那段才是行方能照做的内容:
     原文照旧只留第一行、截 200 字,提示原样跟在后面。
     """
     text = str(exc).strip()

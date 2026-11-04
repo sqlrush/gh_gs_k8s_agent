@@ -179,7 +179,7 @@ def fetch_report(r: FetchResult) -> str:
         out += (f"- ⚠️ Normalized SQL with {r.placeholders} placeholder(s): "
                 f"replace them with real values before EXPLAIN/collect.\n")
     out += "\n" + render.code_block("sql", r.sql)
-    # 现场(客户 09-09 早):模型按这里的提示走 explain --sql-stdin 贴文本,schema 在这一步丢了 → 400。
+    # 现场(09-09 早):模型按这里的提示走 explain --sql-stdin 贴文本,schema 在这一步丢了 → 400。
     # 下一步要指向按 id 的入口(它们自己取 SQL 并带 schema);非要贴文本,Schema 行必须带成 --schema,不许猜。
     carry = (f"贴文本走 `--sql-stdin` 时必须带 `--schema {r.schema}`(就是上面 Schema 行的值),不要猜。" if r.schema
              else "输出里没有 Schema 行:贴文本前先问用户这条 SQL 平时在哪个 schema 下跑,不要猜 public 或别的 schema 去试。")

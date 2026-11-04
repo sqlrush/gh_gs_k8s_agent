@@ -7,7 +7,7 @@ MODEL="${KB_DEMO_MODEL:-kimi/k3}"
 KB="${KB_DIR:-$HOME/.kb-sample}"
 OUT="$HOME/kb-model-out"; rm -rf "$OUT"; mkdir -p "$OUT"
 WORK="$HOME/kb-model-cwd"; mkdir -p "$WORK"; cd "$WORK"
-ASK='用 gaussdb-health 检查连接 og(只读,不做任何变更)。然后只针对 INDEX_UNUSED 和 CACHE_LOW 两类发现各给一条处置建议,每条注明依据来源:来自客户知识库就写案例 ID 或条款 ID,没有就写"通用经验"。'
+ASK='用 gaussdb-health 检查连接 og(只读,不做任何变更)。然后只针对 INDEX_UNUSED 和 CACHE_LOW 两类发现各给一条处置建议,每条注明依据来源:来自本行知识库就写案例 ID 或条款 ID,没有就写"通用经验"。'
 run() {
   echo "===== $1 $(date +%H:%M:%S) ====="
   perl -e 'alarm shift; exec @ARGV' 900 opencode run --model "$MODEL" --title "kb-3state-$1" "$ASK" > "$OUT/$1.txt" 2> "$OUT/$1.err"

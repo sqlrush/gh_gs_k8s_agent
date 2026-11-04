@@ -40,7 +40,7 @@ def test_non_ascii_is_not_escaped():
 
 
 def test_scalars_are_unaffected():
-    """标量仍旧全部字符串化，这是客户中间件的行为，不能顺手「改良」。"""
+    """标量仍旧全部字符串化，这是现场中间件的行为，不能顺手「改良」。"""
     assert serialize.render_cell(10, S) == "10"
     assert serialize.render_cell(-1, S) == "-1"
     assert serialize.render_cell(3.5, S) == "3.5"

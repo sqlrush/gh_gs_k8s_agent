@@ -315,7 +315,7 @@ if __name__ == "__main__":
 
 
 def test_evidence_says_when_analyze_was_requested_but_the_plan_is_an_estimate():
-    """现场 sqltune.plan_text_analyze 按客户只读要求把 ANALYZE 固定关闭:要了 --analyze,
+    """现场 sqltune.plan_text_analyze 按行方只读要求把 ANALYZE 固定关闭:要了 --analyze,
     模板回来的仍是估算计划。analyzed 必须按计划文本判(false),报告里要说明,不能写 Analyzed: true。"""
     class _R:
         def run(self, script, values=None):
@@ -531,7 +531,7 @@ def test_derivation_report_degrades_to_a_note_when_calibration_hits_missing_stat
 
 
 def test_whitelist_path_refuses_dml_before_calling_the_middleware():
-    """客户清单第 2 项第 3 点:中间件只受理 SELECT 的执行计划,写语句要在 skill 层拦,不能靠中间件报 400。
+    """行方清单第 2 项第 3 点:中间件只受理 SELECT 的执行计划,写语句要在 skill 层拦,不能靠中间件报 400。
     直连原始会话那条路不受影响(EXPLAIN UPDATE 不执行,直连能出计划)。"""
     import pytest
     import sqltune

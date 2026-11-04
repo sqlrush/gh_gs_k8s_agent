@@ -68,7 +68,7 @@ def bar(pct: float, width: int = BAR_WIDTH) -> str:
         v = 0.0
     # NaN 要单独挡:它和任何数比较都是 False,夹取那两行放不住它,
     # 到 round() 才抛 ValueError —— 一个格式问题把整份报告弄挂。
-    # 用 math.isnan 而不是 `v != v`:客户的代码扫描(SonarQube S1764)会把自比较报成缺陷,
+    # 用 math.isnan 而不是 `v != v`:行方的代码扫描(SonarQube S1764)会把自比较报成缺陷,
     # 这条已经被 tests/test_code_scan_gate_units.py 钉住了。
     if math.isnan(v):
         v = 0.0

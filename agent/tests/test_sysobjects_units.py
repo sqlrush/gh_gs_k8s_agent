@@ -9,7 +9,7 @@ og5(openGauss-lite 5.0.3)与 og7(7.0.0-RC1)各取一遍再求并集。
 
 **为什么不用 oid < 16384 直接判**:两处原因。① `public` 的 oid 是 2200,也小于 16384,
 但它正是用户建对象的地方,一刀切会把用户的东西全忽略掉。② proctune 拿到的是
-中间件已注册脚本返回的 `nspname`,报文里**没有 oid** —— 要用 oid 就得改脚本让客户
+中间件已注册脚本返回的 `nspname`,报文里**没有 oid** —— 要用 oid 就得改脚本让行方
 重新登记,代价远大于收益。所以按名字判,名单来自真库。
 
 判定保守:拿不准一律当用户对象。误放行只是多出一份无害的分析,误拦截会吞掉
@@ -78,7 +78,7 @@ def test_gaussdb_commercial_schemas_kept():
 
 
 def test_list_is_sorted_and_deduped():
-    """名单是要给人看、给客户审的,保持有序无重复。"""
+    """名单是要给人看、给行方审的,保持有序无重复。"""
     names = list(sysobjects.SYSTEM_SCHEMAS)
     assert len(names) == len(set(names))
     assert "public" not in sysobjects.SYSTEM_SCHEMAS

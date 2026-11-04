@@ -17,7 +17,7 @@ Both --original and --rewrite must be fully executable SQL (no placeholders).
      协议再 str() 一遍就成了 Python repr（单引号），json.loads 解不回来 ——
      即便不要求会话，这条也过不去白名单那条路径。
 
-所以在 grmp 连接上本脚本会**明确报错**而不是降级：该能力在客户的白名单
+所以在 grmp 连接上本脚本会**明确报错**而不是降级：该能力在行方的白名单
 模型下本来就不存在，假装能跑等于交付一个错误结论。
 
 Usage:

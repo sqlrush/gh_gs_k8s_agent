@@ -75,7 +75,7 @@ def judge(rows: Sequence, th: Thresholds, top: int, fetched_cap: int) -> Running
     """health.long_xact 的行 → 执行中长 SQL 的发现与一句标题。纯函数。"""
     floor = th.running_sql_notice
     long_rows = [r for r in rows if r.get("state") == "active" and _secs(r, "state_age_s") >= floor]
-    # 老白名单(客户还没重导)没有 waiting 列:当作没在等锁,照常判
+    # 老白名单(行方还没重导)没有 waiting 列:当作没在等锁,照常判
     waiting = [r for r in long_rows if as_bool(r.get("waiting", ""))]
     executing = [r for r in long_rows if not as_bool(r.get("waiting", ""))]
     screening = syssql.screen(executing, sql_id=lambda r: "pid %s" % r.get("pid"),
