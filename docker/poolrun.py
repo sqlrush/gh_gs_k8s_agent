@@ -169,6 +169,7 @@ class Supervisor:
             "GSDB_USER_ID": desired["user_id"],
             "OPENCODE_SERVER_PASSWORD": desired["password"],
         })
+        env["GSDB_SKILLS_DIR"] = podctl.skills_dir(env)     # 提示词里写 $GSDB_SKILLS_DIR,与权限规则同一算法
         return env
 
     def _prepare(self, env: Dict[str, str]) -> None:

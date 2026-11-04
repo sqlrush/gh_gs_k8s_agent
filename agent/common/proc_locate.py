@@ -53,7 +53,7 @@ class Verdict:
     code: str
     summary: str
     questions: Tuple[str, ...]
-    actions: Tuple[str, ...]               # DBA 可照做的 SQL,逐条
+    actions: Tuple[str, ...]               # DBA 要做的核对 / 处理,逐条(写要做的事,不写语句 —— 回答里不出现系统 SQL)
 
 
 # ---------------------------------------------------------------- probe
@@ -115,15 +115,11 @@ def probe(runner, prefix: str, ref: ProcRef) -> Locate:
 # ---------------------------------------------------------------- classify
 
 def _verify_sql(ref: ProcRef) -> str:
-    return ("SELECT current_database() AS db, n.nspname, k.pkgname, p.proname\n"
-            "FROM pg_proc p\n"
-            "LEFT JOIN pg_namespace n ON n.oid = p.pronamespace\n"
-            "LEFT JOIN gs_package k ON k.oid = p.propackageid\n"
-            "WHERE p.proname ILIKE '%%%s%%';" % ref.name)
+    return "按名字在本库全部 schema(含包内过程)里模糊查找名字含「%s」的过程 / 函数,看它在哪个 schema、哪个包" % ref.name
 
 
 def _grant_usage(ref: ProcRef, acct: str) -> str:
-    return "GRANT USAGE ON SCHEMA %s TO %s;" % (ref.schema or "<schema>", acct)
+    return "给执行账号 %s 授 schema %s 的 USAGE 权限" % (acct, ref.schema or "<schema>")
 
 
 def _others(loc: Locate) -> str:
@@ -145,14 +141,14 @@ def classify(ref: ProcRef, loc: Locate) -> Verdict:
     if hidden:
         return Verdict(
             "schema_hidden",
-            "过程 %s 在本库的 pg_proc 里有(%d 行同名),但它所在的 schema 对执行账号 %s 不可见:本库开启了对象隔离"
+            "过程 %s 在本库里有(%d 个同名定义),但它所在的 schema 对执行账号 %s 不可见:本库开启了对象隔离"
             "(ENABLE PRIVATE OBJECT)且该账号没有 schema %s 的 USAGE 权限,联表查询于是 0 行。这不是过程不存在。"
             % (ref.name, len(hidden), acct, ref.schema or "(未指定)"),
-            ("请 DBA 按下面的命令给执行账号 %s 授权,授权后重跑本命令即可。" % acct,
-             "如果 DBA 说本库没有开对象隔离,请把下面『DBA 核对』查询的结果发回,我们据此再查。"),
+            ("请 DBA 按下面的说明给执行账号 %s 授权,授权后重跑本命令即可。" % acct,
+             "如果 DBA 说本库没有开对象隔离,请把下面『DBA 核对』的结果发回,我们据此再查。"),
             tuple(a for a in (
                 _grant_usage(ref, acct),
-                ("GRANT EXECUTE ON PACKAGE %s.%s TO %s;" % (ref.schema, ref.package, acct)) if ref.package and ref.schema else "",
+                ("给执行账号 %s 授包 %s.%s 的 EXECUTE 权限" % (acct, ref.schema, ref.package)) if ref.package and ref.schema else "",
                 verify) if a))
     if exact:
         cands = "、".join(sorted({_hit_name(h) for h in exact}))
@@ -169,7 +165,7 @@ def classify(ref: ProcRef, loc: Locate) -> Verdict:
             "排查脚本有 %d 项未能执行(见上面「未能排查」),无法判断是库不对、权限不够还是过程不存在。" % len(loc.skipped),
             ("请先按交付文档 08 把本次新增的白名单脚本(procinfo / proctune 的 locate_context、locate_schema、locate_search)"
              "灌入 script_config,再重跑本命令。",
-             "或请 DBA 用管理员账号在库 %s 执行下面『DBA 核对』的查询并把结果发回。" % db),
+             "或请 DBA 用管理员账号在库 %s 按下面『DBA 核对』查一下并把结果发回。" % db),
             (verify,))
     if ref.schema and loc.schema_seen is False:
         return Verdict(
@@ -178,15 +174,15 @@ def classify(ref: ProcRef, loc: Locate) -> Verdict:
             % (db, acct, ref.schema),
             ("过程 %s 是不是建在别的库里?当前连的是 %s,实例上还有:%s。是的话用 gaussdb-login 重新登录到那个库再跑。"
              % (full, db, _others(loc)),
-             "如果确认就在库 %s,请 DBA 用管理员账号执行下面『DBA 核对』的查询并把结果发回:有结果就是执行账号 %s 的权限问题"
-             "(按 GRANT 命令授权后重跑),没有结果就是这个库里确实没有。" % (db, acct)),
+             "如果确认就在库 %s,请 DBA 用管理员账号按下面『DBA 核对』查一下并把结果发回:查得到就是执行账号 %s 的权限问题"
+             "(按下面的说明授权后重跑),查不到就是这个库里确实没有。" % (db, acct)),
             (_grant_usage(ref, acct), verify))
     if ref.schema and loc.schema_usage is False:
         return Verdict(
             "no_usage",
             "schema %s 在本库,但执行账号 %s 没有它的 USAGE 权限;按名字没有查到 %s(权限不足时 GaussDB 可能把对象一并藏起来)。"
             % (ref.schema, acct, ref.name),
-            ("请 DBA 先按下面的命令给执行账号 %s 授权,授权后重跑本命令。" % acct,
+            ("请 DBA 先按下面的说明给执行账号 %s 授权,授权后重跑本命令。" % acct,
              "授权后仍找不到,请确认过程全名与所在库(当前 %s,实例上还有:%s)。" % (db, _others(loc))),
             (_grant_usage(ref, acct), verify))
     pkg_hits = [h for h in loc.hits if h.kind == "package"]
@@ -203,9 +199,7 @@ def classify(ref: ProcRef, loc: Locate) -> Verdict:
             (verify,))
     if ref.package:
         summary = "schema %s 与包 %s 都在本库且执行账号可访问,但包里没有名为 %s 的过程。" % (ref.schema, ref.package, ref.name)
-        list_sql = ("SELECT p.proname FROM pg_proc p WHERE p.propackageid = (SELECT k.oid FROM gs_package k "
-                    "JOIN pg_namespace n ON n.oid = k.pkgnamespace WHERE n.nspname = '%s' AND k.pkgname = '%s');"
-                    % (ref.schema, ref.package))
+        list_sql = "列出包 %s.%s 里的全部过程名,核对要找的那个叫什么" % (ref.schema, ref.package)
         actions: Tuple[str, ...] = (list_sql, verify)
     elif ref.schema:
         summary = "schema %s 在本库且执行账号可访问,但没有名为 %s 的过程/函数。" % (ref.schema, ref.name)
@@ -216,7 +210,7 @@ def classify(ref: ProcRef, loc: Locate) -> Verdict:
     return Verdict(
         "name_missing", summary,
         (("过程名是否写对?名字相近的有:%s,是其中之一就回复全名。" % "、".join(near_procs)) if near_procs
-         else "过程名是否写对?请把慢 SQL 里 call 的原文或建过程语句里的名字发来(DBA 可用下面的查询列出候选)。",
+         else "过程名是否写对?请把慢 SQL 里 call 的原文或建过程语句里的名字发来(DBA 可按下面的说明列出候选)。",
          "过程是不是建在别的库?当前连的是 %s,实例上还有:%s。" % (db, _others(loc))),
         actions)
 
@@ -251,7 +245,7 @@ def with_adm(v: Verdict, loc: Locate, adm_denied: bool) -> Verdict:
         questions=v.questions + (
             "执行账号 %s 没有 ADM_SOURCE 的读权限。是否请 DBA 授权?授权后本命令直接从 ADM_SOURCE 取源码,"
             "不受对象隔离影响(ADM_SOURCE 能看到全库的过程定义,授不授由贵方决定)。" % acct,),
-        actions=v.actions + ("GRANT SELECT ON pg_catalog.adm_source TO %s;" % acct,))
+        actions=v.actions + ("由 DBA 决定是否给执行账号 %s 授 ADM_SOURCE 的读权限(授权由 DBA 按行内规范执行),授权后重跑" % acct,))
 
 
 def render(ref: ProcRef, tried: Sequence[str], loc: Locate, v: Verdict, adm: str = "") -> str:
@@ -260,7 +254,7 @@ def render(ref: ProcRef, tried: Sequence[str], loc: Locate, v: Verdict, adm: str
            if loc.db else "(未取到)")
     tried_text = " / ".join(dict.fromkeys(tried))       # 两段名按 schema.proc 与 package.proc 各查一次,字面相同,只写一遍
     lines = ["# 过程未找到:%s" % full, "",
-             "脚本按 %s 查过,当前库的 pg_proc 里没有这一行。已代为排查:" % tried_text, "",
+             "脚本按 %s 查过,当前库里没有这个过程。已代为排查:" % tried_text, "",
              "- 当前连接:%s" % ctx, _schema_line(ref, loc), _hits_line(ref, loc)]
     if adm:
         lines.append("- ADM_SOURCE 兜底:%s" % adm)
@@ -269,9 +263,8 @@ def render(ref: ProcRef, tried: Sequence[str], loc: Locate, v: Verdict, adm: str
     lines += ["", "**结论**:%s" % v.summary, "", "请用户协助回答(按编号答复即可):"]
     lines += ["%d. %s" % (i, q) for i, q in enumerate(v.questions, 1)]
     if v.actions:
-        lines += ["", "DBA 核对/处理(用管理员账号在库 %s 执行):" % (loc.db or "<当前库>"), "```sql"]
-        lines += list(v.actions)
-        lines.append("```")
+        lines += ["", "DBA 核对/处理(用管理员账号在库 %s 上做;回答里照这样写要做的事,不写语句):" % (loc.db or "<当前库>")]
+        lines += ["- %s" % a for a in v.actions]
     return "\n".join(lines) + "\n"
 
 

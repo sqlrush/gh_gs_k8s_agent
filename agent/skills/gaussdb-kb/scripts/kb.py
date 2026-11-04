@@ -280,7 +280,7 @@ def cmd_health(args: argparse.Namespace) -> int:
         if not status.attached:
             print(f"[error] 知识库未接入:{status.reason}")
     # 每次覆盖 kb/health.json:大盘知识库页读它;失败只 warn,不改退出码
-    reports.announce("kb", reports.archive("kb", d, name="health"), "")   # 标准错误:大盘知识库页的直达链接
+    reports.announce("kb", reports.archive("kb", d, name="health"), "")   # 标准错误:说一句已存档(不给链接)
     if not readonly:
         _share_health(kb, d)
     if not status.attached:

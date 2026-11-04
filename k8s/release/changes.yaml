@@ -12,6 +12,13 @@
 # 版本从新到旧;第一条必须是本仓库清单里的版本(守卫测试)。min_upgrade_from 之前的版本按《部署上线方案》§14 手工升级。
 min_upgrade_from: agent-v1.4.0
 versions:
+  - version: agent-v1.4.6
+    mixed_with: [agent-v1.4.5]  # 网关没改;槽位里的提示词与技能跟着镜像走,换到哪版用哪版
+    required: []
+    steps: [rebuild_kb_import]    # 导入镜像换了(根提示词)
+    whitelist: []
+    notes:
+      - "(按需)换过根规范的,用本版本的离线包重做 rootspec-overlay.sh 再推内网仓库(版本说明 v1.4.5「根规范模板替换」)"
   - version: agent-v1.4.5
     mixed_with: [agent-v1.4.4]  # 网关只改了措辞;提示词在用户镜像里,槽位换到哪版用哪版
     required: []

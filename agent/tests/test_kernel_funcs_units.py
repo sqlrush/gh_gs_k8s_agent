@@ -63,7 +63,8 @@ def test_probe_on_gaussdb_flags_missing_functions_as_expected_but_missing():
     assert p.expected_but_missing == ["gs_get_explain", "gs_get_kernel_info"]
     note = kf.missing_note(p)
     assert "GaussDB" in note and "gs_get_explain" in note and "gs_get_kernel_info" in note
-    assert "pg_proc" in note and "database" in note and "升级" in note and "EXPLAIN" in note
+    assert "函数定义逐 database 独立" in note and "升级" in note and "EXPLAIN" in note
+    assert "SELECT proname" not in note and "SHOW upgrade_mode" not in note, "不写查数据字典 / 查参数的语句"
 
 
 def test_probe_on_opengauss_expects_nothing():

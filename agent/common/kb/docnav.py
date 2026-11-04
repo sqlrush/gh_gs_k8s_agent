@@ -80,7 +80,7 @@ def l0_rows(cat: kbcat.Catalog, docsets: Sequence) -> List[str]:
         state = "完整" if idx.get("complete") else ("未建" if not idx else f"建了一部分(还差 {idx.get('docs_left', '?')} 条)")
         ver = f"{m.get('product', '')} {m.get('versions', '')}" + (f"(内核 {m['kernel_version']})" if m.get("kernel_version") else "")
         out.append(f"| {ds.code} | {m.get('title', '')} | {ver} | {m.get('items', 0)} | {state} | `kb.py doc {ds.code}` |")
-    out += ["", "官方文档只说明产品怎么工作;**贵行规范、案例与之不一致时以贵行为准**,并列呈现交用户裁决。", ""]
+    out += ["", "官方文档只说明产品怎么工作;**本行规范、案例与之不一致时以本行为准**,并列呈现交用户裁决。", ""]
     return out
 
 

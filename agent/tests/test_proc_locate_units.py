@@ -103,7 +103,7 @@ def test_hidden_schema_means_object_isolation_without_usage():
     v = pl.classify(REF, _loc(schema_seen=False, hits=(pl.Hit("proc", "", "pckg_zxac_property_dtl", "proc_maketext"),)))
     assert v.code == "schema_hidden"
     assert "对象隔离" in v.summary
-    assert any("GRANT USAGE ON SCHEMA gmag TO" in a for a in v.actions)
+    assert any("授 schema gmag 的 USAGE 权限" in a for a in v.actions)
 
 
 def test_same_name_elsewhere_asks_user_to_confirm_candidate():
@@ -117,13 +117,13 @@ def test_missing_schema_points_at_other_databases_and_dba_check():
     assert v.code == "no_schema"
     assert any("gmag_db" in q for q in v.questions)
     assert any("gbatch" in q for q in v.questions)          # 当前库要写明,用户才知道「换库」是换哪个
-    assert any("pg_proc" in a and "ILIKE" in a for a in v.actions)
+    assert any("模糊查找" in a for a in v.actions)
 
 
 def test_schema_without_usage_names_the_privilege():
     v = pl.classify(REF, _loc(schema_usage=False))
     assert v.code == "no_usage"
-    assert any("GRANT USAGE ON SCHEMA gmag TO" in a for a in v.actions)
+    assert any("授 schema gmag 的 USAGE 权限" in a for a in v.actions)
 
 
 def test_package_missing_lists_near_packages():
@@ -135,7 +135,7 @@ def test_package_missing_lists_near_packages():
 def test_package_present_but_proc_missing_offers_listing_sql():
     v = pl.classify(REF, _loc(hits=(pl.Hit("package", "gmag", "pckg_zxac_property_dtl", ""),)))
     assert v.code == "name_missing"
-    assert any("propackageid" in a for a in v.actions)
+    assert any("列出包" in a for a in v.actions)
 
 
 def test_probe_gaps_yield_unknown_with_missing_script_hint():
@@ -158,7 +158,8 @@ def test_render_has_findings_verdict_questions_and_dba_block():
     assert text.startswith("# 过程未找到")
     assert "当前连接" in text and "schema gmag" in text and "近似名" in text
     assert "请用户协助回答" in text and "\n1. " in text
-    assert "```sql" in text and "ILIKE" in text
+    assert "DBA 核对/处理" in text and "模糊查找" in text
+    assert "```sql" not in text and "SELECT" not in text and "GRANT" not in text, "给 DBA 的核对写要做的事,不写语句"
     assert "不支持" not in text          # 不给模型任何「不支持包」的暗示
 
 

@@ -35,7 +35,7 @@ def status_line(status: KbStatus) -> str:
 def _clause_line(r: Ref) -> str:
     sev = r.meta.get("severity") or ""
     src = f" ——{r.source}" if r.source else ""
-    return f"- **贵行规范** {r.short_id}《{r.title}》" + (f"({sev})" if sev else "") + src
+    return f"- **本行规范** {r.short_id}《{r.title}》" + (f"({sev})" if sev else "") + src
 
 
 def _case_line(r: Ref) -> str:
@@ -65,7 +65,7 @@ def _guide_line(r: Ref) -> str:
 
 
 # 六类类型化条目的引用行:前缀名 + 括号里放验证状态 / 厂商结论 / 系统
-_TYPED_LABEL = {"runbook": "处置手册", "defect": "已知缺陷", "baseline": "贵行基线", "product": "产品文档",
+_TYPED_LABEL = {"runbook": "处置手册", "defect": "已知缺陷", "baseline": "本行基线", "product": "产品文档",
                 "wiki": "Wiki 经验", "profile": "环境画像"}
 
 
@@ -100,9 +100,9 @@ def render_item(item: FindingRefs) -> str:
     lines = [f"### 对 {item.label}".rstrip()]
     lines += list(item.hints)
     if item.empty:
-        lines.append("- 贵行规范:无对应条款 · 历史相似:无相似案例 · 路径:无")
+        lines.append("- 本行规范:无对应条款 · 历史相似:无相似案例 · 路径:无")
     else:
-        lines += [_clause_line(r) for r in item.clauses] or ["- 贵行规范:无对应条款"]
+        lines += [_clause_line(r) for r in item.clauses] or ["- 本行规范:无对应条款"]
         lines += [_case_line(r) for r in item.cases] or ["- 历史相似:无相似案例"]
         lines += [_path_line(p) for p in item.paths] or ["- 本行历史路径:无(没有已确认的 现象→根因→处置 链)"]
         lines += [_typed_line(r) for r in item.typed]

@@ -25,7 +25,7 @@ step "index --rebuild"; $PY "$KBPY" index --kb "$KB" --rebuild 2>&1 | grep -v '^
 step "eval"; $PY "$KBPY" eval --kb "$KB"; echo "rc=$?"
 
 run_health() { perl -e "alarm shift; exec @ARGV" 240 "$PY" skills/gaussdb-health/scripts/health.py -c "$CONN" 2>/dev/null; }
-kb_section() { sed -n '/^## 本行知识库参照/,/^## Overview\|^## Deterministic/p' | grep -E '^## |^> |^### 对|^- \*\*|^- 贵行规范:无'; }
+kb_section() { sed -n '/^## 本行知识库参照/,/^## Overview\|^## Deterministic/p' | grep -E '^## |^> |^### 对|^- \*\*|^- 本行规范:无'; }
 step "态一:导入前(无 GSDB_KB_DIR,安装根下无 kb/)"; unset GSDB_KB_DIR; run_health | kb_section | head -3
 step "态二:导入后"; export GSDB_KB_DIR="$KB"; run_health > /tmp/kb-health-after.md; kb_section < /tmp/kb-health-after.md
 step "态三:回退"; mv "$KB" "$KB.off"; run_health | kb_section | head -3; mv "$KB.off" "$KB"

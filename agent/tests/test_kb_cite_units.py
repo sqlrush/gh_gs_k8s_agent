@@ -92,9 +92,9 @@ def test_cmd_exit_codes_and_render(tmp_path, capsys):
 
 def test_library_name_must_match_the_id_type():
     """2026-10-26 回答模板化:「(引用自 xxx 库 编号)」里的库名要和编号类型对上,写错只提示、不改退出码。"""
-    text = ("<font color=#2f6fdb>先取消 DDL 会话</font>(引用自贵行规范库 RB-LCK-001);"
-            "<font color=#2f6fdb>会话级不超过 30 秒</font>（引用自贵行规范库 GS-CHG-003）;"
+    text = ("<font color=#2f6fdb>先取消 DDL 会话</font>(引用自本行规范库 RB-LCK-001);"
+            "<font color=#2f6fdb>会话级不超过 30 秒</font>（引用自本行规范库 GS-CHG-003）;"
             "<font color=#0f7c86>默认 20 分钟</font>(引用自 GaussDB 官方文档库 PD-G25132C-01481)")
-    assert kb_cite.library_mismatches(text) == [("贵行规范库", "RB-LCK-001", "处置手册库")]
+    assert kb_cite.library_mismatches(text) == [("本行规范库", "RB-LCK-001", "处置手册库")]
     assert "这个编号属于处置手册库" in kb_cite.render_mismatches(kb_cite.library_mismatches(text))
     assert kb_cite.library_mismatches("没有引用") == []

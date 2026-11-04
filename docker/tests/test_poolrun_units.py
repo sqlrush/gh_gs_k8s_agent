@@ -111,6 +111,7 @@ def test_run_starts_opencode_with_the_bound_identity(rig):
     assert env["GSDB_USER_ID"] == "u1234" and env["OPENCODE_SERVER_PASSWORD"] == PW
     assert env["XDG_DATA_HOME"] == str(rig.state / "xdg-data") and env["GSDB_HOME"] == str(rig.state / "gdaa")
     assert env["GSDB_REPORTS_DIR"] == str(rig.state / "reports") and env["GSDB_KB_DIR"] == str(rig.kb)
+    assert env["GSDB_SKILLS_DIR"] and env["GSDB_SKILLS_DIR"].endswith("/opencode/skills"), "提示词里的 $GSDB_SKILLS_DIR 要在槽位里设好"
     assert pathlib.Path(env["cwd"]).resolve() == (rig.state / "workspace").resolve()
     assert env["SANDBOX_CONTROL_KEY"] is None, "控制密钥只在管家"
     cfg = rig.state / "gdaa" / "config.yaml"

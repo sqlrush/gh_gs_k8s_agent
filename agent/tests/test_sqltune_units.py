@@ -289,7 +289,7 @@ def test_runtime_plan_for_on_opengauss_is_silent():
 def test_runtime_plan_for_on_gaussdb_missing_function_explains():
     import sqltune
     plan, pid, note = sqltune._runtime_plan_for(_RtRunner(_GAUSS, has_explain=False), "1")
-    assert plan == "" and "GaussDB" in note and "pg_proc" in note
+    assert plan == "" and "GaussDB" in note and "函数定义逐 database 独立" in note and "SELECT proname" not in note
 
 
 def test_runtime_plan_for_empty_plan_reports_preconditions():

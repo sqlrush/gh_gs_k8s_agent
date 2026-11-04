@@ -26,10 +26,10 @@ GOOD_FAULT = """评估时段:要的是 10-24 18:20–18:40,实际评估快照 31
 需要就阻塞链的根会话展开说明吗?
 """
 
-GOOD_QA = """解答来源:GaussDB 官方文档库 PD-G25132C-01481;贵行规范库 GS-CHG-003
+GOOD_QA = """解答来源:GaussDB 官方文档库 PD-G25132C-01481;本行规范库 GS-CHG-003
 
 **① 解答正文**
-<font color=#0f7c86>默认 20 分钟</font>[1];<font color=#2f6fdb>贵行要求不超过 30 秒</font>[2]。
+<font color=#0f7c86>默认 20 分钟</font>[1];<font color=#2f6fdb>本行要求不超过 30 秒</font>[2]。
 
 **② 举例说明**
 通用场景:白天执行 DDL。
@@ -65,7 +65,7 @@ def test_opening_followup_and_two_views():
 def test_citation_mistakes_are_caught():
     no_paren = GOOD_FAULT.replace("(引用自处置手册库 RB-LCK-001)", "")
     assert "出处括号" in _bad(ac.check(no_paren, "fault"))
-    wrong_lib = GOOD_FAULT.replace("处置手册库 RB-LCK-001", "贵行规范库 RB-LCK-001")
+    wrong_lib = GOOD_FAULT.replace("处置手册库 RB-LCK-001", "本行规范库 RB-LCK-001")
     assert "库名与颜色" in _bad(ac.check(wrong_lib, "fault"))
     wrong_color = GOOD_FAULT.replace("<font color=#0f7c86>lockwait", "<font color=#2f6fdb>lockwait")
     assert "库名与颜色" in _bad(ac.check(wrong_color, "fault"))

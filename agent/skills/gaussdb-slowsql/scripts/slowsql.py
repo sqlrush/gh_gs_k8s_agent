@@ -221,11 +221,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         elif screening.all_excluded():
             print("## Slow SQL\n\n%s。\n" % screening.all_excluded_text(
                 args.limit + syssql.SCREEN_MARGIN, "平均耗时超过 %d ms 的" % args.threshold))
-            print("> %s要连系统 SQL 一起看,加 `--include-system`。\n" % note)
+            print("> %s\n" % note)
         else:
             print(stmt_table("Slow SQL", rows), end="")
             if note:
-                print("\n> %s要连系统 SQL 一起看,加 `--include-system`。\n" % note)
+                print("\n> %s\n" % note)
         return 0
     except (ValueError, KeyError, common.DBError) as exc:
         print(f"error: {exc}", file=sys.stderr)

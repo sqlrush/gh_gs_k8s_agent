@@ -422,7 +422,7 @@ def test_render_unattached_is_title_plus_reason_only(tmp_path):
     res = query.from_findings([_finding()], kb_dir=tmp_path / "nope")
     out = render.render_section(res)
     assert out.startswith("## 本行知识库参照\n> 知识库未接入(")
-    assert "贵行规范" not in out
+    assert "本行规范" not in out
 
 
 def test_render_item_has_all_four_lines_and_explicit_none(tmp_path):
@@ -431,13 +431,13 @@ def test_render_item_has_all_four_lines_and_explicit_none(tmp_path):
     out = render.render_section(res)
     assert "> 知识库 v2026.09 · 模式:向量库+图库 · 条款 2 · 案例 3 · 原始工单 1 · 向量:" in out
     assert "### 对 🟠告警 VAC_FREQ" in out
-    assert "- **贵行规范** GS-VAC-002《小表 autovacuum 阈值》(warn) ——《运维规范》v5 §6.2" in out
+    assert "- **本行规范** GS-VAC-002《小表 autovacuum 阈值》(warn) ——《运维规范》v5 §6.2" in out
     assert f"- **历史相似** {CASE_ID}(结论强度:已确认,2025-02-24):处置 = 针对小表调大 autovacuum_vacuum_threshold" in out
     assert "- **本行历史路径** 单条 update 偶发秒级 → autovacuum 持 8 级锁 → 表级调大 autovacuum_vacuum_threshold (1 案例支持:" in out
     assert "- **原始工单** q1/T-100(未结构化)" in out
     # 第二条发现没命中:必须明写「无」,不能省略
     assert "### 对 🟡关注 IDX_UNUSED" in out
-    assert "- 贵行规范:无对应条款 · 历史相似:无相似案例 · 路径:无" in out
+    assert "- 本行规范:无对应条款 · 历史相似:无相似案例 · 路径:无" in out
     assert "违规汇总" not in out
 
 

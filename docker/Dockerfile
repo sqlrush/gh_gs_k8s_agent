@@ -51,6 +51,8 @@ RUN chmod 0755 /opt/agent/entrypoint.sh && chown -R agent:agent /opt/agent && ch
 # 镜像里只放三个模板(带 ROOTSPEC-TEMPLATE 标记,检索时跳过);行内部署时用 scripts/rootspec-overlay.sh 换成正式规范。
 # 只读:root 所有、所有人可读,容器根文件系统本来就是只读挂载
 COPY docker/search_docs.py /workspace/search_docs.py
+# 提示词里只写变量不写路径:$GSDB_ROOTSPEC_HOME/search_docs.py 与 $GSDB_ROOTSPEC_HOME/docs/(podctl 放行这种写法)
+ENV GSDB_ROOTSPEC_HOME=/workspace
 COPY docker/rootspec/ /workspace/docs/
 RUN chmod 0755 /workspace /workspace/docs && chmod 0644 /workspace/search_docs.py /workspace/docs/* \
     && test "$(ls /workspace/docs | wc -l)" = "3" && python3 /workspace/search_docs.py --list

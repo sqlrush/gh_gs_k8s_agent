@@ -98,6 +98,20 @@ def input_modalities(env: Mapping[str, str]) -> Optional[list]:
 # 复合命令(管道、&&、$())逐条核对,`*` 能匹配 `/` 与空格,所以:先全拒,再放行,最后把放行里的漏洞拒回去。
 ROLE_RUNTIME, ROLE_KB_IMPORT = "runtime", "kb-import"
 ROOTSPEC_SEARCH = "/workspace/search_docs.py"     # 镜像里的根规范检索脚本(本行知识库不可用或查不到时用)
+# 根提示词里不写绝对路径,写这两个变量(shell 展开);opencode 按命令原文匹配规则,不展开变量,所以变量写法也要放行。
+# 变量能被 export 改指别处(opencode 不核对声明命令),但要执行得有文件在那里:诊断容器写不了文件;
+# 导入容器本来就能用 write 工具往可写的技能目录里写再按绝对路径执行 —— 变量写法没有多给能力。
+SKILLS_VAR, ROOTSPEC_VAR = "GSDB_SKILLS_DIR", "GSDB_ROOTSPEC_HOME"
+_PY = ("python3", "python")
+
+
+def skills_dir(env: Mapping[str, str]) -> str:
+    """技能目录:$XDG_CONFIG_HOME/opencode/skills。权限规则与 $GSDB_SKILLS_DIR 都按它,两边不会对不上。"""
+    return (env.get("XDG_CONFIG_HOME") or "/data/config").rstrip("/") + "/opencode/skills"
+
+
+def _var_forms(var: str) -> tuple:
+    return ("$%s" % var, "${%s}" % var, '"$%s' % var, '"${%s}' % var)
 _READ_ONLY_COMMANDS = ("cat", "grep", "head", "tail", "ls", "wc", "sort", "uniq", "cut", "date", "echo", "pwd",
                        "ps", "df", "du", "free", "find", "cd", "stat", "file", "tree", "realpath", "basename",
                        "dirname", "which", "diff", "true")
@@ -127,10 +141,12 @@ def opencode_permissions(env: Mapping[str, str]) -> dict:
     role = (env.get("AGENT_ROLE") or ROLE_RUNTIME).strip()
     if role not in (ROLE_RUNTIME, ROLE_KB_IMPORT):
         raise ConfigError("AGENT_ROLE=%r 不认识,只能是 %s / %s" % (role, ROLE_RUNTIME, ROLE_KB_IMPORT))
-    skills = (env.get("XDG_CONFIG_HOME") or "/data/config").rstrip("/") + "/opencode/skills"
+    skills = skills_dir(env)
     # 顺序就是规则:先全拒 → 放行技能脚本与只读命令 → 拒掉一切重定向 → 给放行过的命令补安全结尾 → 最后再拒漏洞。
-    allowed = ["%s %s/gaussdb-*" % (py, skills) for py in ("python3", "python")]
-    allowed += ["%s %s" % (py, ROOTSPEC_SEARCH) + tail for py in ("python3", "python") for tail in ("", " *")]   # 根规范检索
+    allowed = ["%s %s/gaussdb-*" % (py, d) for py in _PY for d in (skills,) + _var_forms(SKILLS_VAR)]
+    search = [ROOTSPEC_SEARCH] + ["%s/search_docs.py" % v for v in _var_forms(ROOTSPEC_VAR)[:2]] \
+        + ['%s/search_docs.py"' % v for v in _var_forms(ROOTSPEC_VAR)[2:]]
+    allowed += ["%s %s" % (py, s) + tail for py in _PY for s in search for tail in ("", " *")]   # 根规范检索
     allowed += [p for cmd in _READ_ONLY_COMMANDS for p in (cmd, cmd + " *")]
     bash: Dict[str, str] = {"*": "deny"}
     bash.update((p, "allow") for p in allowed)
@@ -142,7 +158,7 @@ def opencode_permissions(env: Mapping[str, str]) -> dict:
         "webfetch": "deny", "websearch": "deny",               # 数据不出域
         "skill": {"*": "deny", "gaussdb-*": "allow"},
         "read": "allow", "glob": "allow", "grep": "allow", "list": "allow",
-        "external_directory": "allow",          # 知识库 /nas/kb 与根规范 /workspace/docs 在项目目录之外,模型要能读原文
+        "external_directory": "allow",          # 知识库 $GSDB_KB_DIR 与根规范 $GSDB_ROOTSPEC_HOME/docs 在项目目录之外,模型要能读原文
         "bash": bash,
     }
 

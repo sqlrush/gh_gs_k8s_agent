@@ -63,7 +63,8 @@ def test_function_missing_hint_separates_the_three_causes():
     hint = hints.explain(FUNC_MISSING)
     assert "gs_get_explain" in hint                              # 点名函数
     assert "参数类型" in hint or "实参" in hint                     # ① 类型不符
-    assert "pg_proc" in hint and "database" in hint               # ② 逐库 catalog
+    assert "函数定义逐 database 独立" in hint and "参数签名" in hint   # ② 逐库 catalog
+    assert "SELECT" not in hint and "pg_proc" not in hint, "排查提示写要核对什么,不写查数据字典的 SQL"
     assert "升级" in hint                                         # ③ catalog 未升级
     # 通用的对象不存在仍走老提示,不被函数提示抢走
     generic = hints.explain("ERROR: relation \"dbe_perf.foo\" does not exist")

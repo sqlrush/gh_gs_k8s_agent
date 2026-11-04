@@ -9,15 +9,23 @@ pg_stat_activity 里),所以「按应用名认内核线程」在排行里用不�
 (og5 实测 WDRXdb 的语句全是 `select ?, ?, t.* from dbe_perf.summary_statio_all_indexes t` 一类),
 按正文判同样能认出来;诊断工具(含我方智能体)查系统视图的语句也一并排除 —— 它们同样会污染慢 SQL 榜。
 
-命中任一即为系统 SQL:
-  ① 引用的表 / 视图**全部**是系统对象(系统 schema、pg_ / gs_ 前缀、statement_history 等);
-  ② 不引用任何表,只调用系统函数(generate_wdr_report、pg_* / gs_* 等;pg_sleep 除外 —— 那是业务在等)。
+2026-11-04 现场要求收紧:**Top SQL 等排行只列行方的业务 SQL**,内核自己的 SQL、查数据字典的 SQL 一条都不出现。
+命中任一即为非业务 SQL(报告按类说排除了几条,不列正文):
+  ① 内核与数据字典:引用的表 / 视图**全部**是系统对象(系统 schema、pg_ / gs_ 前缀、文档里的系统表与系统视图名单
+     common/sysdict.py —— 含 ADM_* / DB_* / MY_* / V$* / DUAL 这类没有前缀的 A 兼容数据字典视图);
+     或不引用任何表,只调用系统函数(generate_wdr_report、pg_* / gs_* 等;pg_sleep 除外 —— 那是业务在等)。
+  ② 会话设置、事务控制与连接探活:SET / SHOW / RESET / BEGIN / COMMIT / ROLLBACK / SAVEPOINT …;
+     不引用任何表、只有常量或系统信息函数的语句(select 1、select version()、select current_schema() …)。
+     连接池与驱动每次建连都发,调用次数上千,会把业务 SQL 挤出榜(2026-11-04 测试环境实测前 10 名里占 4 名)。
+  ③ 运维管理:建删库 / 用户 / 角色 / 表空间、GRANT / REVOKE、ALTER SYSTEM、VACUUM / ANALYZE / CHECKPOINT、
+     EXPLAIN(包括我方 explain / sqltune 技能分析业务 SQL 时发的那条)。
+  ④ 中间件自身:只碰中间件 schema(grmp,我方交付的白名单与配置表)的语句。
 
-判定**保守**,与 sqltune 的系统对象策略同一方向:拿不准一律当业务 SQL 保留。
-误保留只是榜上多一行;误排除会把行方真正的慢 SQL 藏起来。
+判定对业务 SQL 仍是**保守**的:看得到业务对象(或带 schema 的业务函数、认不得的函数、序列函数)就是业务 SQL。
   - 排行里的正文是截断的(slowsql 180 字、topsql 80 字),FROM 可能在截掉的那一半里 —— 截断且只看到系统
-    对象时**不下结论**,按 sql_id 补取全文(白名单里已有的 sqlfetch.from_statement / from_history,
-    不改白名单、行方不用重导)再判;补不到就保留,并在说明里写明有几条是这样保留的。
+    对象时先按 sql_id 补取全文(白名单里已有的 sqlfetch.from_statement / from_history,不改白名单)再判;
+    补不到时:看得到的部分**有系统对象、没有业务对象** → 按非业务排除(现场要求宁可不列);一个表都看不到 → 保留,
+    并在说明里写明有几条是这样处理的。
   - WITH 子句的名字不是表;`extract(epoch from now())` 里的 now 是函数不是表。两者都不算用户对象。
 """
 from __future__ import annotations
@@ -30,9 +38,45 @@ import sys
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
-from common import sqlrefs, sysobjects
+from common import sqlrefs, sysdict, sysobjects
 
 SYSTEM, USER, UNSURE = "system", "user", "unsure"
+# 非业务 SQL 的类别(报告按类说排除了几条)
+KIND_KERNEL, KIND_SESSION, KIND_ADMIN, KIND_TOOL = "内核与数据字典", "会话设置与事务控制", "运维管理", "中间件自身"
+KINDS = (KIND_KERNEL, KIND_SESSION, KIND_ADMIN, KIND_TOOL)
+# 中间件 schema:我方交付的白名单与配置表(scripts.sql 里的 grmp.script_config)。中间件每调一次诊断脚本都查它
+TOOL_SCHEMAS = frozenset({"grmp"})
+# 我方白名单脚本自己建的探测表(explain.multi_stmt_probe 建临时表 t_probe 验多语句)。改脚本要行方重导白名单,所以按名字认
+TOOL_TABLES = frozenset({"t_probe"})
+# 文档名单里太像业务表名的:业务系统常把代码表叫 dict,不带 schema 时不据此判(宁可多列一行)
+_DICT_TOO_GENERIC = frozenset({"dict", "dictionary"})
+# 不引用任何表时,只调这些(或只有常量)= 连接探活 / 取会话信息,不是业务
+PROBE_FUNCTIONS = frozenset({
+    "version", "opengauss_version", "current_schema", "current_schemas", "current_database", "current_catalog",
+    "current_user", "session_user", "user", "current_role", "getpgusername", "current_setting", "set_config",
+    "now", "current_timestamp", "current_date", "current_time", "localtimestamp", "localtime", "sysdate",
+    "systimestamp", "clock_timestamp", "statement_timestamp", "transaction_timestamp", "timeofday",
+    "txid_current", "txid_current_snapshot", "inet_client_addr", "inet_client_port", "inet_server_addr",
+    "inet_server_port", "obj_description", "col_description", "shobj_description", "format_type", "to_regclass",
+    "to_regproc", "to_regtype", "to_regnamespace", "has_table_privilege", "has_schema_privilege",
+    "has_database_privilege", "has_function_privilege", "has_column_privilege", "has_sequence_privilege",
+})
+# 会话设置 / 事务控制:看开头的关键字就够,正文截断也认得
+_SESSION_RE = re.compile(r"(?is)^\s*(?:set|show|reset|discard|deallocate|start\s+transaction|commit|rollback|abort|"
+                         r"savepoint|release|prepare\s+transaction)\b")
+# BEGIN / END 单独成句才是事务控制;BEGIN … END; 是匿名块,里面是业务逻辑
+_TXN_WORD_RE = re.compile(r"(?is)^\s*(?:begin|end)(?:\s+(?:transaction|work))?(?:\s+isolation\s+level\s+[\w ]+|"
+                          r"\s+read\s+(?:only|write))*\s*;?\s*$")
+_ADMIN_RE = re.compile(
+    r"(?is)^\s*(?:(?:create|alter|drop)\s+(?:database|user|role|group|tablespace|resource\s+pool|workload\s+group|"
+    r"app\s+workload\s+group|audit\s+policy|masking\s+policy|directory|data\s+source|node|schema)\b"
+    r"|grant\b|revoke\b|alter\s+system\b|checkpoint\b|vacuum\b|analy[sz]e\b|explain\b|reindex\s+(?:database|system)\b"
+    r"|clean\s+connection\b)")
+# DDL 的对象不在 FROM 后面:CREATE TABLE grmp.script_config (…)、CREATE INDEX i ON grmp.t (…)
+_DDL_RE = re.compile(r"(?is)^\s*(?:create|alter|drop|truncate)\s+(?:or\s+replace\s+)?(?:(?:global\s+|local\s+)?"
+                     r"(?:temporary|temp)\s+|unlogged\s+)?(?:table|view|materialized\s+view|sequence|schema)\s+"
+                     r"(?:if\s+(?:not\s+)?exists\s+)?([a-z_][\w.]*)")
+_DDL_ON_RE = re.compile(r"(?is)^\s*(?:create|alter|drop)\s+(?:unique\s+)?(?:index|trigger)\b.*?\bon\s+([a-z_][\w.]*)")
 
 # 未限定 schema 时:openGauss 系统表 / 系统视图统一以 pg_ / gs_ 开头(与 sqltune/systables.py 同一口径)
 _SYSTEM_NAME_PREFIXES = ("pg_", "gs_")
@@ -87,10 +131,21 @@ _DANGLING = frozenset({
 
 
 def is_system_relation(ref: str) -> bool:
-    """表引用(`s.t` 或 `t`)是不是数据库自带的。schema 限定的只按 sysobjects 那张名单判。"""
+    """表引用(`s.t` 或 `t`)是不是数据库自带的。schema 限定的只按 sysobjects 那张名单判;
+    不带 schema 的再查文档里的系统表 / 系统视图名单(A 兼容的数据字典视图没有 pg_ / gs_ 前缀)。"""
+    ref = ref.lower()
     if "." in ref:
         return sysobjects.is_system_schema(ref[:ref.index(".")])
-    return ref.startswith(_SYSTEM_NAME_PREFIXES) or ref in _SYSTEM_NAMES
+    return (ref.startswith(_SYSTEM_NAME_PREFIXES) or ref in _SYSTEM_NAMES
+            or (ref in sysdict.NAMES and ref not in _DICT_TOO_GENERIC))
+
+
+def is_tool_relation(ref: str) -> bool:
+    """中间件自己的表(grmp.*)与我方脚本的探测表(t_probe)。"""
+    ref = ref.lower()
+    if "." in ref:
+        return ref[:ref.index(".")] in TOOL_SCHEMAS
+    return ref in TOOL_TABLES
 
 
 def is_system_function(name: str) -> bool:
@@ -120,8 +175,18 @@ def looks_cut(sql_text: str) -> bool:
 
 
 def classify(sql_text: str, complete: bool = True) -> str:
-    """SYSTEM / USER / UNSURE。complete=False 表示正文是截断的:只能判出 USER,判不出 SYSTEM。"""
+    """SYSTEM / USER / UNSURE。complete=False 表示正文是截断的:只能判出 USER,判不出 SYSTEM(开头关键字认得的除外)。"""
+    return judge(sql_text, complete)[0]
+
+
+def judge(sql_text: str, complete: bool = True):
+    """(SYSTEM / USER / UNSURE, 类别)。类别:SYSTEM 时是 KINDS 之一;UNSURE 时是「看得到的部分像哪一类」,
+    什么都看不到是空串(补不到全文时据此决定排除还是保留,见 screen)。"""
     text = _scrub(sql_text)
+    if _SESSION_RE.match(text) or _TXN_WORD_RE.match(text):
+        return SYSTEM, KIND_SESSION
+    if _ADMIN_RE.match(text):
+        return SYSTEM, KIND_ADMIN
     if not complete:
         # 截断处的最后一个词多半是半截(`JOIN dbe_pe`):当成表名会被判成业务对象,这一条就永远排除不掉
         text = re.sub(r"[\w.]+\s*$", "", text)
@@ -130,28 +195,71 @@ def classify(sql_text: str, complete: bool = True) -> str:
     maint = _MAINT_RE.match(text)
     if maint:
         relations += [n.strip().lower() for n in maint.group(1).split(",")]
+    for ddl in (_DDL_RE.match(text), _DDL_ON_RE.match(text)):
+        if ddl:
+            relations.append(ddl.group(1).lower())
+    # INSERT INTO t (列, …):t 后面的括号是列清单,不是函数调用
+    into = {m.group(1).lower() for m in re.finditer(r"(?is)\binto\s+([a-z_][\w.]*)", text)}
     for ref in sqlrefs.extract_table_refs(text):
         if ref in ctes:
             continue
         # FROM 后面紧跟括号的是函数:FROM create_wdr_snapshot()、extract(epoch from now())
-        if re.search(r"(?i)\b%s\s*\(" % re.escape(ref), text):
+        if ref.lower() not in into and re.search(r"(?i)\b%s\s*\(" % re.escape(ref), text):
             calls.add(ref)
         else:
             relations.append(ref)
     calls |= {m.group(1).lower() for m in _CALL_RE.finditer(text)
               if m.group(1).lower() not in _NOT_CALLS}
-    if any(not is_system_relation(r) for r in relations):
-        return USER
-    # 带 schema 的业务函数(fl.calc_bonus(...))说明它在做业务的事;不带 schema 的多是内置函数,不据此判
-    if any("." in f and not is_system_function(f) for f in calls):
-        return USER
+    if any(not is_system_relation(r) and not is_tool_relation(r) for r in relations):
+        return USER, ""
+    # 带 schema 的业务函数(fl.calc_bonus(...))说明它在做业务的事
+    if any("." in f and not is_system_function(f) and not is_tool_relation(f) for f in calls):
+        return USER, ""
+    kind = (KIND_TOOL if any(is_tool_relation(r) for r in relations) else KIND_KERNEL) if relations else ""
     if not complete:
-        return UNSURE
+        return UNSURE, kind
     if relations:
-        return SYSTEM
+        return SYSTEM, kind
     if calls and all(is_system_function(f) for f in calls):
-        return SYSTEM
-    return USER          # SELECT ? / SET / COMMIT / 只调内置函数:不是内核的,留着
+        return SYSTEM, KIND_KERNEL
+    if calls and all(is_tool_relation(f) or is_system_function(f) for f in calls) and any(is_tool_relation(f) for f in calls):
+        return SYSTEM, KIND_TOOL
+    # 不引用任何表:只有常量、或只调系统信息函数 = 连接探活;认不得的函数(业务函数、nextval 取业务序列)照样是业务
+    if _is_probe(text):
+        return SYSTEM, KIND_SESSION
+    return USER, ""
+
+
+# 探活语句里允许出现的词(函数名另查 PROBE_FUNCTIONS / 系统函数)
+_PROBE_WORDS = frozenset({"as", "distinct", "null", "true", "false", "current_timestamp", "current_date", "current_time",
+                          "localtimestamp", "localtime", "sysdate", "systimestamp", "current_user", "session_user",
+                          "user", "current_role", "current_catalog", "current_schema"})
+
+
+def _is_probe(text: str) -> bool:
+    """严格意义的探活:SELECT 后只有常量、占位符、系统信息函数(及 AS 别名)。出现带点的列(o.id)、*、
+    认不得的名字 —— 多半是 FROM 被截掉的业务语句 —— 一律不算,宁可留着。"""
+    m = re.match(r"(?is)^\s*select\s+(.*?)\s*;?\s*$", text)
+    if not m:
+        return False
+    toks = re.findall(r"[a-z_][\w$]*|\?|\$\d+|\d+(?:\.\d+)?|''|\S", m.group(1).lower())
+    prev = ""
+    for i, tok in enumerate(toks):
+        nxt = toks[i + 1] if i + 1 < len(toks) else ""
+        if re.match(r"^(\?|\$\d+|\d+(\.\d+)?|'')$", tok) or tok in (",", "(", ")", "::", ":", "+", "-"):
+            pass
+        elif re.match(r"^[a-z_]", tok):
+            if prev == "as":
+                pass                                        # 别名
+            elif nxt == "(":
+                if not (tok in PROBE_FUNCTIONS or is_system_function(tok)):
+                    return False
+            elif tok not in _PROBE_WORDS and not (prev == ":" and toks[i - 2:i] == [":", ":"]):
+                return False
+        else:
+            return False                                    # . * 等:引用了列或表
+        prev = tok
+    return bool(toks)
 
 
 @dataclass(frozen=True)
@@ -161,19 +269,26 @@ class Screening:
     excluded: list = field(default_factory=list)
     excluded_ids: List[str] = field(default_factory=list)
     excluded_seconds: float = 0.0
-    unresolved: int = 0          # 正文截断、全文补取不到 → 按业务 SQL 保留的条数
+    unresolved: int = 0          # 正文截断、全文补取不到、一个表都看不到 → 按业务 SQL 保留的条数
+    kinds: Dict[str, int] = field(default_factory=dict)   # 排除的按类计数
+    guessed: int = 0             # 正文截断、全文补取不到、看得到的只有系统对象 → 按非业务排除的条数
+
+    def _kinds(self) -> str:
+        return "、".join("%s %d 条" % (k, self.kinds[k]) for k in KINDS if self.kinds.get(k))
 
     def note(self) -> str:
-        """给报告用的一句话。什么都没排除、也没有判不了的 → 空串(不加噪音)。"""
+        """给报告用的一句话。什么都没排除、也没有判不了的 → 空串(不加噪音)。只说条数与类别,不列正文。"""
         parts = []
         if self.excluded_ids:
             ids = "、".join(self.excluded_ids[:_NOTE_IDS]) + ("等" if len(self.excluded_ids) > _NOTE_IDS else "")
             cost = ",合计耗时 %.1f 秒" % self.excluded_seconds if self.excluded_seconds > 0 else ""
-            parts.append("已排除 %d 条内核系统 SQL(只访问系统表 / 系统视图 / 系统函数的语句,"
-                         "如 WDR 快照、监控采集、诊断工具自己的查询%s):sql_id %s"
-                         % (len(self.excluded_ids), cost, ids))
+            kinds = "(%s)" % self._kinds() if self._kinds() else ""
+            parts.append("榜上只列业务 SQL:已排除 %d 条非业务 SQL%s%s,sql_id %s"
+                         % (len(self.excluded_ids), kinds, cost, ids))
+        if self.guessed:
+            parts.append("其中 %d 条正文被截断、补取全文没成功,看得到的部分只有系统对象,按非业务排除" % self.guessed)
         if self.unresolved:
-            parts.append("另有 %d 条正文被截断、补取全文没成功,判断不了是不是系统 SQL,按业务 SQL 保留在榜上"
+            parts.append("另有 %d 条正文被截断、补取全文没成功,看不到访问的对象,按业务 SQL 保留在榜上"
                          % self.unresolved)
         return ";".join(parts) + ("。" if parts else "")
 
@@ -185,16 +300,16 @@ class Screening:
         """「全是系统 SQL」时的那句话。取满了上限 = 后面可能还有业务 SQL,只是没取到,要说清楚。"""
         n = len(self.excluded_ids)
         if n >= fetched_cap:
-            return ("%s前 %d 条全是内核系统 SQL,没有业务语句;再往后的没取(一次最多取 %d 条),"
-                    "要看就加 `--include-system`" % (what, n, fetched_cap))
-        return "%s %d 条全是内核系统 SQL,没有业务语句" % (what, n)
+            return ("%s前 %d 条全是非业务 SQL(内核、数据字典、会话设置、运维管理等),没有业务语句;"
+                    "再往后的没取(一次最多取 %d 条)" % (what, n, fetched_cap))
+        return "%s %d 条全是非业务 SQL(内核、数据字典、会话设置、运维管理等),没有业务语句" % (what, n)
 
     def brief(self) -> str:
         """标题行用的短句(健康检查、WDR 的维度标题)。"""
         parts = []
         if self.excluded_ids:
             cost = ",合计 %.1f 秒" % self.excluded_seconds if self.excluded_seconds > 0 else ""
-            parts.append("已排除 %d 条内核系统 SQL(%s%s)"
+            parts.append("已排除 %d 条非业务 SQL(%s%s)"
                          % (len(self.excluded_ids), "、".join(self.excluded_ids[:3])
                             + ("等" if len(self.excluded_ids) > 3 else ""), cost))
         if self.unresolved:
@@ -204,7 +319,8 @@ class Screening:
     def as_dict(self) -> dict:
         """存档用(大盘与健康检查读)。"""
         return {"excluded": list(self.excluded_ids), "excluded_seconds": round(self.excluded_seconds, 3),
-                "unresolved": self.unresolved, "note": self.note(), "brief": self.brief()}
+                "unresolved": self.unresolved, "guessed": self.guessed, "kinds": dict(self.kinds),
+                "note": self.note(), "brief": self.brief()}
 
 
 def screen(rows: Iterable, *, sql_id: Callable, text: Callable, want: Optional[int] = None,
@@ -220,17 +336,20 @@ def screen(rows: Iterable, *, sql_id: Callable, text: Callable, want: Optional[i
     调用方要**多取一些行**(want 之外留 SCREEN_MARGIN),否则排除掉几条之后榜就短了。
     """
     kept, excluded, ids = [], [], []
-    cost, unresolved, lookups = 0.0, 0, 0
+    cost, unresolved, lookups, guessed = 0.0, 0, 0, 0
+    kinds: Dict[str, int] = {}
     for row in rows:
         if want is not None and len(kept) >= want:
             break
         body = str(text(row) or "")
         # 没有正文(老基线里只存了数字)也算「不知道」,要补取
         complete = bool(body.strip()) and ((len(body) < shown_chars) if shown_chars else not looks_cut(body))
-        verdict = classify(body, complete)
+        verdict, kind = judge(body, complete)
         sid = str(sql_id(row))
         if verdict == UNSURE and cache is not None:
-            verdict = cache.get(sid) or UNSURE
+            cached = cache.get(sid)
+            if cached:
+                verdict, kind = (cached, kind or KIND_KERNEL) if cached == SYSTEM else (cached, "")
         if verdict == UNSURE and full_text is not None and lookups < max_lookups:
             lookups += 1
             if lookups == _LOOKUP_NOTICE_AT:
@@ -238,12 +357,16 @@ def screen(rows: Iterable, *, sql_id: Callable, text: Callable, want: Optional[i
                       file=sys.stderr)
             whole = full_text(sid)
             if whole:
-                verdict = classify(whole, not looks_cut(whole))
+                verdict, kind = judge(whole, not looks_cut(whole))
                 if verdict != UNSURE and cache is not None:
                     cache.put(sid, verdict)
+        if verdict == UNSURE and kind:          # 补不到全文,看得到的只有系统 / 中间件对象:宁可不列
+            verdict = SYSTEM
+            guessed += 1
         if verdict == SYSTEM:
             excluded.append(row)
             ids.append(sid)
+            kinds[kind or KIND_KERNEL] = kinds.get(kind or KIND_KERNEL, 0) + 1
             cost += float(seconds(row) or 0) if seconds else 0.0
             continue
         if verdict == UNSURE:
@@ -252,7 +375,7 @@ def screen(rows: Iterable, *, sql_id: Callable, text: Callable, want: Optional[i
     if cache is not None:
         cache.save()
     return Screening(kept=kept, excluded=excluded, excluded_ids=ids,
-                     excluded_seconds=cost, unresolved=unresolved)
+                     excluded_seconds=cost, unresolved=unresolved, kinds=kinds, guessed=guessed)
 
 
 def keep_all(rows: Sequence) -> Screening:

@@ -38,6 +38,7 @@ export XDG_STATE_HOME=$STATE_LOCAL/xdg-state
 # 镜像目录只读(readOnlyRootFilesystem)会让配置加载失败、所有 API 报错(探针 /global/health 不碰配置,发现不了)。
 # 所以每次启动把镜像里的 skills/AGENTS.md(3 MB)与 models.json/rg(8 MB)复制到 /data 下再指过去。
 export XDG_CONFIG_HOME=/data/config
+export GSDB_SKILLS_DIR=$XDG_CONFIG_HOME/opencode/skills   # 提示词里写 $GSDB_SKILLS_DIR,与 podctl 权限规则同一算法
 export XDG_CACHE_HOME=/data/cache
 # **gdaa 整个留在 NAS**:里面既有登录句柄又有加密凭据,凭据不能落本地盘;
 # 句柄是几百字节的小文件,本地化没有性能收益(statesync.py 里有这条的完整理由)。

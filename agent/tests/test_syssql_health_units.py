@@ -50,7 +50,7 @@ def test_slow_sql_dimension_skips_system_sql_and_says_so():
     r = Runner({"health.slow_sql": lambda p: rows[: p["limit"]]})
     d = collectors.collect_slowsql(r, thresholds.default_thresholds(), 5)
     assert [row[0] for row in d.rows] == ["1"]
-    assert d.headline.startswith("Top1 avg 3000ms") and "已排除 1 条内核系统 SQL(9,合计 30.0 秒)" in d.headline
+    assert d.headline.startswith("Top1 avg 3000ms") and "已排除 1 条非业务 SQL(9,合计 30.0 秒)" in d.headline
     assert r.calls[0][1]["limit"] == 5 + collectors.syssql.SCREEN_MARGIN
 
 
@@ -69,7 +69,7 @@ def test_spill_champion_is_not_a_system_statement_but_its_spill_still_counts():
 
 def test_window_top_sql_headline_carries_what_topsql_excluded(monkeypatch):
     payload = {"rows": [{"sql_id": "1", "calls": 1, "total_sec": 2.0, "avg_ms": 2.0, "query": "UPDATE fl.a"}],
-               "system_sql": {"excluded": ["9"], "brief": "已排除 1 条内核系统 SQL(9,合计 3.0 秒)"}}
+               "system_sql": {"excluded": ["9"], "brief": "已排除 1 条非业务 SQL(9,合计 3.0 秒)"}}
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, json.dumps(payload), ""))
     d = window.topsql_dim(_cov(), 10, "topsql.py", 30)
-    assert d.headline.endswith("；已排除 1 条内核系统 SQL(9,合计 3.0 秒)")
+    assert d.headline.endswith("；已排除 1 条非业务 SQL(9,合计 3.0 秒)")

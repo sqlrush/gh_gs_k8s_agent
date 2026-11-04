@@ -120,3 +120,19 @@ def test_dockerfile_puts_search_and_templates_in_both_images_and_the_import_prom
     kbi = df[df.index("AS kb-import"):]
     assert "COPY agent/AGENTS-kb-import.md /opt/agent/config/opencode/AGENTS.md" in kbi
     assert "AGENTS-kb-import" not in df[df.index("AS runtime"):df.index("AS kb-import")]
+
+
+def test_docs_dir_comes_from_the_variable_or_sits_next_to_the_script(monkeypatch, tmp_path):
+    """$ROOTSPEC_DIR > $GSDB_ROOTSPEC_HOME/docs > 脚本旁边的 docs/;提示里写变量,不写镜像里的绝对路径。"""
+    def load():
+        mod = importlib.util.module_from_spec(_SPEC)
+        _SPEC.loader.exec_module(mod)
+        return mod
+    monkeypatch.delenv("ROOTSPEC_DIR", raising=False)
+    monkeypatch.delenv("GSDB_ROOTSPEC_HOME", raising=False)
+    assert load().DOCS == _ROOT / "docker" / "docs"
+    monkeypatch.setenv("GSDB_ROOTSPEC_HOME", str(tmp_path) + "/")
+    assert load().DOCS == tmp_path / "docs"
+    monkeypatch.setenv("ROOTSPEC_DIR", str(tmp_path / "x"))
+    assert load().DOCS == tmp_path / "x"
+    assert "/workspace" not in load().SELF

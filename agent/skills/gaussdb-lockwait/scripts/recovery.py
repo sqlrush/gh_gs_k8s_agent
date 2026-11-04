@@ -84,10 +84,10 @@ def kill_for(holder: dict) -> KillStatement:
         fn = "pg_terminate_session"
         if state.startswith(_NEEDS_TERMINATE_PREFIX):
             why = ("holder 处于 %s —— 没有正在执行的语句，"
-                   "cancel 对它无效，只能断开会话" % state)
+                   "取消语句对它无效，只能断开会话" % state)
         else:
-            why = ("holder 状态为 %r，无法确认 cancel 是否有效；"
-                   "选用更强的 terminate —— 取消失败而锁仍在，"
+            why = ("holder 状态为 %r，无法确认取消语句是否有效；"
+                   "选用更强的断开会话 —— 取消失败而锁仍在，"
                    "会让人误以为已经处理过"
                    % (holder.get("holder_state") or ""))
 
@@ -124,17 +124,21 @@ def kill_for(holder: dict) -> KillStatement:
     )
 
 
+# 报告与回答里只写要做的事(2026-11-04 现场要求:不出现系统 SQL);语句本身留在 KillStatement.sql,只供测试核对函数与参数
+ACTIONS = {"pg_cancel_session": "取消该会话正在执行的语句(会话与事务保留)", "pg_terminate_session": "断开该会话"}
+
+
 def render_kills(kills: list) -> str:
     """渲染成报告里的一段。空列表要**明说**，不能返回空串。"""
     if not kills:
-        return ("## 快速恢复语句\n\n"
+        return ("## 快速恢复操作\n\n"
                 "无 —— 当前没有需要处理的根阻塞会话。\n")
-    out = ["## 快速恢复语句\n",
-           "> **这些语句由本 skill 生成，供人工判断后自行执行；"
-           "本 skill 不会执行它们，也不要直接执行。**",
-           "> 只针对**根**阻塞会话生成 —— 杀链条中间的会话不解堵。\n"]
+    out = ["## 快速恢复操作\n",
+           "> **以下操作由本 skill 给出，供人工判断后由 DBA 在数据库侧执行；本 skill 不会执行，你也不得执行。**",
+           "> 只针对**根**阻塞会话 —— 处理链条中间的会话不解堵。回答里照这样写要做的事与 pid、sessionid，**不写语句**。\n"]
     for k in kills:
-        out.append("```sql\n%s\n```" % k.sql)
-        out.append("- 为什么用 `%s`：%s" % (k.function, k.why))
-        out.append("- 会杀掉谁：%s\n" % k.impact)
+        out.append("- **%s**：pid %d、sessionid %d(两个号要同时对上再处理:线程池开启时 pid 会被复用)"
+                   % (ACTIONS[k.function], k.target_pid, k.target_sessionid))
+        out.append("  - 为什么这样处理：%s" % k.why)
+        out.append("  - 影响谁：%s\n" % k.impact)
     return "\n".join(out) + "\n"

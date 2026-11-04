@@ -55,6 +55,16 @@ CASES = [
     ("bash", "cat /etc/hostname", True, True),
     ("bash", "grep -c root /etc/passwd", True, True),
     ("bash", "python3 %s/gaussdb-login/scripts/login.py --help" % SK, True, True),
+    # 2026-11-04:根提示词里写环境变量;opencode 按命令原文匹配、不展开变量
+    ("bash", "python3 $GSDB_SKILLS_DIR/gaussdb-login/scripts/login.py --help", True, True),
+    ("bash", 'python3 "$GSDB_SKILLS_DIR/gaussdb-login/scripts/login.py" --help 2>&1', True, True),
+    ("bash", "python3 ${GSDB_SKILLS_DIR}/gaussdb-login/scripts/login.py --help", True, True),
+    ("bash", "python3 $GSDB_ROOTSPEC_HOME/search_docs.py --list", True, True),
+    ("bash", "python3 ${GSDB_ROOTSPEC_HOME}/search_docs.py 锁等待 2>&1", True, True),
+    ("bash", "python3 $GSDB_SKILLS_DIR/../../../../tmp/w/evil.py", False, False),
+    ("bash", "python3 $GSDB_ROOTSPEC_HOME/../tmp/w/evil.py", False, False),
+    ("bash", "python3 $HOME/evil.py", False, False),
+    ("bash", "export GSDB_SKILLS_DIR=/tmp/w; python3 $GSDB_SKILLS_DIR/gaussdb-x/evil.py", None, None),
     ("write", {"filePath": "/tmp/w/written.txt", "content": "hi"}, False, True),
     ("webfetch", {"url": "https://example.com", "format": "text"}, False, False),
 ]
@@ -62,7 +72,7 @@ CASES = [
 # opencode 1.18.27 只对语法树里的「命令」节点生成匹配项;export / declare / typeset / readonly 是「声明命令」,
 # 不生成匹配项、不核对,任何规则都拦不到(2026-10-23 本脚本实测)。它们能打印本进程的环境 ——
 # 所以凭据根本不放进这个容器(凭据代理),环境里只剩本人的对话口令、报告令牌这类本来就是他自己的东西。
-GAPS = "export / declare 这类声明命令 opencode 不核对(已知;容器环境里没有凭据兜底)"
+GAPS = "export / declare 这类声明命令 opencode 不核对(已知;容器环境里没有凭据兜底;改指技能目录变量要有文件在那里,诊断容器写不了文件)"
 
 FAKE_MODEL = r'''
 import http.server, json, sys
@@ -104,7 +114,9 @@ set -e
 mkdir -p /tmp/cfg /tmp/oc /tmp/h /tmp/w /tmp/d /tmp/s /tmp/c
 cp -R /opt/agent/config/. /tmp/cfg/
 echo 'print("evil ran")' > /tmp/w/evil.py
+mkdir -p /tmp/w/gaussdb-x && cp /tmp/w/evil.py /tmp/w/gaussdb-x/evil.py   # export 改指变量那一条要有文件在那里
 export XDG_CONFIG_HOME=/tmp/cfg XDG_DATA_HOME=/tmp/d XDG_STATE_HOME=/tmp/s XDG_CACHE_HOME=/tmp/c HOME=/tmp/h
+export GSDB_SKILLS_DIR=$XDG_CONFIG_HOME/opencode/skills      # 同 entrypoint.sh;GSDB_ROOTSPEC_HOME 来自镜像 ENV
 export OPENCODE_CONFIG=/tmp/oc/opencode.json MODEL_PROXY_URL=http://127.0.0.1:9999/v1 MODEL_ID=fake AGENT_ROLE=__ROLE__
 python3 /opt/agent/podctl.py render-opencode-config --out /tmp/oc/opencode.json
 python3 /chk/fake_model.py 9999 /chk/cmds.json &

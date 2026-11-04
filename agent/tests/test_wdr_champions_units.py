@@ -37,7 +37,7 @@ class Runner:
         return self.rows[: int(params["top"])]
 
 
-def stmt(sid, elapsed_s, spill_mb=0.0, cpu_s=0.0, calls=1, phys=0, query="select 1"):
+def stmt(sid, elapsed_s, spill_mb=0.0, cpu_s=0.0, calls=1, phys=0, query="select * from fl.acct where id = ?"):
     return {"sid": sid, "query": query, "calls": str(calls), "elapsed_us": str(int(elapsed_s * 1e6)),
             "cpu_us": str(int(cpu_s * 1e6)), "spill_kb": str(int(spill_mb * 1024)), "phys_blocks": str(phys)}
 

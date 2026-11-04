@@ -215,7 +215,7 @@ def test_idle_xact_with_unknown_age_does_not_print_literal_none():
 
 def _root_edge():
     """让默认 _pair() 里的 holder（2259）在 chain 里被识别成根 ——
-    kill 语句只对根 holder 生成，不给这条边就永远没有 kill 语句可测。"""
+    恢复操作只对根 holder 生成，不给这条边就永远没有 恢复操作可测。"""
     return [{"sessionid": "2260", "block_sessionid": "2259"}]
 
 
@@ -224,7 +224,10 @@ def test_kill_statements_use_the_two_argument_session_aware_functions():
     不是单参数的 pg_cancel_backend/pg_terminate_backend。"""
     rep = lockwait.collect(_Runner(pairs=[_pair()], edges=_root_edge()), limit=20)
     md = lockwait.render_markdown(rep)
-    assert "pg_cancel_session(" in md or "pg_terminate_session(" in md
+    # 2026-11-04 起报告里写要做的事(取消语句 / 断开会话)与 pid、sessionid,不写调用系统函数的语句;
+    # 「两个号同时对上」就是会话感知的那一层,语句本身留在 KillStatement.sql(recovery 单测核对)
+    assert ("取消该会话正在执行的语句" in md or "断开该会话" in md) and "sessionid" in md and "同时对上" in md
+    assert "pg_cancel_session(" not in md and "pg_terminate_session(" not in md
     assert "pg_cancel_backend(" not in md
     assert "pg_terminate_backend(" not in md
 
@@ -233,7 +236,7 @@ def test_garbled_holder_pid_does_not_crash_kill_generation():
     """recovery.kill_for() 内部是裸 int(x or 0)——真实查询结果都是字符串，
     非数字字符串会让它抛。lockwait 是第一个把真实取数结果接进 kill_for()
     的调用方，责任在这一层：不能让这个 Traceback 冒到用户面前，也不能
-    编一个假 pid 生成一条看着正常、其实指向别的会话的 kill 语句。"""
+    编一个假 pid 生成一条看着正常、其实指向别的会话的 恢复操作。"""
     rep = lockwait.collect(
         _Runner(pairs=[_pair(holder_pid="not-a-number")], edges=_root_edge()),
         limit=20)
@@ -266,8 +269,8 @@ def test_kill_section_is_not_a_bare_none_when_chain_data_is_missing():
     最要紧的那个位置。"""
     rep = lockwait.collect(_Runner(pairs=[_pair()], edges=[]), limit=20)
     md = lockwait.render_markdown(rep)
-    assert "## 快速恢复语句" in md
-    section = md[md.index("## 快速恢复语句"):]
+    assert "## 快速恢复操作" in md
+    section = md[md.index("## 快速恢复操作"):]
     assert "无 —— 当前没有需要处理的根阻塞会话" not in section
     assert "未能确认根" in section
     assert "1" in section  # 数量要出现，不能只说"有一些"
@@ -275,7 +278,7 @@ def test_kill_section_is_not_a_bare_none_when_chain_data_is_missing():
 
 def test_kill_section_lists_both_confirmed_kill_and_unconfirmed_caveat():
     """混合场景：一对有 chain 数据能确认根，另一对完全没有——已确认的
-    kill 语句照常生成，未确认的说明也必须同时出现在同一小节里，
+    恢复操作照常生成，未确认的说明也必须同时出现在同一小节里，
     不能被已确认的那条挡住视线。"""
     edges = [{"sessionid": "2260", "block_sessionid": "2259"}]  # 只覆盖这一个 waiter
     confirmed_pair = _pair()  # waiter=2260, holder=2259 —— chain 能确认
@@ -284,18 +287,18 @@ def test_kill_section_lists_both_confirmed_kill_and_unconfirmed_caveat():
     rep = lockwait.collect(
         _Runner(pairs=[confirmed_pair, unconfirmed_pair], edges=edges), limit=20)
     md = lockwait.render_markdown(rep)
-    section = md[md.index("## 快速恢复语句"):]
-    assert "pg_cancel_session(" in section or "pg_terminate_session(" in section
+    section = md[md.index("## 快速恢复操作"):]
+    assert ("取消该会话正在执行的语句" in section or "断开该会话" in section) and "SELECT" not in section
     assert "未能确认根" in section
 
 
 def test_null_holder_pid_does_not_silently_become_zero():
     """holder_pid 缺失（NULL，协议里是空串）不能被 as_int() 的默认值 0
-    悄悄顶替——那会生成一条看着正常、其实 pid 是编出来的 kill 语句。"""
+    悄悄顶替——那会生成一条看着正常、其实 pid 是编出来的 恢复操作。"""
     rep = lockwait.collect(
         _Runner(pairs=[_pair(holder_pid="")], edges=_root_edge()), limit=20)
     md = lockwait.render_markdown(rep)
-    section = md[md.index("## 快速恢复语句"):]
+    section = md[md.index("## 快速恢复操作"):]
     assert "pg_cancel_session(0" not in section
     assert "pg_terminate_session(0" not in section
     assert "未能生成" in section
@@ -312,7 +315,7 @@ def test_null_holder_pid_does_not_silently_become_zero():
 @pytest.mark.parametrize("edges,pair_kwargs,label", [
     ([], {}, "pairs 存在，chain 完全没有该 waiter 的数据"),
     ([{"sessionid": "2260", "block_sessionid": "2259"}], {"holder_pid": ""},
-     "根已被 chain 确认，但 kill 语句因 pid 缺失而生成失败"),
+     "根已被 chain 确认，但 恢复操作因 pid 缺失而生成失败"),
     ([{"sessionid": "2260", "block_sessionid": "9999"}], {},
      "chain 确认了根（9999），但这个根没有出现在 pairs 的任何一行"
      "holder 里"),
@@ -326,8 +329,8 @@ def test_pairs_non_empty_never_yields_the_bare_none(edges, pair_kwargs, label):
         _Runner(pairs=[_pair(**pair_kwargs)], edges=edges), limit=20)
     assert rep.pairs, "前提：这一步必须真的产出非空 pairs，否则测试没有意义"
     md = lockwait.render_markdown(rep)
-    assert "## 快速恢复语句" in md
-    section = md[md.index("## 快速恢复语句"):]
+    assert "## 快速恢复操作" in md
+    section = md[md.index("## 快速恢复操作"):]
     assert "无 —— 当前没有需要处理的根阻塞会话" not in section, label
 
 
@@ -340,7 +343,7 @@ def test_unconfirmed_caveat_counts_by_pair_not_by_holder():
     pair_b = _pair(waiter_sessionid="3002", holder_sessionid="9000")
     rep = lockwait.collect(_Runner(pairs=[pair_a, pair_b], edges=[]), limit=20)
     md = lockwait.render_markdown(rep)
-    section = md[md.index("## 快速恢复语句"):]
+    section = md[md.index("## 快速恢复操作"):]
     assert "2 对阻塞关系" in section
     assert "3001" in section and "3002" in section
 
@@ -357,10 +360,10 @@ def test_unconfirmed_caveat_counts_by_pair_not_by_holder():
 
 def test_every_pair_is_accounted_for_in_the_recovery_section():
     """属性测试：一份报告里混了五种结果——
-      100 ← 200  根已确认，kill 语句成功生成
+      100 ← 200  根已确认，恢复操作成功生成
       101 ← 300  根是 999，但 999 没有作为任何一对的 holder 出现在 pairs 里（orphan_root）
       102 ← 400  chain 完全没有这个 waiter 的数据（data_gap）
-      103 ← 500  根已确认，但 holder_pid 缺失，kill 语句生成失败
+      103 ← 500  根已确认，但 holder_pid 缺失，恢复操作生成失败
       105 ← 250  链条中间节点：链条的根是 200，200 已经在上面被确认为根
     这不是按分支各写一条断言，而是不管走哪条分支、组合成什么样，
     rep.pairs 里出现过的每一个 waiter 会话号都必须能在"快速恢复语句"
@@ -384,8 +387,8 @@ def test_every_pair_is_accounted_for_in_the_recovery_section():
     rep = lockwait.collect(_Runner(pairs=pairs, edges=edges), limit=20)
     assert len(rep.pairs) == 5, "前提：五对都要真的活过冲突过滤，否则测试没有意义"
     md = lockwait.render_markdown(rep)
-    assert "## 快速恢复语句" in md
-    section = md[md.index("## 快速恢复语句"):]
+    assert "## 快速恢复操作" in md
+    section = md[md.index("## 快速恢复操作"):]
     for p in rep.pairs:
         wid = str(p.get("waiter_sessionid"))
         assert wid in section, (
@@ -515,8 +518,8 @@ def test_no_pair_is_claimed_covered_unless_the_chain_data_connects_it():
                 "信息的时候给了他一个错的肯定" % (label, w, h, h, root, h))
 
         md = lockwait.render_markdown(rep)
-        assert "## 快速恢复语句" in md, label
-        section = md[md.index("## 快速恢复语句"):]
+        assert "## 快速恢复操作" in md, label
+        section = md[md.index("## 快速恢复操作"):]
 
         # 本轮的不变量（渲染层）。
         for line in section.splitlines():

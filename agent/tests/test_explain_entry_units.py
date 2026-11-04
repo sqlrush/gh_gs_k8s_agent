@@ -210,7 +210,8 @@ def test_pid_on_gaussdb_missing_function_explains_in_chinese_then_falls_back(mon
     monkeypatch.setattr(explain_mod.access, "for_conn", lambda *a, **k: r)
     assert explain_mod.main(["--pid", "4321"]) == 0
     out = capsys.readouterr().out + capsys.readouterr().err
-    assert "GaussDB" in out and "gs_get_explain" in out and "pg_proc" in out and "升级" in out
+    assert "GaussDB" in out and "gs_get_explain" in out and "函数定义逐 database 独立" in out and "升级" in out
+    assert "FROM pg_proc" not in out, "排查提示写要核对什么,不写查数据字典的 SQL"
     assert "Seq Scan on t" in out                                          # 仍然给出了估算计划
 
 

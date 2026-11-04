@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """lockwait — 锁堵塞分析：谁挡了谁、挡在什么锁上、挡了多久、根源是谁。
 
-只读。生成的 kill 语句**只输出文本，不执行**。
+只读。生成的 恢复操作**只输出文本，不执行**。
 
 Usage:
     lockwait.py -c <conn> [--limit 20] [--format json] [--timeout 30]
@@ -241,7 +241,7 @@ def render_markdown(rep: LockReport) -> str:
         out.append("> **检测到死锁**：" + "；".join(
             " → ".join(str(s) for s in ring) + " → …回到起点"
             for ring in rep.deadlocks) + "\n")
-    # 本行知识库对这些锁发现怎么说——放在明细之前,处置建议(含下面的快速恢复语句)以它为首选依据。
+    # 本行知识库对这些锁发现怎么说——放在明细之前,处置建议(含下面的快速恢复操作)以它为首选依据。
     out.append(kb_section(rep.findings))
 
     body = []
@@ -347,7 +347,7 @@ def _classify_pairs(rep: LockReport) -> dict:
     前几轮的教训：先是只分 confirmed/unconfirmed 两类，遗漏了"根已确认
     但没出现在 pairs 里"的第三种情况；后来在渲染层用 `kills`/`reasons`
     两个聚合状态去判断该不该提示，又在"两条链混在一份报告里、一条成功
-    生成语句、另一条恰好落进第三类"时失效——聚合判断只关心"整体有没有
+    给出恢复操作、另一条恰好落进第三类"时失效——聚合判断只关心"整体有没有
     话可说"，看不见"某一条具体的 pair 有没有被照顾到"。于是把判断挪到
     最细的粒度：**每一对**必属其一，渲染层只管照着这些类如实转述，不再
     做任何整体性的"还有没有话说"式推断。
@@ -365,7 +365,7 @@ def _classify_pairs(rep: LockReport) -> dict:
 
     五类（对每一对 (waiter, holder)）：
 
-      root          holder 本身就是（某条链的）确认根——是 kill 语句的
+      root          holder 本身就是（某条链的）确认根——是 恢复操作的
                     直接对象。
       data_gap      chain 里完全没有这个 waiter 的数据（waiter_sid 不在
                     rep.roots 里）——不知道这个 holder 是不是根。
@@ -377,10 +377,10 @@ def _classify_pairs(rep: LockReport) -> dict:
                     holder 自己也在（传递地）等那个根，那个根又**确实**
                     作为某一对的 holder 出现在了 rep.pairs 里——这个
                     holder 是链条中间节点，处理根时会一并解开，真正该
-                    处理的根有另一对负责生成语句/说明。
+                    处理的根有另一对负责给出恢复操作/说明。
       orphan_root   同上，但那个根**没有**作为任何一对的 holder 出现在
                     rep.pairs 里——根已确认，却没有材料（pid/状态/
-                    query……）生成语句，需要人工继续查。
+                    query……）给出恢复操作，需要人工继续查。
 
     `lockwait.pairs` 与 `lockwait.chain` 是两条**独立、不同视图**上的
     查询，覆盖面不保证一致：data_gap、coblocker、orphan_root 都是这种
@@ -413,7 +413,7 @@ def _classify_pairs(rep: LockReport) -> dict:
 
 
 def _dedup_by_holder(pairs: list) -> list:
-    """按 holder 去重——生成 kill 语句只需要一条，同一个根挡了几个
+    """按 holder 去重——生成 恢复操作只需要一条，同一个根挡了几个
     waiter 不该重复杀。"""
     seen, out = set(), []
     for p in pairs:
@@ -439,7 +439,7 @@ def _dedup_by_waiter_and_holder(pairs: list) -> list:
 
 def _waiters_by_holder(pairs: list) -> dict:
     """holder_sessionid -> 被它挡住的 waiter_sessionid 列表（保留原始
-    字符串、去重、按出现顺序）。用来在 kill 语句/失败说明旁边标注
+    字符串、去重、按出现顺序）。用来在 恢复操作/失败说明旁边标注
     "这条语句预计解除了哪些会话"——`recovery.kill_for()` 只知道 holder，
     不知道被它挡住的是谁，这段追加要在 lockwait.py 这一层做。"""
     out: dict = {}
@@ -453,7 +453,7 @@ def _waiters_by_holder(pairs: list) -> dict:
 
 
 def _kill_statements(root_holders: list):
-    """给已确认的根 holder 生成 kill 语句。
+    """给已确认的根 holder 生成 恢复操作。
 
     recovery.kill_for() 内部是裸 `int(holder.get("holder_pid") or 0)`——
     在 brief 起草时输入还是假想的，可以不管；这里接的是真实查询结果，
@@ -466,8 +466,8 @@ def _kill_statements(root_holders: list):
         is_null() 单独挡一道，NULL 一律算失败，不让它混进 as_int()
         的默认值路径。
 
-    两种情况都不生成语句，把原因摆出来让人工核对，而不是生成一条看着
-    正常、其实指向假会话（pid=0）的 kill 语句。
+    两种情况都不给出恢复操作，把原因摆出来让人工核对，而不是生成一条看着
+    正常、其实指向假会话（pid=0）的 恢复操作。
     """
     kills, failures = [], []
     for p in root_holders:
@@ -475,7 +475,7 @@ def _kill_statements(root_holders: list):
         sid_raw = p.get("holder_sessionid")
         if is_null(pid_raw) or is_null(sid_raw):
             failures.append((p, "holder_pid/holder_sessionid 缺失（NULL），"
-                                "拒绝用默认值 0 顶替去生成 kill 语句"))
+                                "拒绝用默认值 0 顶替去生成 恢复操作"))
             continue
         try:
             safe = dict(p)
@@ -489,11 +489,11 @@ def _kill_statements(root_holders: list):
 
 
 def _render_recovery_section(rep: LockReport) -> str:
-    """渲染「## 快速恢复语句」整段。
+    """渲染「## 快速恢复操作」整段。
 
     **两条不变量（这是本函数存在的唯一理由）：**
 
-      1. `rep.pairs` 里的每一对，要么被一条已生成的 kill 语句覆盖，要么
+      1. `rep.pairs` 里的每一对，要么被一条已生成的 恢复操作覆盖，要么
          有一句写明的理由说明为什么没有。不允许任何一对因为"恰好还有
          别的对生成了语句/给出了理由"就被聚合状态判断悄悄放过。
       2. **没有任何一对可以在数据没有真正建立起连接的情况下被说成"已被
@@ -545,14 +545,14 @@ def _render_recovery_section(rep: LockReport) -> str:
                 # 一个 waiter 可以配出多个真冲突的 holder），这条语句只
                 # 解除它自己那一份。别的那几份在本节其余条目里各自有话。
                 notes.append(
-                    "> 会话 %s 的这条语句解除的是**它自己**挡住的这几个会话："
+                    "> 处理会话 %s 解除的是**它自己**挡住的这几个会话："
                     "%s（这些会话若同时还被别的会话挡着，那部分见本节其余说明）"
                     % (k.target_sessionid, "、".join(str(w) for w in waiters)))
         if notes:
             section += "\n" + "\n".join(notes)
     else:
-        section = ("## 快速恢复语句\n\n"
-                   "> **未生成任何 kill 语句**——原因见下，不代表当前"
+        section = ("## 快速恢复操作\n\n"
+                   "> **未生成任何 恢复操作**——原因见下，不代表当前"
                    "无需处理：\n")
 
     if kill_failures:
@@ -565,7 +565,7 @@ def _render_recovery_section(rep: LockReport) -> str:
         # 块之间空一行：markdown 里连续的 `>` 行会并成同一段，"已覆盖"
         # 与"没被覆盖"两段挤在一起时，读的人很容易只看见前一句。
         section += "\n\n" + (
-            "> **%d 个根 holder 的 kill 语句未能生成**（pid/sessionid "
+            "> **%d 个根 holder 的 恢复操作未能生成**（pid/sessionid "
             "缺失或不是合法数字，为避免编造数据已跳过，请人工核对该会话）：\n"
             % len(kill_failures) + "\n".join(lines))
 
@@ -582,7 +582,7 @@ def _render_recovery_section(rep: LockReport) -> str:
         # 块之间空一行：markdown 里连续的 `>` 行会并成同一段，"已覆盖"
         # 与"没被覆盖"两段挤在一起时，读的人很容易只看见前一句。
         section += "\n\n" + (
-            "> **%d 对阻塞关系没有被上面任何一条语句覆盖 —— 这些持有者是"
+            "> **%d 对阻塞关系没有被上面任何一条恢复操作覆盖 —— 这些持有者是"
             "独立的阻塞者，要各自单独处理**：`lockwait.pairs`（`pg_locks`）"
             "显示它们与等待者的锁模式确实互斥，等待者必须等它们释放；但"
             "`lockwait.chain`（`pg_thread_wait_status`）里没有任何数据表明"
@@ -591,7 +591,7 @@ def _render_recovery_section(rep: LockReport) -> str:
             "挡着（一条 DDL 等 AccessExclusive、被好几个 AccessShare 读者"
             "一起挡住是最平常的现场），链路数据里只会留下其中一个。**所以"
             "不能说处理掉根会话就顺带解决了它们**；也不给它们凭猜测生成 "
-            "kill 语句（它们自己可能同样在等别人，杀了不解堵）。请逐条确认"
+            "恢复操作（它们自己可能同样在等别人，处理了也不解堵）。请逐条确认"
             "这个会话在等谁、要不要单独处理：\n" % len(coblocker)
             + "\n".join(lines))
 
@@ -601,9 +601,9 @@ def _render_recovery_section(rep: LockReport) -> str:
         # 与"没被覆盖"两段挤在一起时，读的人很容易只看见前一句。
         section += "\n\n" + (
             "> **%d 对阻塞关系因阻塞链数据缺失，未能确认根 holder，"
-            "未生成对应 kill 语句**（`lockwait.pairs` 与 `lockwait.chain` "
+            "未生成对应 恢复操作**（`lockwait.pairs` 与 `lockwait.chain` "
             "是两条独立查询，覆盖面可能不一致；不能因为 chain 没提到就"
-            "当作「不是根」处理，也不能猜它是根去生成语句）：\n"
+            "当作「不是根」处理，也不能猜它是根去给出恢复操作）：\n"
             % len(data_gap)
             + "\n".join(
                 "> - 会话 %s ← %s（%s %s）"
@@ -629,7 +629,7 @@ def _render_recovery_section(rep: LockReport) -> str:
         # 与"没被覆盖"两段挤在一起时，读的人很容易只看见前一句。
         section += "\n\n" + (
             "> %d 对是阻塞链的中间节点，**已被针对根会话的处理覆盖**，因此"
-            "不单独生成语句（杀中间节点不解堵）；根会话本身的语句或说明见"
+            "不单独给出恢复操作（处理中间节点不解堵）；根会话本身的恢复操作或说明见"
             "本节其他条目：\n" % len(intermediate)
             + "\n".join(lines))
 
@@ -640,7 +640,7 @@ def _render_recovery_section(rep: LockReport) -> str:
         section += "\n\n" + (
             "> **%d 对阻塞关系的根会话已被阻塞链数据确认，但该根未出现在"
             "「阻塞明细」的持有者列里**（它可能持有的是链条上游、不在"
-            "本次 pairs 明细范围内的另一把锁），没有材料生成 kill 语句，"
+            "本次 pairs 明细范围内的另一把锁），没有材料生成 恢复操作，"
             "需人工进一步排查：\n" % len(orphan_root)
             + "\n".join(
                 "> - 会话 %s ← %s（根是会话 %s，未出现在明细持有者列里）"
@@ -721,7 +721,7 @@ def run_span(runner, args) -> int:
 
 def main(argv: Optional[list] = None) -> int:
     ap = argparse.ArgumentParser(prog="lockwait.py",
-                                 description="锁堵塞分析（只读；kill 语句只生成不执行）")
+                                 description="锁堵塞分析（只读；恢复操作只生成不执行）")
     ap.add_argument("-c", "--conn", default="", help="连接名（省略则用 gaussdb-login 建立的会话）")
     cli.add_session_arg(ap)
     ap.add_argument("--limit", type=int, default=20, help="阻塞明细条数上限")
@@ -730,7 +730,7 @@ def main(argv: Optional[list] = None) -> int:
     # 死锁明细只在数据库日志里(次数之外数据库不留),本工具读不到日志 —— 由用户把日志段给过来
     ap.add_argument("--deadlock-log", default="", metavar="文件|-",
                     help="解析数据库日志里的死锁段(含 deadlock detected 的那几段);- 表示从标准输入读。不连库")
-    # 时段回看:读活跃会话采样(gs_asp),不生成 kill 语句(见 aspchain.py)
+    # 时段回看:读活跃会话采样(gs_asp),不生成 恢复操作(见 aspchain.py)
     ap.add_argument("--from", dest="from_", default="", metavar="'YYYY-MM-DD HH:MM'",
                     help="时段回看起点(数据库所在时区);给了就不看此刻,改读活跃会话采样")
     ap.add_argument("--to", default="", metavar="'YYYY-MM-DD HH:MM'", help="时段回看终点;不给 = 到此刻")

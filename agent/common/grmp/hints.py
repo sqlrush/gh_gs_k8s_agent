@@ -63,12 +63,12 @@ def _function_hint(text: str) -> str:
         return ""
     name, args = m.group(1).strip('"'), (m.group(2) or "").strip()
     return (
-        f"函数 {name} 按「名字 + 实参类型({args or '无参'})」在当前 database 的 pg_proc 里找不到匹配。"
+        f"函数 {name} 按「名字 + 实参类型({args or '无参'})」在当前 database 里找不到匹配的函数定义。"
         f"报错里的实参类型是**调用时传的**,不代表已存在的重载。三种原因分开查:"
         f"① 函数存在但实参类型不符(int8→int4 无隐式转换;注意 505.2.1.SPC0600 实测签名是 gs_get_explain(bigint),"
-        f"文档写的 (integer) 已过时,pid 是 64 位线程号应按 bigint 传)——按 pg_proc 里的真实签名显式转型;"
-        f"② pg_proc 逐 database 独立——在脚本连接的同一个 database 里执行 "
-        f"SELECT proname, pg_get_function_arguments(oid) FROM pg_proc WHERE proname = '{name}',并与 postgres 库比对;"
+        f"文档写的 (integer) 已过时,pid 是 64 位线程号应按 bigint 传)——按库里的真实签名显式转型;"
+        f"② 函数定义逐 database 独立——请 DBA 在脚本连接的同一个 database 里核对 {name} 是否存在、参数签名是什么,"
+        f"并与 postgres 库比对;"
         f"③ 集群升级后 catalog 升级未提交,新函数尚未写入。openGauss 本身没有 gs_get_explain / gs_get_kernel_info,"
         f"对 openGauss 这不算异常"
     )
@@ -90,9 +90,8 @@ def _relation_hint(text: str) -> str:
                 f"对照 whitelist.md 里的 SQL 与目标实例版本")
     return (f"表 / 视图 {name} 找不到,而它没带 schema:多半不是不存在,是执行账号的 search_path 里没有它所在的 schema。"
             f"业务 SQL 的表名靠应用账号的 search_path 解析,中间件执行账号的 search_path 默认是 \"$user\", public。"
-            f"核对:SELECT current_schemas(true); 与 SELECT nspname FROM pg_namespace n JOIN pg_class c ON c.relnamespace = n.oid "
-            f"WHERE c.relname = '{name}';。解决:由 DBA 给执行账号在该库上设置 search_path 包含业务 schema"
-            f"(ALTER ROLE <执行账号> IN DATABASE <库> SET search_path = <业务schema>, public),或在 SQL 里写全 schema.表 后重跑")
+            f"核对:请 DBA 确认执行账号当前的 search_path,以及 {name} 实际所在的 schema。"
+            f"解决:由 DBA 给执行账号在该库上把 search_path 设成包含业务 schema,或在 SQL 里写全 schema.表 后重跑")
 
 
 def explain(text: str) -> str:

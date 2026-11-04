@@ -291,7 +291,7 @@ def test_locate_report_shows_adm_line_and_grant_only_when_denied():
         _resolve(runner, "gmag.proc_daily")
     md = proc_locate.report(runner, "proctune", ei.value)
     assert "- ADM_SOURCE 兜底:没取到 —— 执行账号没有 ADM_SOURCE 的读权限" in md
-    assert "GRANT SELECT ON pg_catalog.adm_source TO" in md
+    assert "授 ADM_SOURCE 的读权限" in md and "GRANT" not in md
     js = proc_locate.report(runner, "proctune", ei.value, fmt="json")
     assert '"denied": true' in js
 

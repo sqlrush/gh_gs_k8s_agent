@@ -107,7 +107,7 @@ def test_old_interp_still_renders(tmp_path):
 
 def test_kb_refs_are_coloured_by_script_and_fabricated_ones_dropped(tmp_path):
     out = finalreport.render_report(_ev(), _interp(), kb_dir=_kb(tmp_path))
-    good = "<font color=#2f6fdb>DDL 变更时会话级锁等待上限不超过 30 秒</font>(引用自贵行规范库 GS-CHG-003)"
+    good = "<font color=#2f6fdb>DDL 变更时会话级锁等待上限不超过 30 秒</font>(引用自本行规范库 GS-CHG-003)"
     assert good in out.split("## ③ 解决方案")[0]
     body, appendix = out.split("## 附录")
     assert "GS-CHG-999" not in body and "编出来的一条" not in out
@@ -124,7 +124,7 @@ def test_ansi_follows_the_same_order_and_drops_tags(tmp_path):
     out = finalreport.render_report(_ev(), _interp(summary="s"), fmt="ansi", no_color=True, kb_dir=_kb(tmp_path))
     pos = [out.index(h) for h in ("① 负载画像", "② 问题与元凶", "③ 解决方案", "④ 总结和结论", "附录")]
     assert pos == sorted(pos)
-    assert "<font" not in out and "(引用自贵行规范库 GS-CHG-003)" in out
+    assert "<font" not in out and "(引用自本行规范库 GS-CHG-003)" in out
 
 
 def test_interp_json_new_keys_parse_and_bad_values_are_ignored():
@@ -171,4 +171,4 @@ def test_kb_refs_resolve_in_a_fresh_process(tmp_path):
             % (str(scripts), str(_ROOT), str(kb)))
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=str(scripts))
     assert out.returncode == 0, out.stderr
-    assert "(引用自贵行规范库 GS-CHG-003)" in out.stdout and "GS-CHG-999:未找到" in out.stdout
+    assert "(引用自本行规范库 GS-CHG-003)" in out.stdout and "GS-CHG-999:未找到" in out.stdout

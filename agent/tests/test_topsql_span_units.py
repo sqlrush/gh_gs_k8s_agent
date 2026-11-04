@@ -39,7 +39,7 @@ SNAPS = {2980: "2026-10-17 10:45:29", 2981: "2026-10-17 10:46:29",
          2986: "2026-10-17 11:06:55", 2988: "2026-10-17 11:41:13"}
 
 
-def stmt(sid, calls, total_sec, rows=0, query="select 1"):
+def stmt(sid, calls, total_sec, rows=0, query="select * from fl.acct where id = ?"):
     return {"unique_sql_id": sid, "query": query, "calls": str(calls), "total_sec": str(total_sec),
             "avg_ms": "0", "rows": str(rows)}
 
@@ -155,8 +155,7 @@ def test_a_past_window_is_the_difference_of_the_two_snapshots_around_it(rdir, mo
     assert rep["window"] == {"begin_ts": "2026-10-17 10:46:29", "end_ts": "2026-10-17 11:06:55"}
     idx = json.loads((d / "index.json").read_text(encoding="utf-8"))
     assert idx[-1]["mode"] == "span" and idx[-1]["window"]["begin_ts"] == "2026-10-17 10:46:29"
-    assert ("run=%s" % files[0]) in err, "大盘链接要钉住这一份时段榜"
-    assert "from=2026-10-17T10%3A46" in err
+    assert "已存入报告存档" in err and "/dash/" not in err, "回答里不给报告链接"
 
 
 def test_from_without_snapshots_or_clock_is_an_error_not_a_silent_fallback(rdir, monkeypatch, capsys):

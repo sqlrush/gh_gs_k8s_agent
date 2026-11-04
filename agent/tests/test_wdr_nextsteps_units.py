@@ -84,7 +84,7 @@ class Runner:
         return self.rows
 
 
-def _row(sid, elapsed_s, cpu_s, spill_kb=0, calls=1, query="SELECT 1"):
+def _row(sid, elapsed_s, cpu_s, spill_kb=0, calls=1, query="SELECT * FROM fl.acct WHERE id = ?"):
     return {"sid": sid, "query": query, "calls": str(calls),
             "elapsed_us": str(int(elapsed_s * 1e6)), "cpu_us": str(int(cpu_s * 1e6)),
             "spill_kb": str(spill_kb), "phys_blocks": "0"}

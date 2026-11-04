@@ -32,11 +32,13 @@ def test_no_link_when_nothing_was_archived_or_the_skill_has_no_page():
     assert reports.dash_link("sqltune", pathlib.Path("/r/x.json"), "k") == "", "调优没有自己的大盘页"
 
 
-def test_announce_goes_to_stderr_only(capsys):
-    reports.announce("health", pathlib.Path("/r/health/k/20261016T072321Z.json"), "k")
+def test_announce_goes_to_stderr_only_and_gives_no_link(capsys):
+    """报告由行方前端调用:标准错误只说已存档,不给链接、不叫模型放进回答;地址只作返回值。"""
+    link = reports.announce("health", pathlib.Path("/r/health/k/20261016T072321Z.json"), "k")
     out, err = capsys.readouterr()
     assert out == "", "stdout 留给报告本身(JSON 模式要纯 JSON)"
-    assert "已存入大盘" in err and "/dash/health?inst=k&run=20261016T072321Z.json" in err
+    assert "已存入报告存档" in err and "/dash/" not in err and "打开报告" not in err
+    assert link == "/dash/health?inst=k&run=20261016T072321Z.json"
 
 
 def test_announce_is_silent_without_an_archive(capsys):
@@ -67,4 +69,4 @@ def test_kb_link_is_the_one_shared_page(capsys):
     assert reports.dash_link("kb", pathlib.Path("/r/kb/health.json"), "") == "/dash/kb"
     reports.announce("kb", pathlib.Path("/r/kb/health.json"), "")
     out, err = capsys.readouterr()
-    assert out == "" and "[打开知识库大盘](/dash/kb)" in err
+    assert out == "" and "已存入报告存档" in err and "/dash/kb" not in err

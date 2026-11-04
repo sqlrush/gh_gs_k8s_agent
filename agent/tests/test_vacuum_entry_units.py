@@ -302,7 +302,8 @@ def test_kernel_info_is_silent_on_opengauss():
 def test_kernel_info_missing_on_gaussdb_is_explained_in_chinese():
     rep = vacuum.collect(_Runner(version=_GAUSS), limit=20, th=_th())
     md = vacuum.render_markdown(rep)
-    assert "gs_get_kernel_info" in md and "GaussDB" in md and "pg_proc" in md and "升级" in md
+    assert "gs_get_kernel_info" in md and "GaussDB" in md and "函数定义逐 database 独立" in md and "升级" in md
+    assert "SELECT proname" not in md
 
 
 def test_kernel_info_call_failure_does_not_break_the_report():

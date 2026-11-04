@@ -31,7 +31,7 @@ con.commit()
 keys = ("GSDB_USER_ID", "OPENCODE_SERVER_PASSWORD", "XDG_DATA_HOME", "XDG_STATE_HOME", "GSDB_HOME",
         "GSDB_REPORTS_DIR", "GSDB_KB_DIR", "SANDBOX_CONTROL_KEY", "GRMP_AUTH_TOKEN", "REPORTS_TOKEN", "HOME",
         "OPENCODE_CONFIG", "XDG_CONFIG_HOME", "PYTHONPATH", "MODEL_API_KEY", "GRMP_SM2_PRIVATE_KEY", "MODEL_PROXY_URL",
-        "GRMP_PROXY_SOCKET")
+        "GRMP_PROXY_SOCKET", "GSDB_SKILLS_DIR")
 (out / "env.json").write_text(json.dumps(dict({k: os.environ.get(k) for k in keys}, cwd=os.getcwd(),
                                               pid=os.getpid())), encoding="utf-8")
 _auth = "Basic " + base64.b64encode(("opencode:%s" % pw).encode()).decode()

@@ -61,7 +61,7 @@ def test_slowsql_drops_system_sql_keeps_the_list_full_and_says_so():
     assert r.calls[0][1]["limit"] == 3 + slowsql.syssql.SCREEN_MARGIN, "要多取余量"
     assert ("sqlfetch.from_statement", {"sid": 3}) in r.calls, "180 字截断的那条要补全文再判"
     assert screening.excluded_ids == ["1", "3"]
-    assert "已排除 2 条内核系统 SQL" in screening.note() and "52.5 秒" in screening.note()
+    assert "已排除 2 条非业务 SQL" in screening.note() and "52.5 秒" in screening.note()
 
 
 def test_slowsql_include_system_keeps_everything():
@@ -72,13 +72,14 @@ def test_slowsql_include_system_keeps_everything():
     assert r.calls[0][1]["limit"] == 5
 
 
-def test_slowsql_markdown_carries_the_note_and_the_way_back(monkeypatch, capsys):
+def test_slowsql_markdown_carries_the_note_but_does_not_invite_system_sql(monkeypatch, capsys):
+    """2026-11-04:榜上只列业务 SQL,不再提示「加 --include-system 连系统 SQL 一起看」。"""
     rows = [_slow("1", WDR_THREAD), _slow("2", "UPDATE fl.a SET x = ?")]
     monkeypatch.setattr(slowsql.access, "for_conn", lambda conn, timeout=None: _Runner(rows))
     monkeypatch.setattr(slowsql.cli, "apply_session_arg", lambda args: None)
     assert slowsql.main(["-c", "x"]) == 0
     out = capsys.readouterr().out
-    assert "已排除 1 条内核系统 SQL" in out and "--include-system" in out
+    assert "已排除 1 条非业务 SQL" in out and "include-system" not in out
     assert "summary_statio_all_indexes" not in out
 
 
@@ -88,7 +89,7 @@ def test_slowsql_says_the_ranking_was_all_system_sql_not_that_stats_are_off(monk
     monkeypatch.setattr(slowsql.cli, "apply_session_arg", lambda args: None)
     assert slowsql.main(["-c", "x"]) == 0
     out = capsys.readouterr().out
-    assert "平均耗时超过 1000 ms 的 1 条全是内核系统 SQL,没有业务语句" in out and "enable_stmt_track" not in out
+    assert "平均耗时超过 1000 ms 的 1 条全是非业务 SQL(内核、数据字典、会话设置、运维管理等),没有业务语句" in out and "enable_stmt_track" not in out
 
 
 def _drow(sid, query, total):
@@ -110,7 +111,7 @@ def test_topsql_window_screens_before_cutting_the_list():
                                          ("3", "SELECT * FROM fl.b", 3, 30.0)])
     res = delta_mod.diff(before, after, 600, limit=2, screen=topsql._screener(_Runner([]), False))
     assert [r.sql_id for r in res.rows] == ["2", "3"]
-    assert res.system_sql["excluded"] == ["1"] and "--include-system" in topsql._screen_line(res.system_sql)
+    assert res.system_sql["excluded"] == ["1"] and "include-system" not in topsql._screen_line(res.system_sql)
     plain = delta_mod.diff(before, after, 600, limit=2)
     assert [r.sql_id for r in plain.rows] == ["1", "2"] and plain.system_sql is None
 
@@ -134,6 +135,6 @@ def test_topsql_cumulative_json_keeps_its_shape_and_archives_the_exclusion(monke
     assert topsql.main(["-c", "x", "--format", "json", "--limit", "2"]) == 0
     cap = capsys.readouterr()
     assert [r["sql_id"] for r in json.loads(cap.out)] == ["2", "3"], "stdout 仍是行列表"
-    assert "已排除 1 条内核系统 SQL" in cap.err
+    assert "已排除 1 条非业务 SQL" in cap.err
     saved = [json.loads(p.read_text(encoding="utf-8")) for p in tmp_path.rglob("*.json")]
     assert any(isinstance(d, dict) and (d.get("system_sql") or {}).get("excluded") == ["1"] for d in saved)

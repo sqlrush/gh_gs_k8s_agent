@@ -83,7 +83,7 @@ def test_health_partial_run_is_not_archived_as_a_patrol(rdir, monkeypatch, scope
 def test_topsql_main_archives_with_by_in_name(rdir, monkeypatch):
     _load("gaussdb-topsql", "topsql", "render")
     import topsql  # noqa: E402
-    rows = [topsql.StmtRow(sql_id="1a9f", query="select 1", calls=3, total_sec=1.5, avg_ms=500.0, rows=3)]
+    rows = [topsql.StmtRow(sql_id="1a9f", query="select * from fl.acct where id = ?", calls=3, total_sec=1.5, avg_ms=500.0, rows=3)]
     monkeypatch.setattr(topsql.access, "for_conn", lambda *a, **k: object())
     monkeypatch.setattr(topsql, "top_sql", lambda runner, by, limit: rows)
     monkeypatch.setattr(topsql.common.config, "resolved_name", lambda c: "og")
@@ -207,11 +207,15 @@ def test_health_announces_the_dashboard_link_on_stderr_and_keeps_stdout_pure_jso
     monkeypatch.setattr(health.aggregate, "collect_all", lambda *a, **k: [])
     monkeypatch.setattr(health, "run_health", lambda *a, **k: model.HealthEvidence(conn="og"))
     monkeypatch.setattr(health.common.config, "resolved_name", lambda c: "og")
+    links = []
+    _real = reports.announce
+    monkeypatch.setattr(reports, "announce", lambda *a, **k: links.append(_real(*a, **k)) or links[-1])
     assert health.main(["-c", "og", "--format", "json"]) == 0
     out, err = capsys.readouterr()
     json.loads(out)                                   # 多一行就不是合法 JSON 了
     run = json.loads((rdir / "health" / "og" / "index.json").read_text(encoding="utf-8"))[-1]["file"]
-    assert "已存入大盘:[打开报告](/dash/health?inst=og&run=%s)" % run in err
+    assert "已存入报告存档" in err and "/dash/" not in err and "打开报告" not in err
+    assert links[-1] == "/dash/health?inst=og&run=%s" % run
 
 
 def test_partial_health_run_gives_no_link(rdir, monkeypatch, capsys):
@@ -222,7 +226,7 @@ def test_partial_health_run_gives_no_link(rdir, monkeypatch, capsys):
     monkeypatch.setattr(health, "run_health", lambda *a, **k: model.HealthEvidence(conn="og"))
     monkeypatch.setattr(health.common.config, "resolved_name", lambda c: "og")
     health.main(["-c", "og", "--include", "logs"])
-    assert "已存入大盘" not in capsys.readouterr().err, "没存档就不能给链接"
+    assert "已存入报告存档" not in capsys.readouterr().err, "没存档就不能说已存档"
 
 
 def test_topsql_link_opens_the_same_sort_tab(rdir, monkeypatch, capsys):
@@ -231,9 +235,13 @@ def test_topsql_link_opens_the_same_sort_tab(rdir, monkeypatch, capsys):
     monkeypatch.setattr(topsql.access, "for_conn", lambda *a, **k: object())
     monkeypatch.setattr(topsql, "top_sql", lambda runner, by, limit: [])
     monkeypatch.setattr(topsql.common.config, "resolved_name", lambda c: "api/10-0-0-9-postgres")
+    links = []
+    _real = reports.announce
+    monkeypatch.setattr(reports, "announce", lambda *a, **k: links.append(_real(*a, **k)) or links[-1])
     assert topsql.main(["-c", "x", "--by", "avg"]) == 0
-    assert ("已存入大盘:[打开报告](/dash/topsql?inst=api_10-0-0-9-postgres&by=avg)"
-            in capsys.readouterr().err)
+    err = capsys.readouterr().err
+    assert "已存入报告存档" in err and "/dash/" not in err and "打开报告" not in err
+    assert links[-1] == "/dash/topsql?inst=api_10-0-0-9-postgres&by=avg"
 
 
 def test_wdr_collect_link_and_window_in_the_index(rdir, monkeypatch, capsys):
@@ -245,9 +253,13 @@ def test_wdr_collect_link_and_window_in_the_index(rdir, monkeypatch, capsys):
     monkeypatch.setattr(wdr.access, "for_conn", lambda *a, **k: object())
     monkeypatch.setattr(wdr, "collect_evidence", lambda runner, opt: ev)
     monkeypatch.setattr(wdr.common.config, "resolved_name", lambda c: "og")
+    links = []
+    _real = reports.announce
+    monkeypatch.setattr(reports, "announce", lambda *a, **k: links.append(_real(*a, **k)) or links[-1])
     assert wdr.main(["collect", "-c", "og", "--begin", "2936", "--end", "2937", "--format", "json"]) == 0
     out, err = capsys.readouterr()
     json.loads(out)
-    assert "已存入大盘:[打开报告](/dash/wdr?inst=og&run=" in err
+    assert "已存入报告存档" in err and "/dash/" not in err and "打开报告" not in err
+    assert links[-1].startswith("/dash/wdr?inst=og&run=")
     idx = json.loads((rdir / "wdr" / "og" / "index.json").read_text(encoding="utf-8"))
     assert idx[-1]["window"]["begin_id"] == 2936 and idx[-1]["window"]["end_ts"] == "2026-10-16 15:26:46"

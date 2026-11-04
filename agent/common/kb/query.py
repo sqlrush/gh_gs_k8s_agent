@@ -273,7 +273,7 @@ class KbSession:
         self.alias = ""                 # 当前连接别名(诊断 skill 的会话),用来匹配环境画像
         self._catalog = None
         self._triples = None
-        # 官方文档集:各自的索引、单独的候选池(几万块官方文档不许把贵行的规范与案例挤出候选)
+        # 官方文档集:各自的索引、单独的候选池(几万块官方文档不许把本行的规范与案例挤出候选)
         self.docsets: List[Tuple[Any, "ssq.SqliteStore", bool]] = []
 
     # --- 八类知识 / 分层(条目元数据从文件现读;拿不到就当没有,检索照常)---------------

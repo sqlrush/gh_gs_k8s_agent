@@ -359,9 +359,9 @@ def test_current_alias_maps_the_api_connection_back_to_the_login_alias(monkeypat
     assert kbquery.current_alias() == ""
 
 
-def test_kb_health_gives_the_dashboard_link_when_archived(kb, monkeypatch, tmp_path):
-    """查询 skill 的 health 存档后给大盘知识库页的直达链接(子进程继承 GSDB_REPORTS_DIR)。"""
+def test_kb_health_archives_and_says_so_without_a_link(kb, monkeypatch, tmp_path):
+    """查询 skill 的 health 存档(子进程继承 GSDB_REPORTS_DIR),标准错误说已存档;2026-11-04 起报告由行方前端调用,不给链接。"""
     monkeypatch.setenv("GSDB_REPORTS_DIR", str(tmp_path / "reports"))
     rc, out = _query_main()("health", "--kb", str(kb))
     assert (tmp_path / "reports" / "kb" / "health.json").is_file()
-    assert "[打开知识库大盘](/dash/kb)" in out
+    assert "已存入报告存档" in out and "/dash/kb" not in out, "报告由行方前端调用,回答里不给大盘链接"

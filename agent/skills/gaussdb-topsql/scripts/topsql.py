@@ -134,7 +134,7 @@ def _screener(runner, include_system: bool):
 
 def _screen_line(system_sql: Optional[dict]) -> str:
     note = (system_sql or {}).get("note") or ""
-    return ("\n> %s要连系统 SQL 一起看,加 `--include-system`。\n" % note) if note else ""
+    return ("\n> %s\n" % note) if note else ""
 
 
 def _sample(runner, at: str) -> "delta_mod.Sample":

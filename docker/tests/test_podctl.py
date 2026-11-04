@@ -357,6 +357,12 @@ _SKILLS = "/data/config/opencode/skills"
     "python3 /workspace/search_docs.py 锁等待 变更窗口", "python3 /workspace/search_docs.py --list",
     "python3 /workspace/search_docs.py --show /workspace/docs/根规范-1.md --from 40 2>&1", "python /workspace/search_docs.py DDL",
     "cat /workspace/docs/根规范-1.md", "grep -n DDL /workspace/docs/根规范-2.md",
+    # 根提示词里写的是环境变量:opencode 按原文匹配、不展开,这些写法都要放行
+    "python3 $GSDB_SKILLS_DIR/gaussdb-kb/scripts/kb.py query --q 锁等待", "python3 ${GSDB_SKILLS_DIR}/gaussdb-login/scripts/login.py --status",
+    'python3 "$GSDB_SKILLS_DIR/gaussdb-kb/scripts/kb.py" show GS-CHG-003', "python3 $GSDB_SKILLS_DIR/gaussdb-health/scripts/health.py 2>&1",
+    "python3 $GSDB_ROOTSPEC_HOME/search_docs.py 锁等待", "python3 $GSDB_ROOTSPEC_HOME/search_docs.py --list",
+    "python3 ${GSDB_ROOTSPEC_HOME}/search_docs.py --show x.docx", 'python3 "$GSDB_ROOTSPEC_HOME/search_docs.py" DDL 2>/dev/null',
+    "ls $GSDB_KB_DIR", "cat $GSDB_ROOTSPEC_HOME/docs/根规范-1.md", "echo $GSDB_SKILLS_DIR",
 ])
 def test_bash_allows_skill_scripts_and_read_only_commands(cmd):
     assert _opencode_decides(podctl.opencode_permissions({})["bash"], cmd) == "allow", cmd
@@ -379,9 +385,23 @@ def test_bash_allows_skill_scripts_and_read_only_commands(cmd):
     # /workspace 下只放行检索脚本这一个
     "python3 /workspace/other.py", "python3 /workspace/docs/x.py", "python3 /workspace/search_docs.py x > /tmp/out",
     "python3 /workspace/search_docs.py/../../../tmp/evil.py", "python3 /workspace/search_docs.py.bak",
+    # 变量写法同样只放行技能脚本与检索脚本这两处
+    "python3 $GSDB_SKILLS_DIR/../../../tmp/evil.py", "python3 $GSDB_SKILLS_DIR/gaussdb-x/../../../tmp/evil.py",
+    "python3 $GSDB_ROOTSPEC_HOME/other.py", "python3 $GSDB_ROOTSPEC_HOME/docs/x.py", "python3 $GSDB_KB_DIR/x.py",
+    "python3 $GSDB_ROOTSPEC_HOME/search_docs.py x > /tmp/out", "python3 $HOME/gaussdb-x/a.py", "python3 $GSDB_SKILLS_DIRX/gaussdb-a/a.py",
 ])
 def test_bash_denies_env_reads_writes_and_anything_else(cmd):
     assert _opencode_decides(podctl.opencode_permissions({})["bash"], cmd) == "deny", cmd
+
+
+def test_skills_dir_is_the_one_the_rules_allow():
+    """$GSDB_SKILLS_DIR(entrypoint.sh / poolrun 设)与权限规则用同一算法,提示词里的变量展开后一定被放行。"""
+    assert podctl.skills_dir({}) == "/data/config/opencode/skills"
+    assert podctl.skills_dir({"XDG_CONFIG_HOME": "/pool/cfg/"}) == "/pool/cfg/opencode/skills"
+    sh = (pathlib.Path(__file__).resolve().parents[1] / "entrypoint.sh").read_text(encoding="utf-8")
+    assert "export GSDB_SKILLS_DIR=$XDG_CONFIG_HOME/opencode/skills" in sh
+    df = (pathlib.Path(__file__).resolve().parents[1] / "Dockerfile").read_text(encoding="utf-8")
+    assert "ENV GSDB_ROOTSPEC_HOME=/workspace" in df
 
 
 def test_skill_path_follows_xdg_config_home():

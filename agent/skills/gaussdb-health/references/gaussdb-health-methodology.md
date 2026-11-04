@@ -41,7 +41,7 @@
 ### Transaction Locks & Blocking Chains（事务锁与阻塞链）
 - `pg_locks` 自连接递归构链（GaussDB 无 `pg_blocking_pids()`）。看**根阻塞者**、链深、被阻会话数、阻塞时长。
 - 根阻塞者若是 `idle in transaction` → 严重度升级：这是最典型、最该先处置的场景（解一个根 IIT 往往解开整条链）。
-- 处置建议：业务确认根阻塞 pid 可中断后由人工 `SELECT pg_terminate_backend(<pid>);`；并排查应用事务边界。**gaussdb-health 绝不自动 kill。**
+- 处置建议：业务确认根阻塞会话可中断后，由 DBA 人工断开该会话（写明 pid 与 sessionid，不写语句）；并排查应用事务边界。**gaussdb-health 绝不自动断开会话。**
 
 ### Connections（连接）
 - `pg_stat_activity` 按 state 分布，只数 `sessionid <> 0` 的会话（开线程池时 `sessionid = 0` 的是空闲工作线程条目，不是会话）。此维为上下文证据，本身不产严重度发现（连接使用率的严重度在 Overview，长/空闲事务在 Xact）。

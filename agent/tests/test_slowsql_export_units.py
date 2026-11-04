@@ -26,7 +26,7 @@ class _Runner:
 
     def run(self, script, values=None):
         return [
-            {"unique_sql_id": str(i), "query": "SELECT %d" % i, "calls": "1",
+            {"unique_sql_id": str(i), "query": "SELECT c%d FROM fl.acct WHERE id = ?" % i, "calls": "1",
              "avg_ms": "1.0", "total_sec": "1.0", "cpu_sec": "1.0", "rows": "1"}
             for i in range(self.n)
         ]

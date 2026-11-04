@@ -336,7 +336,7 @@ def test_contract_tells_the_model_to_mark_kb_content_blue():
     text = _template()
     assert KB_MARK in text and OFFICIAL_MARK in text
     assert "不上色" in text, "要写明哪些不上色:诊断结果、你自己的分析、通用经验"
-    assert "(引用自" in text and "贵行规范库" in text and "GaussDB 官方文档库" in text, "句后括号写出处,库名按类型"
+    assert "(引用自" in text and "本行规范库" in text and "GaussDB 官方文档库" in text, "句后括号写出处,库名按类型"
     assert "知识库中未找到相关内容,以下为通用知识,仅供参考" in text, "兜底说法统一成这一种"
     assert "代码块里不放标签" in text, "代码块里的标签不变色,还会原样露出来"
     assert "不加引号" in text and "加粗" in text, "引号被写成中文引号、标签里加粗,都会让蓝色失效(测试环境实测)"
@@ -1120,6 +1120,7 @@ def test_agents_md_only_sends_the_model_to_paths_that_exist():
     与 /workspace/docs/(docker/Dockerfile 公共阶段),权限也放行它(docker/podctl.py)。提示词里的路径只能是这两个。"""
     text = (_ROOT / "AGENTS.md").read_text(encoding="utf-8")
     assert "本环境没有 `/workspace`" not in text
-    assert set(re.findall(r"/workspace/[\w./-]*", text)) <= {"/workspace/search_docs.py", "/workspace/docs/"}
+    assert set(re.findall(r"\$GSDB_ROOTSPEC_HOME/[\w./-]*", text)) <= {"$GSDB_ROOTSPEC_HOME/search_docs.py", "$GSDB_ROOTSPEC_HOME/docs/"}
+    assert "/workspace" not in text, "路径写环境变量 $GSDB_ROOTSPEC_HOME(镜像 ENV),不写绝对路径"
     assert "不要猜路径" in text and "kb.py query" in text and "kb.py show" in text
     assert "看文件内容用 read 工具" in text, "模型用 sed -n 看文件片段被拦(同一次测试),要指给它能用的办法"

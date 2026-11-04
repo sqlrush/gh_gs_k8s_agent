@@ -134,3 +134,12 @@ def test_render_of_nothing_is_explicit():
     out = render_kills([])
     assert out.strip(), "空结果必须有明确文字"
     assert "无" in out
+
+
+def test_render_writes_the_action_not_the_statement():
+    """2026-11-04:回答里不出现系统 SQL —— 报告写要做的事与 pid、sessionid,语句只留在 KillStatement.sql。"""
+    k = kill_for(_holder())
+    out = render_kills([k])
+    assert k.sql not in out and "SELECT" not in out and "pg_" not in out
+    assert "pid %d" % k.target_pid in out and "sessionid %d" % k.target_sessionid in out
+    assert "不写语句" in out

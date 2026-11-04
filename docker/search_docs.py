@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """检索镜像里的根规范(/workspace/docs/)。本行知识库不可用或查不到时,智能体用它找规范原文。
 
-    python3 /workspace/search_docs.py "关键词" ["关键词2" ...]      搜索:按命中的关键词数排序,给出所在章节与原文行
-    python3 /workspace/search_docs.py --show <文件> [--from N] [--lines M]   读全文(docx / pdf 先转成文字)
-    python3 /workspace/search_docs.py --list                         列出有哪些根规范
+    python3 $GSDB_ROOTSPEC_HOME/search_docs.py "关键词" ["关键词2" ...]      搜索:按命中的关键词数排序,给出所在章节与原文行
+    python3 $GSDB_ROOTSPEC_HOME/search_docs.py --show <文件> [--from N] [--lines M]   读全文(docx / pdf 先转成文字)
+    python3 $GSDB_ROOTSPEC_HOME/search_docs.py --list                         列出有哪些根规范
+
+规范目录:$ROOTSPEC_DIR > $GSDB_ROOTSPEC_HOME/docs > 本脚本旁边的 docs/。
 
 支持 .md / .markdown / .txt / .docx;.pdf 在装了 pdftotext 时也能搜。文件第一行带 ROOTSPEC-TEMPLATE 标记的是镜像里预留的模板,
 还没换成正式规范:列出来但标明「模板」,不参与检索。只读,不写任何文件,不联网。
@@ -20,7 +22,10 @@ import sys
 import zipfile
 from typing import Dict, List, Optional, Tuple
 
-DOCS = pathlib.Path(os.environ.get("ROOTSPEC_DIR") or "/workspace/docs")
+DOCS = pathlib.Path(os.environ.get("ROOTSPEC_DIR")
+                    or (os.environ["GSDB_ROOTSPEC_HOME"].rstrip("/") + "/docs" if os.environ.get("GSDB_ROOTSPEC_HOME") else "")
+                    or pathlib.Path(__file__).resolve().parent / "docs")
+SELF = "$GSDB_ROOTSPEC_HOME/search_docs.py"      # 提示里写变量,不写镜像里的绝对路径
 TEMPLATE_MARK = "ROOTSPEC-TEMPLATE"
 SUFFIXES = (".md", ".markdown", ".txt", ".docx", ".pdf")
 HEADING_MD = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
@@ -149,7 +154,7 @@ def search(terms: List[str]) -> int:
             print("  第 %d 行 [%s] %s" % (i + 1, heading_path(lines, i), text[:160]))
         if n_hits > MAX_HITS:
             print("  …… 另有 %d 处" % (n_hits - MAX_HITS))
-        how = "read 工具" if path.suffix.lower() in (".md", ".markdown", ".txt") else "python3 /workspace/search_docs.py --show %s" % path
+        how = "read 工具" if path.suffix.lower() in (".md", ".markdown", ".txt") else "python3 %s --show %s" % (SELF, path)
         print("  读全文:%s" % how)
     if templates:
         print("\n(模板,还没有换成正式规范,不得引用:%s)" % "、".join(templates))

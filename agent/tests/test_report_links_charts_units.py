@@ -147,7 +147,7 @@ def test_share_lines_is_empty_when_there_is_nothing_to_draw():
 
 # ---------------------------------------------------------------- 链接要能点开
 
-def test_the_announced_link_is_a_markdown_link_not_a_bare_path(capsys, tmp_path, monkeypatch):
+def test_the_announced_link_carries_the_window_but_is_not_printed(capsys, tmp_path, monkeypatch):
     """**实测过的问题:** 用户要「这个时间段的 WDR 报告」,拿到的是
     `/dash/wdr?inst=…&run=…` —— 一个**没有站点的路径**。点不开,复制到地址栏也打不开。
 
@@ -155,10 +155,10 @@ def test_the_announced_link_is_a_markdown_link_not_a_bare_path(capsys, tmp_path,
     """
     monkeypatch.setenv(reports.ENV_DIR, str(tmp_path))
     p = reports.archive("wdr", {"dims": []}, instance="og5")
-    reports.announce("wdr", p, "og5", span=("2026-10-17T10:45", "2026-10-17T11:09"))
+    link = reports.announce("wdr", p, "og5", span=("2026-10-17T10:45", "2026-10-17T11:09"))
     err = capsys.readouterr().err
-    assert "[打开报告](/dash/wdr?" in err
-    assert "from=2026-10-17T10%3A45" in err
+    assert "已存入报告存档" in err and "/dash/" not in err and "打开报告" not in err         # 2026-11-04 起回答里不给报告链接
+    assert link.startswith("/dash/wdr?") and "from=2026-10-17T10%3A45" in link
 
 
 def test_a_deployment_can_make_the_link_absolute(monkeypatch):

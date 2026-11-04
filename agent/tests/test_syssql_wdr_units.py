@@ -57,7 +57,7 @@ def test_system_sql_is_neither_listed_nor_picked_as_a_culprit():
     d = C.collect_topsql(Runner(rows), opt)
     assert [r[0] for r in d.rows] == ["1", "2"]
     assert "CPU:2(" in d.headline and "溢出:2(" in d.headline and "调用:1(" in d.headline
-    assert "已排除 2 条内核系统 SQL(9、8" in d.headline and "800.0 秒" in d.headline
+    assert "已排除 2 条非业务 SQL(9、8" in d.headline and "800.0 秒" in d.headline
     assert opt.stmt_spill_kb == (50 + 10) * 1024, "落盘总量仍按全部语句算"
     assert all(f.sql_id in ("1", "2") for f in d.findings if f.sql_id)
 

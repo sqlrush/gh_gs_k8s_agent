@@ -316,21 +316,18 @@ def dash_url(link: str) -> str:
 
 
 def announce(skill: str, path: Optional[pathlib.Path], instance: str, by: str = "",
-             span: Optional[tuple] = None) -> None:
-    """存档成功后在**标准错误**打一行大盘直达链接,**已经是 Markdown 链接形态**。
+             span: Optional[tuple] = None) -> str:
+    """存档成功后在**标准错误**说一句已存档;返回这份报告的大盘地址(给需要的调用方与测试),**不打印**。
 
-    以前存档悄无声息,模型不知道有大盘(用户要「大盘」时它只能自己拼 Markdown)。走标准错误:
-    JSON 模式的 stdout 必须是纯 JSON,WDR 的最终报告必须是 render 的原样输出,都不能多一行。
-
-    **给的是 `[文字](地址)` 而不是裸地址**:裸的根相对路径贴进聊天记录是点不开的,
-    而 Markdown 链接由对话页按同源解析,点一下就到那一份报告 —— 用户要的就是「能跳过去」。
+    2026-11-04 起报告由行方自己的前端调用(报告接口见 docs/api/reports-contract.json),回答里不给报告链接。
+    以前这里打 Markdown 链接、还写着「把这个链接原样放进回答里」—— 模型照做,只删技能说明拦不住(演练实测)。
+    走标准错误:JSON 模式的 stdout 必须是纯 JSON,WDR 的最终报告必须是 render 的原样输出,都不能多一行。
     """
     link = dash_link(skill, path, instance, by, span)
     if not link:
-        return
-    md = "[%s](%s)" % ("打开知识库大盘" if skill == "kb" else "打开报告", dash_url(link))
-    print("已存入大盘:%s —— 这是给用户看的页面,**把这个 Markdown 链接原样放进回答里**"
-          "(不要只写路径,裸路径用户点不开)。" % md, file=sys.stderr)
+        return ""
+    print("已存入报告存档。报告由前端调用:这一行不用放进回答,回答里也不要给报告链接。", file=sys.stderr)
+    return dash_url(link)
 
 
 def append_jsonl(skill: str, name: str, row: Dict[str, Any]) -> bool:

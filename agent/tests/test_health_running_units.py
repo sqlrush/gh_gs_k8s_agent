@@ -129,7 +129,7 @@ def test_kernel_system_sql_is_excluded_and_counted():
             _act(8, 900)]
     chk = R.judge(rows, _th(), top=10, fetched_cap=R.RUNNING_FETCH)
     assert [f.metric for f in chk.findings] == ["pid 8 执行中的 SQL"]
-    assert "已排除 1 条内核系统 SQL" in chk.brief
+    assert "已排除 1 条非业务 SQL" in chk.brief
 
 
 def test_an_old_whitelist_without_the_waiting_column_still_works():
