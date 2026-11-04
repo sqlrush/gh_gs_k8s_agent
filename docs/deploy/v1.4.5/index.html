@@ -453,7 +453,7 @@ kubectl -n gaussdb-agent scale deploy -l role=runtime --replicas=0</code></pre>
 <tr><th>步</th><th>动作</th><th>负责方</th></tr>
 <tr><td>1</td><td>按第 4–6 章拉 <code>agent-v1.4.5</code>、构建 3 个镜像，取标准知识库镜像（第 5.4 节，内容与 v1.4.4 相同、标签换新），四个都推进内网仓库；或按 5.5 直接拉我方发布的镜像。<strong>要换根规范的，推之前按第 6.1 节给两个用户镜像加一层</strong></td><td>平台</td></tr>
 <tr><td>2</td><td>换网关镜像与用户镜像标签（<strong>两者必须同一版本</strong>），重启网关（命令同 14.4 第 4 步）</td><td>平台</td></tr>
-<tr><td>3</td><td>第 8.1 节改好 <code>k8s/base/kbstd-install.yaml</code> 的两处镜像地址后 <code>kubectl apply -f k8s/base/kbstd-install.yaml</code>：Job 名换成了 <code>kbstd-install-v1-4-5</code>，文档集同版本，日志是 <code>[skipped] … 已是这个版本</code>；旧的 <code>kbstd-install-v1-4-5</code> 可以删掉</td><td>平台</td></tr>
+<tr><td>3</td><td>第 8.1 节改好 <code>k8s/base/kbstd-install.yaml</code> 的两处镜像地址后 <code>kubectl apply -f k8s/base/kbstd-install.yaml</code>：Job 名换成了 <code>kbstd-install-v1-4-5</code>，文档集同版本，日志是 <code>[skipped] … 已是这个版本</code>；旧的 <code>kbstd-install-v1-4-4</code> 可以删掉</td><td>平台</td></tr>
 <tr><td>4</td><td><strong>删掉已有的知识库导入环境</strong>，让它下次按新版本建（导入镜像有了自己的根提示词）：<code>kubectl -n gaussdb-agent delete deploy,svc -l role=kb-import</code>（NAS 上的数据不动）</td><td>平台</td></tr>
 <tr><td>5</td><td>按第 10 章验收；换过根规范的，再在诊断环境问一个只有根规范里写了的问题，回答里应引用「《文档名称》第X章/X节」</td><td>平台 + 验收人</td></tr>
 </table>
