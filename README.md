@@ -5,6 +5,26 @@ GaussDB 数据库智能体的**后端**：把 opencode 与 GaussDB / openGauss �
 
 本仓库是**联合项目**：我方负责后端，前端方负责前端，双方（含各自的编码智能体）在同一个仓库里协作。
 
+## v1.4.7 起：交付分支
+
+代码只在测试仓库 [gh_agent_k8s](https://github.com/sqlrush/gh_agent_k8s) 维护（完整代码 + 行外自测用的模拟组件）。交付给行内的是本仓库的两个分支，
+由测试仓库的转化脚本 `delivery/transform.py` 从发布标签自动生成——**不要在这两个分支上手工修改**（转化脚本发现手改会停下，需要的改动挪回测试仓库再生成）：
+
+| 分支 / 标签 | 内容 | 用在 |
+|---|---|---|
+| [`diag`](https://github.com/sqlrush/gh_gs_k8s_agent/tree/diag) / `diag-v1.4.7` | 诊断技能包：`AGENTS.md`、`common/`、17 个诊断技能 + `gaussdb-kb`、`scripts/registry/`（白名单脚本定义）、`whitelist/`（128 条白名单 DML、历次增量与清单）、`rootspec/search_docs.py`（根规范检索脚本）、`补充说明.md` | 诊断环境 |
+| [`kbimport`](https://github.com/sqlrush/gh_gs_k8s_agent/tree/kbimport) / `kbimport-v1.4.7` | 知识库导入技能包：`AGENTS.md`、`common/`、`gaussdb-kb-import`、`gaussdb-kb-init`、`gaussdb-kb`、`rootspec/search_docs.py`、`补充说明.md` | 知识库导入环境 |
+
+每个分支根目录的 `补充说明.md` 写着：版本对应、包内容与技能版本、依赖（Python 包与系统程序）、环境变量（必填 / 默认值）、SQL 白名单与上一版的差异、
+根规范目录约定、变更摘要。
+
+```bash
+git clone -b diag-v1.4.7 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-diag          # 诊断技能包
+git clone -b kbimport-v1.4.7 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-kbimport  # 知识库导入技能包
+```
+
+`main` 上的后端代码停在 `agent-v1.4.6`，不再更新；v1.4.6 及以前的部署上线方案照旧按各自的标签使用。
+
 | 文档 | 给谁 | 内容 |
 |---|---|---|
 | [docs/部署上线方案-v1.4.6.md](docs/部署上线方案-v1.4.6.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/deploy/v1.4.6/)） | 项目经理 / 各方团队 | **从拉代码到部署上线的完整方案**（agent-v1.4.6）：**Top SQL 只列业务 SQL、回答里不出现系统 SQL**；两份根提示词、根规范随镜像（推镜像前换成行内正式规范，第 6.1 节）；系统组成与安全设计、各方分工与检查单、构建（或直接拉我方发布的镜像）、白名单导入、部署、开通、验收、固定池化、知识库、统一认证与前端、**发版台**（跳板机上一条命令起：资源扫描、变更预览确认、按槽位在线替换、冒烟验证）、知识库处置的「取代」、从 v1.4.3 / v1.4.2 / v1.4.1 / v1.4.0 / v1.3.x 升级、回滚、运维，附全部 128 条白名单脚本 |
