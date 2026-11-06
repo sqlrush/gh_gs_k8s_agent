@@ -12,15 +12,15 @@ GaussDB 数据库智能体的**后端**：把 opencode 与 GaussDB / openGauss �
 
 | 分支 / 标签 | 内容 | 用在 |
 |---|---|---|
-| [`diag`](https://github.com/sqlrush/gh_gs_k8s_agent/tree/diag) / `diag-v1.4.7` | 诊断技能包：`AGENTS.md`、`common/`、17 个诊断技能 + `gaussdb-kb`、`scripts/registry/`（白名单脚本定义）、`whitelist/`（137 条白名单 DML、历次增量与清单；从 v1.4.3 ~ v1.4.6 升级导 `scripts-delta-20261105.sql`）、`rootspec/search_docs.py`（根规范检索脚本）、`补充说明.md` | 诊断环境 |
-| [`kbimport`](https://github.com/sqlrush/gh_gs_k8s_agent/tree/kbimport) / `kbimport-v1.4.7` | 知识库导入技能包：`AGENTS.md`、`common/`、`gaussdb-kb-import`、`gaussdb-kb-init`、`gaussdb-kb`、`rootspec/search_docs.py`、`补充说明.md` | 知识库导入环境 |
+| [`diag`](https://github.com/sqlrush/gh_gs_k8s_agent/tree/diag) / `diag-v1.4.8` | 诊断技能包：`AGENTS.md`、`common/`、17 个诊断技能 + `gaussdb-kb`、`scripts/registry/`（白名单脚本定义）、`whitelist/`（137 条白名单 DML、历次增量与清单；从 v1.4.7 升级不用导，从 v1.4.3 ~ v1.4.6 升级导 `scripts-delta-20261105.sql`）、`rootspec/search_docs.py`（根规范检索脚本）、`补充说明.md` | 诊断环境 |
+| [`kbimport`](https://github.com/sqlrush/gh_gs_k8s_agent/tree/kbimport) / `kbimport-v1.4.8` | 知识库导入技能包：`AGENTS.md`、`common/`、`gaussdb-kb-import`、`gaussdb-kb-init`、`gaussdb-kb`、`rootspec/search_docs.py`、`补充说明.md` | 知识库导入环境 |
 
-v1.4.7 起诊断站在应用 DBA / 运维 DBA 的角度（指标异常追到引起它的 SQL、会话、应用、表；处置先改应用、再做运维操作，参数只在典型场景给）。每个分支根目录的 `补充说明.md` 写着：版本对应、包内容与技能版本、依赖（Python 包与系统程序）、环境变量（必填 / 默认值）、SQL 白名单与上一版的差异、
+v1.4.7 起诊断站在应用 DBA / 运维 DBA 的角度（指标异常追到引起它的 SQL、会话、应用、表；处置先改应用、再做运维操作，参数只在典型场景给）。v1.4.8 修复 api 模式登录：中间件按实例 IP 固定连一个库、不按库名切换，原来填业务库名一律登录不了；现在库名在实例上存在就放行（会话另记取数库），写错的仍拦下。每个分支根目录的 `补充说明.md` 写着：版本对应、包内容与技能版本、依赖（Python 包与系统程序）、环境变量（必填 / 默认值）、SQL 白名单与上一版的差异、
 根规范目录约定、变更摘要。
 
 ```bash
-git clone -b diag-v1.4.7 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-diag          # 诊断技能包
-git clone -b kbimport-v1.4.7 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-kbimport  # 知识库导入技能包
+git clone -b diag-v1.4.8 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-diag          # 诊断技能包
+git clone -b kbimport-v1.4.8 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-kbimport  # 知识库导入技能包
 ```
 
 `main` 上的后端代码停在 `agent-v1.4.6`，不再更新；v1.4.6 及以前的部署上线方案照旧按各自的标签使用。
