@@ -1,0 +1,16 @@
+# SQL 取自 common/sql.py 的 skill_wdr_009。列名齐全，未改动。
+name: wdr.window
+description: 快照窗口的起止时间与时长
+sql: |
+  SELECT to_char(b.start_ts,'YYYY-MM-DD HH24:MI') AS b_start,
+         to_char(e.start_ts,'YYYY-MM-DD HH24:MI') AS e_start,
+         round(EXTRACT(EPOCH FROM (e.start_ts-b.start_ts))/60)::bigint AS dur
+  FROM (SELECT start_ts FROM snapshot.snapshot WHERE snapshot_id={{begin}}) b,
+       (SELECT start_ts FROM snapshot.snapshot WHERE snapshot_id={{end}}) e;
+params:
+  - key: begin
+    type: INTEGER
+    description: 起始快照 ID
+  - key: end
+    type: INTEGER
+    description: 结束快照 ID

@@ -1,0 +1,21 @@
+# SQL 取自 common/sql.py 的 skill_sqlreview_003，{sid} 换成 {{sid}}，其余未动。
+#
+# 正文与 sqlreview.from_statement / sqlfetch.from_history 是同一条 SQL：
+# skills/gaussdb-sqlreview/scripts/sqlfetch.py 本来就是 gaussdb-sqlfetch 那份
+# 模块的副本（仓库既有的代码重复，不在本次改动范围）。这里仍单独注册一条
+# sqlreview.* 而不是复用 sqlfetch.*：脚本名是跨环境的匹配键，让 sqlreview
+# 依赖另一个 skill 的脚本名，等于把「sqlfetch 那条脚本被改/被停用」变成
+# sqlreview 的隐性故障点。
+name: sqlreview.from_history
+description: 按 unique_query_id 从 SQL 历史里取最近一条完整语句
+sql: |
+  SELECT schema_name, query
+  FROM dbe_perf.statement_history
+  WHERE unique_query_id = {{sid}}
+    AND query NOT LIKE '/* missing SQL statement%'
+  ORDER BY start_time DESC
+  LIMIT 1;
+params:
+  - key: sid
+    type: INTEGER
+    description: unique_query_id

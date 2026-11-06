@@ -1,0 +1,17 @@
+# **2026-10-18 改:时间精确到秒(原来到分钟)。** 时间段 Top SQL / 健康检查要求窗口**一定包住**
+# 用户说的时间段:快照 2986 实际在 11:06:55,只到分钟时显示成 11:06 —— 用户要到 11:06:30,
+# 凭「11:06」判断不了它够不够晚,只能保守地再往后取一个快照,在每小时一个快照的库上
+# 窗口就平白宽了一小时。snaps.py 解析时只截前 16 位,不受影响。
+# SQL 取自 common/sql.py 的 skill_wdr_010。列名齐全，未改动。
+name: wdr.snapshots
+description: 最近的快照列表
+sql: |
+  SELECT snapshot_id,
+         to_char(start_ts,'YYYY-MM-DD HH24:MI:SS') AS start_ts,
+         to_char(end_ts,'YYYY-MM-DD HH24:MI:SS')   AS end_ts,
+         round(EXTRACT(EPOCH FROM (end_ts-start_ts))/60)::bigint AS dur_min
+  FROM snapshot.snapshot ORDER BY snapshot_id DESC LIMIT {{limit}};
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

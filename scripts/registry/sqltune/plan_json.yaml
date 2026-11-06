@@ -1,0 +1,25 @@
+# EXPLAIN 用户临时给的 SQL —— JSON 格式，给代价推演用。
+#
+# 与 sqltune.plan_text 同一个参数位、同样三道防线：
+#
+#   1. 调用前 common.grmp.statement.ensure_explainable() 校验单语句 + 只读
+#   2. readonly: true —— 只读会话执行,DML/DDL 被数据库本身挡掉
+#   3. 模板里 ANALYZE 写死为 false —— 用户 SQL **不会被执行**,只出估算计划
+#
+# **为什么另起一条而不是复用 plan_text。** 推演的校准闸要拿每个节点的
+# Startup/Total Cost 与复算值逐一比对，TEXT 格式得靠正则从
+# `(cost=0.00..263123.45 rows=100 width=64)` 里抠 —— 缩进层级、节点名里的
+# 括号、换行折叠都能让正则悄悄抠错一个数，而抠错的结果依然是个浮点数。
+# JSON 是结构化的，键取不到就报错。
+#
+# 这条脚本在 1862082 那次被当成死脚本删过（当时 cost.py 只服务 hypopg 路径，
+# 而 hypopg 在中间件下跑不了）。现在推演层是真实调用方，交付闸能验证这一点。
+name: sqltune.plan_json
+description: 取一条只读 SQL 的执行计划（JSON 格式，不执行该 SQL；代价推演用）
+readonly: true
+sql: |
+  EXPLAIN (ANALYZE false, BUFFERS false, FORMAT JSON) {{sql}}
+params:
+  - key: sql
+    type: String
+    description: 待分析的只读 SQL（单条语句）

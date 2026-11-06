@@ -1,0 +1,6 @@
+# 原来是 collectors.py 里的 db.scalar(...)。
+# **改动：count(*) 加别名 cnt。**
+name: health.prepared_xacts
+description: 悬挂的两阶段事务数量
+sql: |
+  SELECT count(*) AS cnt FROM pg_prepared_xacts;

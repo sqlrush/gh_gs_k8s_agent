@@ -1,0 +1,188 @@
+# =============================================================================
+# SQL 规范清单 —— gaussdb-sqlreview 的唯一规范来源，改这个文件就是改规范。
+#
+# 改完之后重装：./install-opencode.sh gaussdb-sqlreview
+#   （安装脚本会重拷整个目录，所以请改「源码仓」里的这一份，
+#     不要改 ~/.config/opencode/skills/gaussdb-sqlreview/ 下的副本——那份会被覆盖。）
+#
+# 常见改法：
+#   - 换成自家命名前缀   → 改 pattern
+#   - 某条规则不适用     → 加 enabled: false
+#   - 降级/升级严重程度   → 改 severity（error / warn / info）
+#   - 新增一条文本规则   → check: regex + pattern（不用改 Python 代码）
+#
+# 字段说明：
+#   id          唯一标识，报告里按它引用          （必填）
+#   name        规则名                            （必填）
+#   severity    error | warn | info               （必填）
+#   applies_to  ddl / dml / dql / object 的组合    （必填）
+#   check       判定器名，见下方白名单             （必填）
+#   message     命中时的说明，可用 {table} {index} {column} {n} 等占位符
+#   rationale   为什么要有这条规范（进报告，帮模型解释）
+#   fix         怎么整改（进报告，标注为需人工执行）
+#   enabled     false 可关掉本条，默认 true
+#
+# check 白名单（写白名单之外的名字，加载时会直接报错）：
+#   regex                 正则匹配（逃生舱，用户自由扩展）
+#                         参数：pattern，可选 on: normalized(默认) | raw
+#                         注意：默认匹配「归一化文本」——注释已剥离、字符串字面量
+#                         已替换为 :s1，所以注释和字符串里的内容不会误报。
+#                         需要匹配字面量原文时写 on: raw。
+#   advisory              脚本不判定，只取证，交给模型判断。参数：criteria
+#   table_no_primary_key  建表无主键 / 存量表无主键
+#   table_has_foreign_key 存在外键约束
+#   naming_pattern        命名规范。参数：target(table|index|column)、pattern
+#   index_column_count    索引列数上限。参数：max
+#   stmt_forbidden        禁用某类语句。参数：kind(delete|truncate|drop)
+#   dml_without_where     UPDATE / DELETE 未带 WHERE
+#   select_star           SELECT *
+#   leading_wildcard_like 前置模糊匹配 LIKE '%x'
+#   index_redundant       索引冗余（列是另一个索引的前缀）—— 仅 object
+# =============================================================================
+version: 1
+
+rules:
+
+  # ---------------------------------------------------------------- 表设计
+  - id: TBL001
+    name: 表必须有主键
+    severity: error
+    applies_to: [ddl, object]
+    check: table_no_primary_key
+    message: "表 {table} 未定义主键"
+    rationale: "无主键表无法逻辑复制、无法按主键回表，重复数据也难以清理"
+    fix: "补业务主键；确无自然主键时增加自增代理主键 id"
+
+  - id: TBL002
+    name: 表禁止使用外键
+    severity: error
+    applies_to: [ddl, object]
+    check: table_has_foreign_key
+    message: "表 {table} 存在外键约束 {constraint}"
+    rationale: "外键在高并发写入下产生额外锁与校验开销，且阻碍分库分表与数据归档"
+    fix: "删除外键约束，关联完整性由应用层保证"
+
+  - id: TBL003
+    name: 表名必须小写下划线
+    severity: warn
+    applies_to: [ddl, object]
+    check: naming_pattern
+    target: table
+    pattern: '^[a-z][a-z0-9_]{2,62}$'
+    message: "表名 {table} 不符合命名规范（小写字母开头，仅小写字母/数字/下划线，3-63 字符）"
+    fix: "重命名为小写下划线风格，如 order_items"
+
+  - id: COL001
+    name: 列名必须小写下划线
+    severity: warn
+    applies_to: [ddl, object]
+    check: naming_pattern
+    target: column
+    pattern: '^[a-z][a-z0-9_]{0,62}$'
+    message: "表 {table} 的列名 {column} 不符合命名规范"
+    fix: "重命名为小写下划线风格，如 created_at"
+
+  # ---------------------------------------------------------------- 索引设计
+  - id: IDX001
+    name: 索引名前缀规范
+    severity: warn
+    applies_to: [ddl, object]
+    check: naming_pattern
+    target: index
+    pattern: '^(idx|uk)_[a-z0-9_]+$'
+    message: "索引名 {index}（表 {table}）应以 idx_ / uk_ 开头"
+    rationale: "统一前缀便于区分普通索引与唯一索引，也便于批量运维脚本识别"
+    fix: "普通索引重命名为 idx_<表>_<列>，唯一索引为 uk_<表>_<列>"
+
+  - id: IDX002
+    name: 索引列数不超过 5
+    severity: warn
+    applies_to: [ddl, object]
+    check: index_column_count
+    max: 5
+    message: "索引 {index}（表 {table}）有 {n} 列，超过上限 {max}"
+    rationale: "过宽的组合索引体积大、维护成本高，且往往只有最左几列真正被用到"
+    fix: "按实际查询模式裁剪索引列，保留最左有效前缀"
+
+  - id: IDX003
+    name: 索引冗余
+    severity: warn
+    applies_to: [object]
+    check: index_redundant
+    message: "索引 {index} 的列是索引 {covered_by} 的前缀，属于冗余索引"
+    rationale: "被前缀覆盖的索引不会带来额外的查询能力，却持续增加写入与存储开销"
+    fix: "评估后删除冗余索引 {index} [需人工执行]"
+
+  - id: IDX004
+    name: 索引应建在高基数列上
+    severity: warn
+    applies_to: [object]
+    check: advisory
+    criteria: |
+      低基数列（状态、性别、是否删除等）单独建 B-tree 索引通常无效，
+      优化器多半仍走全表扫描，索引白白增加写入开销。逐个索引判断：
+      - 列 distinct 值数 / 表总行数 < 1%，且该索引 scans 长期为 0 → 建议删除
+      - 低基数列仅作为组合索引的非首列出现 → 可接受，不必处理
+      - 确需按低基数列过滤大表 → 评估分区表，而不是加索引
+      需要 distinct 数时，用 sqltune skill 采集列统计（pg_stats.n_distinct）。
+    fix: "确认无用后删除索引 [需人工执行]"
+
+  # ---------------------------------------------------------------- DML
+  - id: DML001
+    name: 禁止物理删除
+    severity: error
+    applies_to: [dml]
+    check: stmt_forbidden
+    kind: delete
+    message: "出现 DELETE 语句（表 {table}），禁止物理删除"
+    rationale: "物理删除不可追溯，且会打断下游增量同步与审计链路"
+    fix: "改为逻辑删除：UPDATE {table} SET is_deleted = 1, deleted_at = now() WHERE ..."
+
+  - id: DML002
+    name: UPDATE/DELETE 必须带 WHERE
+    severity: error
+    applies_to: [dml]
+    check: dml_without_where
+    message: "UPDATE/DELETE 未带 WHERE 条件（表 {table}），将影响全表"
+    fix: "补上 WHERE 条件；确需全表更新的，走人工审批"
+
+  - id: DDL001
+    name: 禁止 TRUNCATE
+    severity: error
+    applies_to: [ddl]
+    check: stmt_forbidden
+    kind: truncate
+    message: "出现 TRUNCATE 语句（表 {table}）"
+    rationale: "TRUNCATE 不可回滚、不触发触发器，与逻辑删除规范冲突"
+    fix: "如确需清空数据，走人工审批 [需人工执行]"
+
+  # ---------------------------------------------------------------- 查询
+  - id: DQL001
+    name: 禁止前置模糊匹配
+    severity: error
+    applies_to: [dml, dql]
+    check: leading_wildcard_like
+    message: "LIKE '{value}' 使用前置通配，无法走 B-tree 索引，将全表扫描"
+    rationale: "B-tree 索引按最左前缀有序，前置通配使索引完全失效"
+    fix: "改为后置匹配 LIKE 'x%'；确需前置匹配的，评估全文检索或反转列 + 函数索引"
+
+  - id: DQL002
+    name: 禁止 SELECT *
+    severity: warn
+    applies_to: [dml, dql]
+    check: select_star
+    message: "使用了 SELECT *（表 {table}）"
+    rationale: "SELECT * 传输多余列、无法走覆盖索引，且表结构变更时行为不稳定"
+    fix: "显式列出所需列"
+
+  # ---------------------------------------------------------------- 类型
+  # 这条演示 regex 逃生舱：不用改 Python 代码就能加规则。
+  - id: DDL002
+    name: 禁止使用 CHAR 定长类型
+    severity: info
+    applies_to: [ddl]
+    check: regex
+    pattern: '(?i)\bCHAR\s*\('
+    message: "使用了 CHAR 定长类型，建议改用 VARCHAR"
+    rationale: "CHAR 会用空格补齐到固定长度，浪费存储且比较行为易出意外"
+    fix: "改用 VARCHAR(n)"

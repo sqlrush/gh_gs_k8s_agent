@@ -1,0 +1,23 @@
+# SQL 优化第 ① 段「现状」(2026-10-26 回答模板化 R4):这条语句自上次统计清零以来的执行次数与耗时。
+#
+# dbe_perf.statement 是**累计视图**:实例重启或统计重置就清零,所以这里的数是「自那以后」,报告里要写清口径。
+# 同一条语句按执行用户 / 节点拆成多行(与 topsql.top_sql 同一个原因),这里聚合成一行。
+# 耗时列单位是微秒,换成毫秒保留一位;min_elapse_time 为 0 的行(从没完整跑完的计数位)不参与取最小。
+name: sqltune.stat_now
+description: 按 unique_sql_id 取这条语句自统计清零以来的执行次数、平均 / 最大 / 最小耗时与 CPU、数据 IO 时间
+readonly: true
+sql: |
+  SELECT sum(n_calls) AS calls,
+         round(sum(total_elapse_time) / 1000.0, 1) AS total_ms,
+         round(sum(total_elapse_time) / 1000.0 / nullif(sum(n_calls), 0), 1) AS avg_ms,
+         round(max(max_elapse_time) / 1000.0, 1) AS max_ms,
+         round(min(nullif(min_elapse_time, 0)) / 1000.0, 1) AS min_ms,
+         round(sum(cpu_time) / 1000.0, 1) AS cpu_ms,
+         round(sum(data_io_time) / 1000.0, 1) AS io_ms,
+         sum(n_returned_rows) AS returned_rows
+    FROM dbe_perf.statement
+   WHERE unique_sql_id = {{sid}};
+params:
+  - key: sid
+    type: INTEGER
+    description: unique_sql_id(整数,可能为负)

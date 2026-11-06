@@ -1,0 +1,22 @@
+# SQL 取自 common/sql.py 的 skill_memanalyze_001。
+# **改动：两个 %s 换成 {{}} 并补引号**（都是字符串位：模式名、表名）。
+#
+# 这条与同目录下 generated 的脚本不同，它是**固定的** ——
+# 探测「实例有哪些视图/列」这件事本身不随实例而变。
+name: memanalyze.cols_qualified
+description: 取某个 schema.table 的列清单
+sql: |
+  SELECT a.attname::text AS attname
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  JOIN pg_attribute a ON a.attrelid = c.oid
+  WHERE n.nspname = '{{schema}}' AND c.relname = '{{relname}}'
+    AND a.attnum > 0 AND NOT a.attisdropped
+  ORDER BY a.attnum;
+params:
+  - key: schema
+    type: String
+    description: 模式名。取值来自 probe.py 的候选常量，不来自用户输入
+  - key: relname
+    type: String
+    description: 表/视图名。同上

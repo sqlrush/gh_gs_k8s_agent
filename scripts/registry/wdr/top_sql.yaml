@@ -1,0 +1,33 @@
+# SQL 取自 common/sql.py 的 skill_wdr_004。列名齐全，未改动。
+name: wdr.top_sql
+description: 窗口内耗时增量最大的语句
+sql: |
+  WITH b AS (SELECT snap_unique_sql_id AS sid, max(snap_query) AS query,
+                    sum(snap_n_calls) AS calls, sum(snap_total_elapse_time) AS elapsed, sum(snap_cpu_time) AS cpu,
+                    sum(COALESCE(snap_sort_spill_size,0)+COALESCE(snap_hash_spill_size,0)) AS spill,
+                    sum(snap_n_blocks_fetched-snap_n_blocks_hit) AS phys
+               FROM snapshot.snap_summary_statement WHERE snapshot_id={{b}} GROUP BY snap_unique_sql_id),
+       e AS (SELECT snap_unique_sql_id AS sid, max(snap_query) AS query,
+                    sum(snap_n_calls) AS calls, sum(snap_total_elapse_time) AS elapsed, sum(snap_cpu_time) AS cpu,
+                    sum(COALESCE(snap_sort_spill_size,0)+COALESCE(snap_hash_spill_size,0)) AS spill,
+                    sum(snap_n_blocks_fetched-snap_n_blocks_hit) AS phys
+               FROM snapshot.snap_summary_statement WHERE snapshot_id={{e}} GROUP BY snap_unique_sql_id)
+  SELECT e.sid, e.query,
+         (e.calls   - COALESCE(b.calls,   0)) AS calls,
+         (e.elapsed - COALESCE(b.elapsed, 0)) AS elapsed_us,
+         (e.cpu     - COALESCE(b.cpu,     0)) AS cpu_us,
+         (e.spill   - COALESCE(b.spill,   0)) AS spill_kb,
+         (e.phys    - COALESCE(b.phys,    0)) AS phys_blocks
+  FROM e LEFT JOIN b USING (sid)
+  WHERE (e.elapsed - COALESCE(b.elapsed, 0)) > 0
+  ORDER BY elapsed_us DESC LIMIT {{top}};
+params:
+  - key: b
+    type: INTEGER
+    description: 起始快照 ID
+  - key: e
+    type: INTEGER
+    description: 结束快照 ID
+  - key: top
+    type: INTEGER
+    description: 返回条数上限

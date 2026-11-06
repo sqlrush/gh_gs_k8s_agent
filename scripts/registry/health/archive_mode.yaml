@@ -1,0 +1,5 @@
+# 原来是 collectors.py 里的 db.scalar(...)。
+name: health.archive_mode
+description: 归档模式是否开启
+sql: |
+  SELECT setting FROM pg_settings WHERE name='archive_mode';

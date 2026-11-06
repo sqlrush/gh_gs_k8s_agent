@@ -1,0 +1,26 @@
+# 原来是 native.py 里拼出来的 generate_wdr_report(...) 调用。
+#
+# scope / node 是 String 参数，中间件不做转义（决策表第 5 项：引号责任在
+# 脚本作者）。调用方 native.py 保留了原有的 sql_literal() 双写单引号 ——
+# 那是这两个取值唯一的转义防线，迁移时不能丢。
+#
+# 注：openGauss-lite 没有 generate_wdr_report，执行会失败。
+# 原实现本来就把它当 best-effort 留底，失败只记 note 不影响主流程。
+name: wdr.native_report
+description: 调用原生 WDR 报告生成（留底/审计用，失败不影响主流程）
+readonly: true
+sql: |
+  SELECT generate_wdr_report({{begin}}, {{end}}, 'all', '{{scope}}', '{{node}}') AS report_line;
+params:
+  - key: begin
+    type: INTEGER
+    description: 起始快照 ID
+  - key: end
+    type: INTEGER
+    description: 结束快照 ID
+  - key: scope
+    type: String
+    description: 报告范围。调用方须先经 sql_literal 转义
+  - key: node
+    type: String
+    description: 节点名。调用方须先经 sql_literal 转义

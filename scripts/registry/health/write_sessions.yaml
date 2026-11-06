@@ -1,0 +1,27 @@
+# 正在执行写入的会话(2026-11-05 加):WAL 维度的「谁在写」第三路,两个内核都能取到。
+# 表级写入计数要等语句(或调用存储过程的整条 CALL)结束才累加进统计 —— 一个跑了半小时的批量写入过程,采样期间
+# 表上一行增量都看不到。这里直接看此刻正在执行 INSERT / UPDATE / DELETE / MERGE / COPY / CALL 的会话:
+# 哪个会话、哪个应用、执行了多久、语句是什么。GaussDB 另有 health.xlog_by_session 给出 xlog 用量。
+name: health.write_sessions
+description: 此刻正在执行写入（INSERT / UPDATE / DELETE / MERGE / COPY / CALL）的会话
+readonly: true
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限
+sql: |
+  SELECT sessionid::text AS sessionid,
+         pid::text AS pid,
+         usename,
+         application_name,
+         EXTRACT(EPOCH FROM (now() - query_start)) AS query_age_s,
+         unique_sql_id::text AS unique_sql_id,
+         substr(query, 1, 120) AS query
+    FROM pg_stat_activity
+   WHERE state = 'active'
+     AND pid <> pg_backend_pid()
+     AND (lower(ltrim(query)) LIKE 'insert%' OR lower(ltrim(query)) LIKE 'update%'
+          OR lower(ltrim(query)) LIKE 'delete%' OR lower(ltrim(query)) LIKE 'merge%'
+          OR lower(ltrim(query)) LIKE 'copy%' OR lower(ltrim(query)) LIKE 'call%')
+   ORDER BY query_start
+   LIMIT {{limit}};

@@ -1,0 +1,26 @@
+# **WHERE upper(...) NOT IN ('STATUS','NONE') 必须保留,与 wdr.waits / waitevent.events 逐字一致。**
+# STATUS(openGauss 里显示为 "wait cmd")是会话**空等客户端发下一条命令**,不是等待;
+# 不排除的话,og5 那次故障窗口里它占「总等待」65%(32526 秒),把真正的锁等待挤成第二。
+# 某一个 WDR 快照时刻的等待事件累计值 —— 时段体检里「这段时间在等什么」的起点或终点。
+#
+# 与 health.live_waits 列一一对应(wait_class / event / waits / wait_us),判定侧按
+# (wait_class, event) 相减。snap_global_wait_events 是**固定枚举**(og5 实测两端都是
+# 413 个事件、一个不多一个不少),所以按事件相减不会有「新出现」的问题。
+# 只取有过等待的事件(waits > 0):其余几百个恒为 0 的事件对结论没有贡献。
+name: health.snap_waits
+description: 指定快照时刻的等待事件累计值（按等待类与事件）
+readonly: true
+params:
+  - key: snap
+    type: INTEGER
+    description: 快照 ID
+sql: |
+  SELECT snap_type  AS wait_class,
+         snap_event AS event,
+         sum(snap_wait)            AS waits,
+         sum(snap_total_wait_time) AS wait_us
+    FROM snapshot.snap_global_wait_events
+   WHERE snapshot_id = {{snap}}
+     AND upper(snap_type) NOT IN ('STATUS','NONE')
+   GROUP BY snap_type, snap_event
+  HAVING sum(snap_wait) > 0;

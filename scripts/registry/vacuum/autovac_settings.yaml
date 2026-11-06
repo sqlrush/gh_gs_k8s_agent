@@ -1,0 +1,12 @@
+# autovacuum 触发线 = autovacuum_vacuum_threshold + autovacuum_vacuum_scale_factor
+# × reltuples，两个参数都在这里取。一并连 vacuum_cost% 取出，用来判断
+# autovacuum 追不上是不是被 cost-based 限速卡住了吞吐。全库只有一份 GUC，
+# 无参数。
+name: vacuum.autovac_settings
+description: autovacuum / vacuum_cost 相关 GUC 现值
+readonly: true
+sql: |
+  SELECT name, setting
+    FROM pg_settings
+   WHERE name LIKE 'autovacuum%' OR name LIKE 'vacuum_cost%'
+   ORDER BY name;

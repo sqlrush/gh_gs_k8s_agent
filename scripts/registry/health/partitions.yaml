@@ -1,0 +1,27 @@
+# 分区表体检 —— 每张分区表有多少个分区、用哪种分区策略。
+#
+# **这个内核上分区信息在 `pg_partition`,不在 PG 那套 `pg_inherits`/`pg_class.relispartition`。**
+# 列实测为:relname / parttype / parentid / rangenum / intervalnum / partstrategy / …
+#   parttype='r' 是分区表本体,'p' 是一个分区(实测 fl.part_log 有 1000 个 'p')。
+#
+# 只回答「分区数量与策略」,**不回答「分区裁剪有没有生效」** —— 裁剪是执行计划的
+# 属性,要看具体 SQL 的 plan(走 gaussdb-explain),一条目录查询给不出这个结论。
+# 把两件事混在一起,会让人以为分区数正常就等于裁剪正常。
+#
+# ORDER BY 分区数倒序:分区过多(几千个)时规划开销显著上升,那才是要先看的那张表。
+name: health.partitions
+description: 分区表的分区数量与分区策略
+readonly: true
+sql: |
+  SELECT n.nspname      AS schema,
+         c.relname      AS "table",
+         count(*)       AS parts,
+         COALESCE(max(p.partstrategy), '') AS strategy
+    FROM pg_partition p
+    JOIN pg_class c     ON c.oid = p.parentid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE p.parttype = 'p'
+     AND n.nspname NOT IN ('pg_catalog','information_schema','snapshot','dbe_perf',
+                           'dbe_pldeveloper','cstore','pg_toast')
+   GROUP BY n.nspname, c.relname
+   ORDER BY parts DESC;

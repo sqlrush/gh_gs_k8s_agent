@@ -1,0 +1,38 @@
+# 窗口内各表写了多少行(2026-11-05 加):两个 WDR 快照的表级计数之差,回答「那段时间 xlog 涨得快 / checkpoint 被频繁
+# 强制触发,是哪张表在写」(站在应用 DBA 角度:追到业务对象)。与 health.table_writes 同一口径:大字段(TOAST)写入
+# 按 pg_class.reltoastrelid 折回所属业务表,单列标出;系统 schema 排除。
+# TOAST 折回用的是**当前**的目录:窗口之后被删掉的表,TOAST 名字折不回去,随 pg_toast 一起排除。
+# 起点没有这张表(窗口内新建的)按 0 算增量起点。多节点按节点分别相减。
+name: wdr.table_writes
+description: 窗口内各表（大字段写入折回所属表）的插入 / 更新 / 删除行数
+readonly: true
+params:
+  - key: b
+    type: INTEGER
+    description: 起始快照 ID
+  - key: e
+    type: INTEGER
+    description: 结束快照 ID
+  - key: top
+    type: INTEGER
+    description: 返回条数上限
+sql: |
+  SELECT schema, "table", is_toast, ins, upd, del
+    FROM (SELECT COALESCE(pn.nspname, e.snap_schemaname) AS schema,
+                 COALESCE(pc.relname, e.snap_relname) AS "table",
+                 (e.snap_schemaname = 'pg_toast') AS is_toast,
+                 SUM(e.snap_n_tup_ins - COALESCE(b.snap_n_tup_ins, 0)) AS ins,
+                 SUM(e.snap_n_tup_upd - COALESCE(b.snap_n_tup_upd, 0)) AS upd,
+                 SUM(e.snap_n_tup_del - COALESCE(b.snap_n_tup_del, 0)) AS del
+            FROM snapshot.snap_global_stat_all_tables e
+            LEFT JOIN snapshot.snap_global_stat_all_tables b
+              ON b.snapshot_id = {{b}} AND b.snap_relid = e.snap_relid
+             AND b.db_name = e.db_name AND b.snap_node_name = e.snap_node_name
+            LEFT JOIN pg_class pc ON e.snap_schemaname = 'pg_toast' AND pc.reltoastrelid = e.snap_relid
+            LEFT JOIN pg_namespace pn ON pn.oid = pc.relnamespace
+           WHERE e.snapshot_id = {{e}}
+           GROUP BY 1, 2, 3) t
+   WHERE schema NOT IN ('pg_catalog','information_schema','snapshot','dbe_perf','dbe_pldeveloper','cstore','pg_toast')
+     AND ins + upd + del > 0
+   ORDER BY ins + upd + del DESC
+   LIMIT {{top}};

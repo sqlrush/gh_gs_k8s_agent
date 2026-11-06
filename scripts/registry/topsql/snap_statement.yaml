@@ -1,0 +1,53 @@
+# **query 列先剥掉开头的注释再截 80 字(2026-10-18 改)。** 原来是先压空白再截 —— 语句开头
+# 只要带一段注释(`-- app=…`、`/* trace … */`),80 个字就全被注释占满,真正的语句一个字都看不到。
+# 只剥**开头**的:中间的注释可能是 hint 或业务标记,不能动。整条都是注释时退回原文
+# (剥成空串会让表格里显示空白,被读成取数失败)。全文要看时走 sqlfetch / WDR 的 SQL 附录。
+# 某一个 WDR 快照时刻的语句累计值 —— 让 Top SQL 能回答「某个时间段」和「最近 N 分钟」。
+#
+# **为什么要单独一条、而不是用 wdr.top_sql。** wdr.top_sql 是「两个快照相减」,两端都必须是
+# 快照。而用户问「最近 10 分钟」时,终点是**此刻** —— 最新的快照可能是 58 分钟前的,
+# 两个快照围不住「此刻」。所以要能单独读出起点那个快照的累计值,再和 topsql.top_sql
+# 读的实时累计值相减(两边口径一致:快照就是 summary_statement 在那一刻的拷贝,
+# og5 上逐类核对过,实时值 >= 快照值、单位都是微秒)。
+#
+# 输出列与 topsql.top_sql **完全一致**(unique_sql_id / query / calls / total_sec / avg_ms / rows),
+# 两边走同一个解析函数,不会一边按列名、一边按位置取值。
+#
+# **按 sql_id 聚合**:同一条语句在快照里也按执行用户拆成多行(与实时视图同一个原因,
+# 见 topsql.top_sql 的说明),两边都聚合才能逐 sql_id 相减。
+#
+# {{limit}} 给起点用时要取宽(调用方传 5000):终点只取前 500 条,但每一条都要在起点里
+# 找到它的前值 —— 起点取得窄,终点里排第 300 的语句可能在起点里被截掉,于是被当成
+# 「窗口里新出现」整条计入,虚高。og5 的 instr_unique_sql_count 是 10000,5000 足够。
+#
+# **2026-10-24 改:多带 cpu_sec / io_sec。** 与 topsql.top_sql 同一次改动、同一个理由:快照表里也没有
+# 锁等待列,时间段榜要标「等待占比」、按 --by self 排,两端都得有 CPU 与数据 IO 才能相减。只加列,
+# 筛选与排序不动(终点仍按总耗时取前 N 条 —— 自身耗时不会超过总耗时,与按调用次数排时是同一个前提,
+# 见 skills/gaussdb-topsql/scripts/delta.py 模块说明 ③)。
+name: topsql.snap_statement
+description: 指定快照时刻的语句累计值（按 sql_id 聚合），用于时间段 Top SQL
+readonly: true
+params:
+  - key: snap
+    type: INTEGER
+    description: 快照 ID
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限（起点取宽，见注释）
+sql: |
+  SELECT
+    snap_unique_sql_id::text AS unique_sql_id,
+    LEFT(REGEXP_REPLACE(COALESCE(NULLIF(REGEXP_REPLACE(max(snap_query), '^(\s*(--[^\n]*(\n|$)|/\*([^*]|\*+[^*/])*\*+/))+\s*', ''), ''), max(snap_query)),
+                       '\s+', ' ', 'g'), 80) AS query,
+    sum(snap_n_calls) AS calls,
+    ROUND(sum(snap_total_elapse_time)/1000000::numeric, 2) AS total_sec,
+    ROUND((sum(snap_total_elapse_time)/NULLIF(sum(snap_n_calls),0))/1000::numeric, 2) AS avg_ms,
+    sum(snap_n_returned_rows) AS rows,
+    ROUND(sum(snap_cpu_time)/1000000::numeric, 2) AS cpu_sec,
+    ROUND(sum(snap_data_io_time)/1000000::numeric, 2) AS io_sec
+  FROM snapshot.snap_summary_statement
+  WHERE snapshot_id = {{snap}}
+  GROUP BY snap_unique_sql_id
+  HAVING sum(snap_n_calls) > 0
+  ORDER BY sum(snap_total_elapse_time) DESC
+  LIMIT {{limit}};

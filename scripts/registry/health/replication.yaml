@@ -1,0 +1,11 @@
+# SQL 取自 common/sql.py 的 skill_health_010。
+# **改动：COALESCE(client_addr::text,'') 加了别名 client_addr。**
+# 原来列名是 coalesce，虽不重名但作为 JSON 键无意义。
+name: health.replication
+description: 主备复制状态与延迟
+sql: |
+  SELECT application_name,
+         COALESCE(client_addr::text,'') AS client_addr,
+         state, sync_state,
+         pg_xlog_location_diff(sender_sent_location, receiver_replay_location)::bigint AS lag_bytes
+  FROM pg_stat_replication;

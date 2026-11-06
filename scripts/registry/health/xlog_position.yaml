@@ -1,0 +1,10 @@
+# 此刻的 xlog 写入位置与时间(2026-11-05 加):health 的 WAL 维度隔几秒采两次,两次位置之差 / 时间差 = 每秒生成的 xlog。
+# 此前没有任何检查测 xlog 生成速度,回答模板里却写着「WAL 多 → 查 WAL 生成量」。
+# 时间用 clock_timestamp()(语句执行那一刻),不用 now()(事务开始时刻,同一事务里两次调用取到同一个值)。
+# 备机上 pg_current_xlog_location() 报「恢复中」,由脚本接住,说明备机看不了。
+name: health.xlog_position
+description: 此刻的 xlog 写入位置（隔几秒采两次算每秒生成量）
+readonly: true
+sql: |
+  SELECT pg_current_xlog_location()::text AS lsn,
+         to_char(clock_timestamp(), 'YYYY-MM-DD HH24:MI:SS.US') AS at;

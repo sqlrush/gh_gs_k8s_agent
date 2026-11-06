@@ -1,0 +1,26 @@
+# SQL 取自 common/sql.py 的 skill_proctune_002。
+#
+# **改动一（必须）：t.relname 与 i.relname 原来**都叫 relname**。**
+# 协议按列名做键返回对象，后一个会静默覆盖前一个 —— 每行的表名都变成索引名，
+# 不报错也不告警。分别加别名 table_name / index_name。
+# pg_get_indexdef(...) 一并加别名 index_def（原来列名是 pg_get_indexdef）。
+#
+# **改动二：`IN {names}` 写成 `IN ({{names}})`**，与 proctune.tables 同形，
+# 理由见那一份。
+#
+# ⚠️ 顺带修掉的既有缺陷同 proctune.tables（Python 列表拼进 IN，语法错误）。
+name: proctune.indexes
+description: 游标 SQL 涉及的表上的索引定义（证据包 ## Indexes）
+sql: |
+  SELECT n.nspname AS schema_name, t.relname AS table_name, i.relname AS index_name,
+         ix.indisunique, ix.indisprimary,
+         pg_get_indexdef(ix.indexrelid) AS index_def
+  FROM pg_class t
+  JOIN pg_index ix ON t.oid = ix.indrelid
+  JOIN pg_class i ON i.oid = ix.indexrelid
+  JOIN pg_namespace n ON n.oid = t.relnamespace
+  WHERE t.relname IN ({{names}});
+params:
+  - key: names
+    type: String
+    description: 带引号的表名字面量列表，如 'orders','items'。取值必须来自调用方已校验的标识符，不可直接取用户输入

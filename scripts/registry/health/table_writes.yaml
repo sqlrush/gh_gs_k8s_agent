@@ -1,0 +1,32 @@
+# 各表的写入计数(2026-11-05 加):WAL 维度隔几秒采两次,两次之差 = 采样期间各表插入 / 更新 / 删除了多少行,
+# 用来回答「xlog 涨得快,是哪张表在写」(站在应用 DBA 角度:追到业务对象)。
+#
+# **TOAST 折回所属的业务表。** 大字段(长文本、bytea、大 JSON)超过约 2KB 会切块写进这张表的 TOAST 表
+# (pg_toast.pg_toast_<oid>),那里的插入行数就是「大字段写入」的量 —— 行方原话里的例子「大量大字段写入导致 xlog
+# 膨胀」靠它认出来。TOAST 表名对业务没有意义,按 pg_class.reltoastrelid 换成所属的业务表,另带 TOAST 大小。
+#
+# 按 last_data_changed(这张表最近一次数据变化的时间)倒序取前 {{limit}} 张:正在写的表一定排在前面;
+# 按累计写入量排会把「历史上写得多、现在不写」的表排进来,而把正在猛写的新表挤掉。
+# 系统 schema 排除表照抄 health/bloat.yaml;找不到所属表的 TOAST(系统表的)随 pg_toast 一起排除。
+name: health.table_writes
+description: 各表（大字段写入折回所属表）的插入 / 更新 / 删除行数与 TOAST 大小
+readonly: true
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限
+sql: |
+  SELECT schema, "table", is_toast, n_tup_ins, n_tup_upd, n_tup_del, toast_bytes
+    FROM (SELECT COALESCE(pn.nspname, s.schemaname) AS schema,
+                 COALESCE(pc.relname, s.relname) AS "table",
+                 (s.schemaname = 'pg_toast') AS is_toast,
+                 s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
+                 CASE WHEN s.schemaname = 'pg_toast' THEN pg_relation_size(s.relid) END AS toast_bytes,
+                 s.last_data_changed
+            FROM pg_stat_all_tables s
+            LEFT JOIN pg_class pc ON s.schemaname = 'pg_toast' AND pc.reltoastrelid = s.relid
+            LEFT JOIN pg_namespace pn ON pn.oid = pc.relnamespace) t
+   WHERE schema NOT IN ('pg_catalog','information_schema','snapshot','dbe_perf','dbe_pldeveloper','cstore','pg_toast')
+     AND n_tup_ins + n_tup_upd + n_tup_del > 0
+   ORDER BY last_data_changed DESC NULLS LAST
+   LIMIT {{limit}};

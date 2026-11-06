@@ -1,0 +1,31 @@
+# 库与表空间的**占用量**。
+#
+# **这里刻意不叫「磁盘水位」。** 剩余空间取不到:`pg_stat_file` / `pg_ls_dir`
+# 在这个内核上要 initial account(omm),诊断账号是 sysadmin 也被拒
+# (实测:"must be initial account to get file information")。所以本脚本
+# 只能回答「占了多少、涨得多快」,回答不了「盘还剩多少」。
+# 判定文案必须跟着这个边界走 —— 说成「磁盘快满了」是在用一个取不到的事实下结论。
+#
+# 两段 UNION ALL,缺一段就少一类根因:
+#   database    —— 哪个库在涨。多租户/多应用共用一个实例时,这是第一步定位。
+#   tablespace  —— 哪个表空间在涨。表空间常挂在不同的盘上,
+#                  单看库大小看不出"是哪块盘在被填满"。
+#
+# `pg_tablespace_size()` 诊断账号可调(实测 og5 返回 pg_default / pg_global /
+# 自建表空间三行)。`pg_database_size(oid)` 对**所有** datallowconn 的库都可调,
+# 不只是当前库(实测),所以不用逐库建连接。
+name: health.storage
+description: 库与表空间的占用量（取不到剩余空间，见脚本注释）
+readonly: true
+sql: |
+  SELECT 'database' AS kind,
+         d.datname  AS name,
+         pg_database_size(d.oid)::bigint AS bytes
+    FROM pg_database d
+   WHERE d.datallowconn
+  UNION ALL
+  SELECT 'tablespace' AS kind,
+         t.spcname    AS name,
+         pg_tablespace_size(t.oid)::bigint AS bytes
+    FROM pg_tablespace t
+   ORDER BY bytes DESC;

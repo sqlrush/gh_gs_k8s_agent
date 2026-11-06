@@ -1,0 +1,11 @@
+# 最老 xmin 落后当前事务号多少(2026-11-05 加):「xmin 推不动」要有个量 —— 落后几百个是正常的并发,
+# 落后几百万个就是有事务长时间不结束。下一个事务号用 gs_get_next_xid_csn() 取(只读,不分配事务号;
+# txid_current() 会给取数会话分配一个,不用它)。多节点时每个节点一行。
+name: vacuum.xid_lag
+description: 最老 xmin 与下一个事务号的差距
+readonly: true
+sql: |
+  SELECT n.node_name AS node,
+         gs_txid_oldestxmin()::text AS oldest_xmin,
+         n.next_xid::text AS next_xid
+    FROM gs_get_next_xid_csn() n;

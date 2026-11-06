@@ -1,0 +1,38 @@
+# 卡住回收的事务到底是哪一个(2026-11-05 加):vacuum.oldest_xmin 只能列出「此刻有哪些长事务」,
+# R4 于是只要有任意一个客户端事务在跑、表上有死元组就提示,指不出**真正持有最老 xmin 的是谁**。
+# 官方文档给的定位方法:pg_running_xacts 里 xmin 等于 gs_txid_oldestxmin() 的那一行就是持有者,
+# 按会话号关联 pg_stat_activity 拿到应用、用户、正在执行的语句(站在应用 DBA 角度:要追到是哪个业务)。
+# 不取客户端地址:报告与回答里不出现内网地址(安全红线),应用名与会话号足够定位。
+#
+# 关联两路:开线程池时 pg_running_xacts.pid 是会话号(= pg_stat_activity.sessionid,og5 实测),
+# 不开线程池时会话号与线程号相同;第二路 LEFT JOIN 只在第一路没对上时按 pid 补。
+# **不加 client_port 过滤**:作业调度线程里跑的存储过程 client_port 为空,同样会卡回收,过滤掉就漏了这一类;
+# 改为带一列 background 标明它是不是后台 / 作业线程。
+# 排除取数会话自己(它的查询快照也有 xmin)。xid 类型先转 text 再比较 / 排序,两个内核都认。
+name: vacuum.xmin_holder
+description: 持有最老 xmin、卡住死元组回收的事务（会话、应用、用户、正在执行的语句）
+readonly: true
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限
+sql: |
+  SELECT r.pid::text AS xact_id,
+         r.xmin::text AS xmin,
+         (r.xmin::text = gs_txid_oldestxmin()::text) AS is_oldest,
+         COALESCE(a1.sessionid, a2.sessionid)::text AS sessionid,
+         COALESCE(a1.pid, a2.pid)::text AS pid,
+         COALESCE(a1.usename, a2.usename) AS usename,
+         COALESCE(a1.application_name, a2.application_name) AS application_name,
+         COALESCE(a1.state, a2.state) AS state,
+         EXTRACT(EPOCH FROM (now() - COALESCE(a1.xact_start, a2.xact_start))) AS xact_age_s,
+         COALESCE(a1.unique_sql_id, a2.unique_sql_id)::text AS unique_sql_id,
+         substr(COALESCE(a1.query, a2.query), 1, 200) AS query,
+         (COALESCE(a1.client_port, a2.client_port) IS NULL) AS background
+    FROM pg_running_xacts r
+    LEFT JOIN pg_stat_activity a1 ON a1.sessionid = r.pid
+    LEFT JOIN pg_stat_activity a2 ON a1.sessionid IS NULL AND a2.pid = r.pid
+   WHERE r.xmin::text <> '0'
+     AND COALESCE(a1.pid, a2.pid, 0) <> pg_backend_pid()
+   ORDER BY r.xmin::text::bigint
+   LIMIT {{limit}};

@@ -1,0 +1,16 @@
+# **WHERE upper(...) NOT IN ('STATUS','NONE') 必须保留,与 wdr.waits / waitevent.events 逐字一致。**
+# STATUS(openGauss 里显示为 "wait cmd")是会话**空等客户端发下一条命令**,不是等待;
+# 不排除的话,og5 那次故障窗口里它占「总等待」65%(32526 秒),把真正的锁等待挤成第二。
+# 此刻的等待事件累计值 —— 与 health.snap_waits 列一一对应,两者相减即「快照时刻到此刻」在等什么。
+name: health.live_waits
+description: 此刻的等待事件累计值（按等待类与事件）
+readonly: true
+sql: |
+  SELECT type  AS wait_class,
+         event AS event,
+         sum(wait)            AS waits,
+         sum(total_wait_time) AS wait_us
+    FROM dbe_perf.global_wait_events
+   WHERE upper(type) NOT IN ('STATUS','NONE')
+   GROUP BY type, event
+  HAVING sum(wait) > 0;

@@ -1,0 +1,21 @@
+# ⚠️ 本文件由 tools/grmp_gen_memanalyze.py 生成，请勿手工编辑。
+#
+# memanalyze 的 SQL 正文取决于目标实例有哪些视图、每个视图有哪些列 ——
+# 探测到什么就查什么，缺的列补 NULL。固定白名单覆盖不了这种形态，
+# 所以脚本名固定、正文按实例生成。
+#
+# 生成依据（来自实例 og）：
+#   视图  dbe_perf.session_memory
+#   列    sessid, init_mem, used_mem, peak_mem
+#
+# ⚠️ 换一套实例必须重新生成。
+
+name: memanalyze.session
+description: 会话级内存 Top N
+sql: |
+  SELECT sessid, init_mem, used_mem, peak_mem FROM dbe_perf.session_memory
+  ORDER BY peak_mem DESC NULLS LAST LIMIT {{limit}};
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

@@ -1,0 +1,17 @@
+# SQL 取自 common/sql.py 的 skill_sqltune_006，{sid} 换成 {{sid}}，其余未动。
+# 历史里查不到时的兜底来源。列名 query 唯一且有意义，未加别名。
+#
+# 正文与 sqlfetch.from_statement 逐字相同，不复用其逻辑名，理由同
+# sqltune.from_history。
+name: explain.from_statement
+description: 按 unique_sql_id 从 SQL 统计视图里取语句正文
+sql: |
+  SELECT query, user_name FROM dbe_perf.statement
+  WHERE unique_sql_id = {{sid}}
+    AND query IS NOT NULL
+    AND LENGTH(TRIM(query)) > 0
+  LIMIT 1;
+params:
+  - key: sid
+    type: INTEGER
+    description: unique_sql_id（整数，可能为负）

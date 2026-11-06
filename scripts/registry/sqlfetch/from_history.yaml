@@ -1,0 +1,14 @@
+# SQL 取自 common/sql.py 的 skill_sqlfetch_001，{sid} 换成 {{sid}}，其余未动。
+name: sqlfetch.from_history
+description: 按 unique_query_id 从 SQL 历史里取最近一条完整语句
+sql: |
+  SELECT schema_name, query
+  FROM dbe_perf.statement_history
+  WHERE unique_query_id = {{sid}}
+    AND query NOT LIKE '/* missing SQL statement%'
+  ORDER BY start_time DESC
+  LIMIT 1;
+params:
+  - key: sid
+    type: INTEGER
+    description: unique_query_id

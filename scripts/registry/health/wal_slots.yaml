@@ -1,0 +1,29 @@
+# 复制槽落后多少 —— WAL 会不会被槽钉住、无限堆积把盘填满。
+#
+# **和 vacuum.oldest_xmin 不是一回事,两条都要有。** 那条回答「槽挡住了死元组
+# 回收」(xmin 维度);这条回答「槽挡住了 WAL 回收」(LSN 维度)。同一个槽可以
+# 只犯其中一样:一个 active 但消费很慢的槽会堆 WAL 而不一定挡 xmin;
+# 一个 inactive 的槽两样都挡。少了这条,「盘被 WAL 填满」这类故障在报告里
+# 完全没有信号。
+#
+# `pg_xlog_location_diff(pg_current_xlog_location(), restart_lsn)` 是这个内核
+# 上能用的写法(9.2 系命名,不是 pg_wal_lsn_diff),诊断账号可调,实测过。
+#
+# **`active` 必须带出来。** inactive 的槽最危险 —— 消费端已经没了,槽却还在
+# 钉着回收下限,而且没有任何东西会自动清掉它。判定里要把 inactive 的槽
+# 单独说,不能和"落后得多"混成一条。
+#
+# og5 上一个槽都没有(实测返回空),所以这条脚本在单机库上返回零行是正常的,
+# 判定必须把"零行"当成"没有槽"而不是"取数失败"。
+name: health.wal_slots
+description: 复制槽落后的 WAL 字节数与是否活跃
+readonly: true
+sql: |
+  SELECT slot_name,
+         COALESCE(slot_type,'')  AS slot_type,
+         COALESCE(database,'')   AS database,
+         active::text            AS active,
+         pg_xlog_location_diff(pg_current_xlog_location(), restart_lsn)::bigint AS lag_bytes
+    FROM pg_replication_slots
+   WHERE restart_lsn IS NOT NULL
+   ORDER BY lag_bytes DESC;

@@ -1,0 +1,23 @@
+# SQL 取自 common/sql.py 的 skill_proctune_003。
+# 六列都是普通列引用，列名唯一且有意义 —— **没有加任何别名**。
+#
+# **改动：`IN {names}` 写成 `IN ({{names}})`**，与 proctune.tables 同形，
+# 理由见那一份。⚠️ 顺带修掉的既有缺陷也同那一份。
+#
+# 注：correlation 允许为 NULL，协议把 NULL 渲染成空串（与真正的空串不可
+# 区分）。调用方 evidence.py 把空串按 NULL 处理 —— 这是数值列，空串只可能
+# 来自 NULL；填 0.0 会被读成「物理顺序与索引顺序完全无关」，那是一个结论，
+# 不是「不知道」。
+name: proctune.column_stats
+description: 游标 SQL 涉及的表的列级统计信息（证据包 ## Column Statistics）
+sql: |
+  SELECT schemaname, tablename, attname, n_distinct, null_frac, avg_width, correlation,
+         COALESCE(most_common_vals::text, '') AS most_common_vals,
+         COALESCE(most_common_freqs::text, '') AS most_common_freqs,
+         COALESCE(histogram_bounds::text, '') AS histogram_bounds
+  FROM pg_stats
+  WHERE tablename IN ({{names}});
+params:
+  - key: names
+    type: String
+    description: 带引号的表名字面量列表，如 'orders','items'。取值必须来自调用方已校验的标识符，不可直接取用户输入

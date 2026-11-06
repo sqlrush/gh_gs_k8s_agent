@@ -1,0 +1,18 @@
+# 带 search_path 的 EXPLAIN 模板:先切到 SQL 原本的 schema 再 EXPLAIN。
+#
+# 现场 400 的成因:业务 SQL 的表名不带 schema,靠应用账号的 search_path 解析;中间件执行账号解析不到。
+# statement_history 记着 schema_name,skill 把它填进 {{schema}}。两条语句能不能跑由 explain.multi_stmt_probe
+# 先验,不行就用不带 _schema 的单语句模板(common/search_path.py)。
+# {{schema}} 进了引号里、且 skill 侧只放行合法标识符(^[A-Za-z_][A-Za-z0-9_$]*$);{{sql}} 的三道防线同单语句模板。
+name: explain.plan_text_schema
+description: 先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(TEXT格式,不执行该 SQL)
+readonly: true
+sql: |
+  SET search_path TO "{{schema}}", public; EXPLAIN (ANALYZE false, BUFFERS false, FORMAT TEXT) {{sql}}
+params:
+  - key: schema
+    type: String
+    description: SQL 原本执行时的 schema(statement_history.schema_name);只放行合法标识符
+  - key: sql
+    type: String
+    description: 待分析的只读 SQL(单条语句;写语句不受理)

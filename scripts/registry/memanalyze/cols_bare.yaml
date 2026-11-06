@@ -1,0 +1,21 @@
+# SQL 取自 common/sql.py 的 skill_memanalyze_002。
+# **改动一：%s 换成 {{relname}} 并补引号**（字符串位）。
+# **改动二：{schemas} 换成 {{schemas}}** —— 整段 SQL 片段，GRMP 没有列表类型，
+#   只能当 String 塞进去。取值来自 probe.py 的 _SCHEMA_LIST 常量，不来自用户输入。
+name: memanalyze.cols_bare
+description: 在候选模式里找某个表/视图的列清单
+sql: |
+  SELECT a.attname::text AS attname
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  JOIN pg_attribute a ON a.attrelid = c.oid
+  WHERE c.relname = '{{relname}}' AND n.nspname IN ({{schemas}})
+    AND a.attnum > 0 AND NOT a.attisdropped
+  ORDER BY a.attnum;
+params:
+  - key: relname
+    type: String
+    description: 表/视图名。取值来自 probe.py 的候选常量
+  - key: schemas
+    type: String
+    description: 候选模式列表，形如 'a','b'。来自 probe.py 的受控常量
