@@ -57,6 +57,29 @@ def parse_search_path(text: Any) -> Tuple[List[str], Optional[str]]:
     return segs, None
 
 
+_QUOTED_RE = re.compile(r'^"([^"]*)"$')
+
+
+def business_path(text: Any) -> str:
+    """SQL 历史里记的搜索路径 → 能用来找业务表的那几段(2026-11-06 行方:技能不要做跨 schema 的限制)。
+
+    statement_history.schema_name 记的是业务会话的搜索路径原文,默认就是 `"$user",public`。原先整串按「带引号、
+    不合法」拒掉、一段都不切,业务表就找不到。这里:`"$user"` 去掉(它指的是业务账号自己,换成中间件执行账号
+    就指错了);合法标识符外的一对引号去掉;只剩 public(或什么都不剩)时返回空串 —— 调用方按表名在目录里找 schema。
+    其余不合法的段原样留着,照旧由 parse_search_path 判掉(那是注入防线,不是 schema 限制)。
+    """
+    segs = []
+    for seg in split_search_path(text):
+        m = _QUOTED_RE.match(seg)
+        inner = m.group(1) if m else seg
+        if inner.lower() == "$user":
+            continue
+        segs.append(inner if m and valid_schema(inner) else seg)
+    if not segs or segs == [FALLBACK_SCHEMA]:
+        return ""
+    return ", ".join(segs)
+
+
 def valid_search_path(text: Any) -> bool:
     """单个 schema 或逗号分隔的搜索路径,每一段都是合法标识符。命令行 --schema 与 sql_id 取回的值都用它判。"""
     return parse_search_path(text)[1] is None
@@ -232,6 +255,6 @@ def set_search_path(db, schema: str) -> str:
 
 
 __all__ = ["IDENT_RE", "PROBE_SCRIPT", "SCHEMA_SUFFIX", "FALLBACK_SCHEMA", "valid_schema", "split_search_path",
-           "parse_search_path", "valid_search_path", "primary_schema", "dba_search_path", "template_value",
+           "business_path", "parse_search_path", "valid_search_path", "primary_schema", "dba_search_path", "template_value",
            "reset_probe_cache", "multi_statement_ok", "explain_plan", "set_search_path", "fallback_note",
            "qualified_note"]

@@ -209,7 +209,7 @@ DB_SCRIPTS = ("procinfo.locate_context", "proctune.locate_context")
 
 class DbCheck(NamedTuple):
     # NamedTuple 而不是 dataclass:测试按文件路径加载本脚本、不登记 sys.modules,dataclass 会在那里找模块而失败
-    # ok / case(只差大小写)/ routed(实例上有这个库,但中间件连的是另一个)/ mismatch(实例上没有)/ unknown(核不了)
+    # ok / case(只差大小写)/ routed(实例上有这个库,但中间件连的是另一个)/ unlisted(实例库清单里没有)/ unknown(核不了)
     status: str
     actual: str = ""
     databases: Tuple[str, ...] = ()
@@ -224,9 +224,10 @@ def _check_database(conn: Connection) -> DbCheck:
     写错了不会报错,只会变成报告抬头与大盘上的错误标签,还把同一个库的历史劈成两份(2026-10-14 抓到)。
     核不了(脚本没登记、查不动)时返回 unknown,由调用方如实写「未核实」,不猜。
 
-    **库名在实例上存在就放行(routed),不存在才拦(2026-11-06 行方):** 中间件对各实例都固定连 postgres,
-    用户填业务库名一律对不上,原先「不一致就拦」让 api 模式谁都登不上。用户填的库名是「要诊断哪个库」,
-    不是「连哪个库」—— 会话按它登记,取数库另记;写错的库名不在实例库清单里,照样拦。
+    **库名核对不再拦登录(2026-11-06 行方):** 中间件对各实例都固定连 postgres,用户填业务库名一律对不上,
+    原先「不一致就拦」让 api 模式谁都登不上。用户填的库名是「要诊断哪个库」,不是「连哪个库」—— 会话按它登记,
+    取数库另记。实例库清单里有这个名字是 routed;没有(多半写错,也可能清单取得不全)是 unlisted,同样登录,
+    由调用方把库清单摆给用户确认名字 —— 行方要求库名限制全部放开(v1.4.9),写错的代价是报告抬头跟着错,不再是登不上。
     """
     last = ""
     for script in DB_SCRIPTS:
@@ -247,19 +248,15 @@ def _check_database(conn: Connection) -> DbCheck:
         listed = next((d for d in dbs if d.lower() == conn.database.lower()), "")
         if listed:
             return DbCheck("routed", actual, dbs, target=listed)
-        return DbCheck("mismatch", actual, dbs)
+        return DbCheck("unlisted", actual, dbs)
     return DbCheck("unknown", note=last)
 
 
-def _mismatch_message(conn: Connection, chk: DbCheck) -> str:
+def _unlisted_cell(conn: Connection, chk: DbCheck) -> str:
     others = "、".join(chk.databases) if chk.databases else "（没取到）"
-    return ("库名不对，**未建立会话**：实例 IP %s 上没有库「%s」。\n"
-            "这个实例上的库：%s。\n\n"
-            "确认用户要诊断的是哪个库，用清单里的名字重新登录：\n"
-            "    gaussdb-login --ip %s --database <库名>\n\n"
-            "（库名写错不会在取数时报错，只会把报告抬头和大盘上的库名写错、把同一个库的历史劈成两份，"
-            "所以登录时就拦下。）"
-            % (conn.data_ip, conn.database, others, conn.data_ip))
+    return ("**实例库清单里没有「%s」**（实例上的库：%s），仍按「%s」登记；中间件按实例 IP 固定连库「%s」，"
+            "取数都在「%s」上执行。请用户确认库名有没有写错 —— 写错的话报告抬头会跟着错，用正确的名字重新登录即可"
+            % (conn.database, others, conn.database, chk.actual, chk.actual))
 
 
 def _routed_cell(chk: DbCheck) -> str:
@@ -509,9 +506,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 db_note = "未核实（--no-verify）"
             else:
                 chk = _check_database(conn)
-                if chk.status == "mismatch":
-                    return _fail(_mismatch_message(conn, chk))
-                if chk.status == "case":
+                if chk.status == "unlisted":
+                    db_note = _unlisted_cell(conn, chk)
+                    conn = replace(conn, exec_database=chk.actual)
+                elif chk.status == "case":
                     db_note = "按实际库名「%s」登录（你给的是「%s」，只差大小写）" % (chk.actual, conn.database)
                     conn = _api_connection(conn.data_ip, chk.actual, config.api_endpoint())
                 elif chk.status == "routed":

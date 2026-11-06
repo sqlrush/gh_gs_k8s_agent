@@ -234,7 +234,8 @@ permission:
 1. **用户给的是 sql_id（Top SQL / 慢 SQL 清单里的 unique_sql_id）**：看计划直接 `gaussdb-explain` 的 `explain.py --sql-id <id>`，
    调优直接 `gaussdb-sqltune` 的 `sqltune.py <id>`。**不要先 sqlfetch 取文本再贴回去**——贴文本那一步会把这条 SQL 当初执行的 schema 丢掉。
 2. **贴 SQL 文本给 explain / sqltune 时**：schema 来自 sqlfetch 输出的 `Schema:` 行或用户所说，带成 `--schema <schema>`；
-   不知道就不带，脚本会按表名在目录里推断。脚本列出候选 schema 让选时，把候选转给用户选，**绝不自己猜 public 或换别的 schema 反复试**。
+   不知道就不带，脚本会按表名在目录里推断；同名表在多个 schema 下时脚本取一个照常跑并写明候选，转告用户，用户说不对再带 `--schema` 重跑。
+   **不要自己猜 public 或换别的 schema 反复试**。
 3. **脚本报「过程未找到」「无法确定 schema」并附编号问题清单时**：把结论和问题清单原样转给用户，等用户回答后再跑；
    不要自己写 SQL 查目录、不要猜名字、不要拿别的对象代替。
 4. 报告里出现「search_path 未切换，已改为补全表名取计划」说明脚本已把不带 schema 的表名按该 schema 补全，计划与原 SQL 等价，照常分析，

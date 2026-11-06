@@ -327,8 +327,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                   file=sys.stderr)
             return 2
         sql_text = fr.sql
-        if not schema and fr.schema and sp.valid_search_path(fr.schema):
-            schema = fr.schema
+        hist_path = sp.business_path(fr.schema)      # `"$user",public` 这类默认路径 → 空,下面按表名在目录里找
+        if not schema and hist_path and sp.valid_search_path(hist_path):
+            schema = hist_path
         label = {"statement_history": "statement_history 记录值", "user_name": "按执行账号 user_name 推测"}.get(
             getattr(fr, "schema_source", ""), "")
         fetch_source = f"sql_id={args.sql_id}({fr.source})" + (
@@ -378,16 +379,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         if args.sql_id is None:
             runner = access.for_conn(args.conn, timeout=args.timeout)
-        # 没有 schema(贴文本漏了 --schema)或只有按账号名推测的值:按表名在目录里找,唯一就用,歧义就停下来问,不猜。
+        # 没有 schema(贴文本漏了 --schema)或只有按账号名推测的值:按表名在目录里找,唯一就用;
+        # 多个候选按规则选一个并写进说明,不再停下来问(2026-11-06 行方:技能不要做跨 schema 的限制)。
         guessed = args.sql_id is not None and getattr(fr, "schema_source", "") == "user_name"
         if not schema or guessed:
             inf = schema_infer.infer(runner, RELATION_SCHEMAS_SCRIPT, sql_text, guess=schema)
-            if inf.ambiguous:
-                print(f"error: {schema_infer.describe(inf)}", file=sys.stderr)
-                return 2
             if inf.schema and not inf.via_guess:
                 schema = inf.schema
-                fetch_source = (fetch_source + ";" if fetch_source else "") + f"schema={schema}(按表名在目录里唯一匹配推断)"
+                how = "按表名在目录里选取,有多个候选" if inf.picked else "按表名在目录里唯一匹配推断"
+                fetch_source = (fetch_source + ";" if fetch_source else "") + f"schema={schema}({how})"
+                if inf.picked:
+                    fetch_notes = tuple(fetch_notes) + (inf.reason,)
         plan, applied, sp_note = explain_plan_via_script(runner, sql_text, args.analyze, schema)
     # access.QueryError 必须在列 —— 它是本项目归一化的「取数失败」类型，
     # runner.run() 在 SQL 本身执行失败时抛的就是它（打错字、表不存在、

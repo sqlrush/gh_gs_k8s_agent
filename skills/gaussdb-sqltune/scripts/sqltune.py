@@ -59,6 +59,7 @@ import placeholder  # noqa: E402
 import planrules  # noqa: E402
 from placeholder import SubstituteResult, substitute  # noqa: E402
 from sqlfetch import sql_fetch  # noqa: E402
+import history_tune  # noqa: E402
 import sqltrend  # noqa: E402
 import sqltrendmd  # noqa: E402
 
@@ -373,7 +374,7 @@ def tune_by_id(runner, db, raw_id: str, binds: list[str], do_analyze: bool,
                schema_override: str = "") -> TuneResult:
     fr = sql_fetch(runner, raw_id)
     # schema 优先级:用户显式给的 > statement_history 记录值 > 按执行账号 user_name 推测
-    schema = schema_override or fr.schema
+    schema = schema_override or sp.business_path(fr.schema)    # `"$user",public` → 空,resolve_schema 按表名在目录里找
     schema_source = "--schema" if schema_override else getattr(fr, "schema_source", "")
     if fr.truncated:
         raise ValueError(
@@ -411,20 +412,20 @@ def tune_by_sql(runner, db, sql_text: str, binds: list[str], do_analyze: bool,
 
 def resolve_schema(runner, sql_text: str, schema: str, source: str) -> tuple[str, str]:
     """贴文本没带 --schema(09-09 早:模型漏了参数 → 400)/ 按 id 只有按账号名推测的值时,按表名在目录里找:
-    唯一匹配就用(来源记 catalog);同名表跨 schema 又定不下来就拒绝并列出候选——不猜;目录里没有就照旧。
+    唯一匹配就用(来源记 catalog);同名表跨 schema 时按规则选一个(来源记 catalog_picked,报告里写明候选),
+    不再拒绝(2026-11-06 行方:技能不要做跨 schema 的限制);目录里没有就照旧。
     用户显式给的 --schema 和 statement_history 的记录值不动。"""
     if schema and source != "user_name":
         return schema, source
     inf = schema_infer.infer(runner, TABLES_SCRIPT, sql_text, guess=schema)
-    if inf.ambiguous:
-        raise ValueError(schema_infer.describe(inf))
     if inf.schema and not inf.via_guess:
-        return inf.schema, "catalog"
+        return inf.schema, "catalog_picked" if inf.picked else "catalog"
     return schema, source
 
 
 _SCHEMA_SOURCE_LABEL = {
     "catalog": "按表名在目录里唯一匹配推断",
+    "catalog_picked": "同名表在多个 schema 下,按名字顺序选取;不对就加 --schema 指定",
     "statement_history": "statement_history 记录值",
     "user_name": "按执行账号 user_name 推测",
     "--schema": "用户指定",
@@ -701,6 +702,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     # ColumnError / ParamError 刻意不接：那是脚本定义缺陷，必须响亮失败。
     except (ValueError, KeyError, common.DBError, access.QueryError) as exc:
         conn = exec_db.routed(args.conn) if exec_db.object_missing(str(exc)) else None
+        if conn is not None and has_id:
+            # 目标库与取数库不同:按 SQL 历史里的真实执行计划出分析(行方「部分 SQL 无法调优」);取不到再报原因
+            md = history_tune.report(runner, args.sql_id, conn, args.format)
+            if md:
+                print(md, end="")
+                return 0
         if conn is not None:
             # 目标库与取数库不同:原因是库不对,tune_by_id 附的 search_path / ALTER ROLE 提示在这里是误导,整段换掉
             print("error: %s当前版本对其他库的 SQL 还不能现取计划做调优；%s" % (
