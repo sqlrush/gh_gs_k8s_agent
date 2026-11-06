@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "package": "kbimport",
+  "version": "kbimport-v1.4.7",
+  "source": {
+    "repo": "gh_agent_k8s",
+    "ref": "agent-v1.4.7",
+    "commit": "1347d589e4acb74ead896949d5fe860545d65662",
+    "date": "2026-11-06T12:36:18+08:00"
+  },
+  "base": null,
+  "files": 95,
+  "digest": "21e5981c1a01b31d0792175b789a9dedc56c83af79d9c4b09d460d5f7bd9e5e9"
+}
