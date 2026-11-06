@@ -18,6 +18,7 @@ import argparse
 import re
 import pathlib
 import sys
+from dataclasses import replace
 from typing import List, NamedTuple, Optional, Tuple
 
 _HERE = pathlib.Path(__file__).resolve()
@@ -208,10 +209,12 @@ DB_SCRIPTS = ("procinfo.locate_context", "proctune.locate_context")
 
 class DbCheck(NamedTuple):
     # NamedTuple 而不是 dataclass:测试按文件路径加载本脚本、不登记 sys.modules,dataclass 会在那里找模块而失败
-    status: str                       # ok / case(只差大小写)/ mismatch / unknown(核不了)
+    # ok / case(只差大小写)/ routed(实例上有这个库,但中间件连的是另一个)/ mismatch(实例上没有)/ unknown(核不了)
+    status: str
     actual: str = ""
     databases: Tuple[str, ...] = ()
     note: str = ""
+    target: str = ""                  # routed 时:实例库清单里的写法(大小写以清单为准)
 
 
 def _check_database(conn: Connection) -> DbCheck:
@@ -220,6 +223,10 @@ def _check_database(conn: Connection) -> DbCheck:
     **为什么要核:** api 模式下库名不发给中间件(报文只有 dataIp / id / param,一个 dataIp 只对一个库),
     写错了不会报错,只会变成报告抬头与大盘上的错误标签,还把同一个库的历史劈成两份(2026-10-14 抓到)。
     核不了(脚本没登记、查不动)时返回 unknown,由调用方如实写「未核实」,不猜。
+
+    **库名在实例上存在就放行(routed),不存在才拦(2026-11-06 行方):** 中间件对各实例都固定连 postgres,
+    用户填业务库名一律对不上,原先「不一致就拦」让 api 模式谁都登不上。用户填的库名是「要诊断哪个库」,
+    不是「连哪个库」—— 会话按它登记,取数库另记;写错的库名不在实例库清单里,照样拦。
     """
     last = ""
     for script in DB_SCRIPTS:
@@ -237,18 +244,37 @@ def _check_database(conn: Connection) -> DbCheck:
             return DbCheck("ok", actual, dbs)
         if actual.lower() == conn.database.lower():
             return DbCheck("case", actual, dbs)
+        listed = next((d for d in dbs if d.lower() == conn.database.lower()), "")
+        if listed:
+            return DbCheck("routed", actual, dbs, target=listed)
         return DbCheck("mismatch", actual, dbs)
     return DbCheck("unknown", note=last)
 
 
 def _mismatch_message(conn: Connection, chk: DbCheck) -> str:
     others = "、".join(chk.databases) if chk.databases else "（没取到）"
-    return ("库名不对，**未建立会话**：中间件按实例 IP %s 实际连到的是库「%s」，不是「%s」。\n"
+    return ("库名不对，**未建立会话**：实例 IP %s 上没有库「%s」。\n"
             "这个实例上的库：%s。\n\n"
-            "用实际的库名重新登录：\n    gaussdb-login --ip %s --database %s\n\n"
-            "（api 模式下一个实例 IP 只对一个库，库名不参与路由 —— 写错的库名不会报错，"
-            "只会把报告抬头和大盘上的实例名写错，所以登录时就拦下。）"
-            % (conn.data_ip, chk.actual, conn.database, others, conn.data_ip, chk.actual))
+            "确认用户要诊断的是哪个库，用清单里的名字重新登录：\n"
+            "    gaussdb-login --ip %s --database <库名>\n\n"
+            "（库名写错不会在取数时报错，只会把报告抬头和大盘上的库名写错、把同一个库的历史劈成两份，"
+            "所以登录时就拦下。）"
+            % (conn.data_ip, conn.database, others, conn.data_ip))
+
+
+def _routed_cell(chk: DbCheck) -> str:
+    return ("目标库「%s」在实例上存在；中间件按实例 IP 固定连库「%s」，取数都在「%s」上执行"
+            % (chk.target, chk.actual, chk.actual))
+
+
+ROUTED_NOTE = (
+    "\n> **要诊断的库（%(target)s）与取数的库（%(exec)s）不同**：中间件按实例 IP 固定连「%(exec)s」，不按库名切换，"
+    "这不是权限或 search_path 的问题，也不需要改数据库。告诉用户：\n"
+    "> - 会话、锁等待、等待事件、慢 SQL / Top SQL、WDR 是整个实例的数据，照常可用；"
+    "目前没有按库筛选，结果里可能有实例上其他库的会话与 SQL，引用时看清是不是「%(target)s」的。\n"
+    "> - 表、索引、执行计划、存储过程这类对象属于各自的库，取数时只能看到「%(exec)s」里的：对「%(target)s」的表做膨胀分析、"
+    "对「%(target)s」的 SQL 现取执行计划会找不到对象。遇到时如实说明是这个原因，不要让用户去改 search_path 或授权。\n"
+)
 
 
 # --- 输出 ---------------------------------------------------------------------
@@ -301,6 +327,7 @@ def _describe(conn: Connection, note: str, path, role: str = "", handle: str = "
          ["应用", conn.app or "—"],         
          ["实例 IP（dataIp）", conn.data_ip],
          ["数据库", conn.database] ,
+         *([["取数库", conn.exec_database]] if conn.exec_database else []),
          *([["库名核对", db_note]] if db_note else []),
          ["验证", note],
          ["主备", role or "未探测"]])
@@ -316,6 +343,8 @@ def _describe(conn: Connection, note: str, path, role: str = "", handle: str = "
          ["验证", note],
          ["主备", role or "未探测"]])
    
+    if conn.exec_database:
+        out += ROUTED_NOTE % {"target": conn.database, "exec": conn.exec_database}
     if role.startswith("备机"):
         out += STANDBY_NOTE
     out += "\n会话已写入 `%s`。\n\n" % path
@@ -485,6 +514,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 if chk.status == "case":
                     db_note = "按实际库名「%s」登录（你给的是「%s」，只差大小写）" % (chk.actual, conn.database)
                     conn = _api_connection(conn.data_ip, chk.actual, config.api_endpoint())
+                elif chk.status == "routed":
+                    db_note = _routed_cell(chk)
+                    conn = replace(_api_connection(conn.data_ip, chk.target, config.api_endpoint()),
+                                   exec_database=chk.actual)
                 elif chk.status == "ok":
                     db_note = "与中间件实际连的库一致"
                 else:

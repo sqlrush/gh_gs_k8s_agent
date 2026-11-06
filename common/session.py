@@ -47,7 +47,7 @@ NOT_LOGGED_IN = ("本对话未登录。请先运行 gaussdb-login 登录要访�
 # 会话文件里允许出现的键。多余的键一律拒绝 —— 手工改这个文件时写错一个键名
 # （比如把 data_ip 写成 dataip），静默忽略的话会连到错误的实例上去。
 _ALLOWED = frozenset({"name", "type", "host", "port", "database", "user",
-                      "sslmode", "driver", "data_ip", "app"})
+                      "sslmode", "driver", "data_ip", "app", "exec_database"})
 
 _selected: Optional[str] = None      # 本进程用 use() 选中的句柄（来自 --session）
 
@@ -144,6 +144,7 @@ def _read(path: pathlib.Path) -> Connection:
         driver=raw.get("driver", "gsql") or "gsql",
         data_ip=raw.get("data_ip", "") or "",
         app=raw.get("app", "") or "",
+        exec_database=raw.get("exec_database", "") or "",
     )
     if conn.driver == "grmp":
         # 会话文件只是登录那一刻的快照。中间件地址属于环境配置,不属于会话:
@@ -189,6 +190,8 @@ def save(conn: Connection, handle: Optional[str] = None) -> str:
         "sslmode": conn.sslmode, "driver": conn.driver,
         "data_ip": conn.data_ip, "app": conn.app,
     }
+    if conn.exec_database:
+        payload["exec_database"] = conn.exec_database
     _write(path_for(handle), payload)
     legacy = _legacy_path()                     # 旧版单文件:谁都能用的口子,见到就删
     if legacy.exists():

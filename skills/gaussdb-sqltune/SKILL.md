@@ -1,6 +1,6 @@
 ﻿---
 name: gaussdb-sqltune
-version: 2.8.2
+version: 2.8.3
 description: "通过内置脚本对 OpenGauss/GaussDB 的慢 SQL 做深度调优和证据化验证。仅在用户要定位慢 SQL 根因、给出索引/改写/GUC 调优建议、验证某个优化方案是否真的带来收益，或基于 sql_id、Top SQL、slow SQL、WDR 结果继续调优时使用，包括“优化这条 SQL”“这条 SQL 为什么慢并怎么改”“看看建什么索引”“这个改写有没有收益”“给我一套能落地的优化建议”等请求。触发后运行 scripts/sqltune.py 和 scripts/verify.py，输出带证据链、可解释原因和已验证收益的调优结论；如果用户只是想看 explain、执行计划、plan 对比，不要优先使用本 skill。"
 allowed-tools: ["exec", "read"]
 compatibility: opencode

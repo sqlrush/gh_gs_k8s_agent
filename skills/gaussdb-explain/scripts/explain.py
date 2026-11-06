@@ -27,6 +27,7 @@ for _anc in _HERE.parents:  # locate common/ (repo root or install dir)
 import common  # noqa: E402
 from common import access  # noqa: E402
 from common import cli  # noqa: E402
+from common import exec_db  # noqa: E402
 from common import kernel_funcs as kf  # noqa: E402
 from common import search_path as sp  # noqa: E402
 from common import schema_infer  # noqa: E402
@@ -395,6 +396,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     # 「syntax error at or near "SELEKT"」。而这是最常见的用户路径之一。
     except (common.ConfigError, common.CredentialError, common.DBError,
             access.AccessError, access.QueryError) as exc:
+        conn = exec_db.routed(args.conn) if exec_db.object_missing(str(exc)) else None
+        if conn is not None:
+            return _emit_misplaced(args, runner, fr, conn, str(exc))
         print(f"error: {exc}", file=sys.stderr)
         return 2
     script = "explain.plan_text_analyze" if args.analyze else "explain.plan_text"
@@ -403,15 +407,37 @@ def main(argv: Optional[list[str]] = None) -> int:
     return _emit(args, sql_text, plan, source, ((sp_note,) if sp_note else ()) + fetch_notes)
 
 
+def _history_source(args, hist) -> str:
+    return (f"sql_id={args.sql_id};SQL 历史里记下的真实执行计划(statement_history.query_plan),"
+            f"{hist.start_time} 那次执行,耗时 {hist.db_time_ms} ms,返回 {hist.rows} 行")
+
+
 def _emit_history(args, fr, hist) -> int:
     """SQL 历史里的真实执行计划:标明是哪次执行、不是此刻重新 EXPLAIN 的。"""
-    source = (f"sql_id={args.sql_id};SQL 历史里记下的真实执行计划(statement_history.query_plan),"
-              f"{hist.start_time} 那次执行,耗时 {hist.db_time_ms} ms,返回 {hist.rows} 行")
+    source = _history_source(args, hist)
     why = (f"文本被截断({fr.truncated_reason})" if fr.truncated
            else f"文本是归一化的(带 {fr.placeholders} 个占位符)")
     notes = (f"这是当时真实执行的计划(带 actual time / rows),不是此刻重新 EXPLAIN 的结果;{why},此刻 EXPLAIN 不了。"
              f"要看现在的估算计划或做调优,用 gaussdb-sqltune 按这个 id 调优(按列类型合成占位符值)。",)
     return _emit(args, fr.sql, hist.plan, source, notes)
+
+
+def _emit_misplaced(args, runner, fr, conn, message: str) -> int:
+    """目标库与取数库不同(中间件按实例 IP 固定连库):现取计划找不到对象时,按 id 退到 SQL 历史里的真实计划。
+
+    statement_history 只在系统库里有数据、覆盖实例上全部库(2026-11-06 og5 实测),取数库是 postgres 时正好取得到。
+    """
+    why = exec_db.misplaced(conn, message)
+    if fr is not None:
+        hist, hist_why = sqlfetch.history_plan(runner, int(args.sql_id))
+        if hist is not None:
+            return _emit(args, fr.sql, hist.plan, _history_source(args, hist),
+                         (f"这是当时真实执行的计划(带 actual time / rows),不是此刻重新 EXPLAIN 的结果。{why}",))
+        why += f"SQL 历史里也没有这条的执行计划({hist_why})。"
+    else:
+        why += "按 --sql-id 调用时可以改看 SQL 历史里记下的真实执行计划。"
+    print(f"error: {why}", file=sys.stderr)
+    return 2
 
 
 def _emit(args, sql_text: str, plan: str, source: str, notes: tuple) -> int:

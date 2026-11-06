@@ -33,6 +33,7 @@ import coltypes  # noqa: E402
 import common  # noqa: E402
 from common import access  # noqa: E402
 from common import cli  # noqa: E402
+from common import exec_db  # noqa: E402
 from common import reports  # noqa: E402
 from common.grmp.hints import ensure_hint  # noqa: E402
 from common import kernel_funcs as kf  # noqa: E402
@@ -699,6 +700,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     # 不经过 runner，报的还是原始的 DBError。
     # ColumnError / ParamError 刻意不接：那是脚本定义缺陷，必须响亮失败。
     except (ValueError, KeyError, common.DBError, access.QueryError) as exc:
+        conn = exec_db.routed(args.conn) if exec_db.object_missing(str(exc)) else None
+        if conn is not None:
+            # 目标库与取数库不同:原因是库不对,tune_by_id 附的 search_path / ALTER ROLE 提示在这里是误导,整段换掉
+            print("error: %s当前版本对其他库的 SQL 还不能现取计划做调优；%s" % (
+                exec_db.misplaced(conn, str(exc)),
+                ("这条 SQL 当时真实执行的计划可以用 gaussdb-explain --sql-id %s 看，执行统计用 gaussdb-slowsql / "
+                 "gaussdb-topsql 看。" % args.sql_id) if has_id else
+                "这条 SQL 的执行统计可以用 gaussdb-slowsql / gaussdb-topsql 看。"), file=sys.stderr)
+            return 1
         print(f"error: {ensure_hint(str(exc))}", file=sys.stderr)   # 直连路径的 DBError 没经过 runner,这里补中文提示
         return 1
     finally:
