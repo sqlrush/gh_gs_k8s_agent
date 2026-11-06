@@ -47,6 +47,9 @@ class Connection:
     driver: str = "gsql"
     # 仅 driver=grmp 时使用：中间件按它路由到目标高斯实例
     data_ip: str = ""
+    # 仅 driver=grmp 时使用：中间件按 dataIp 实际连的库，与 database（用户要诊断的库）不同时才有值。
+    # 中间件不按库名切换（2026-11-06 行方：各实例都固定连 postgres），取数都在这个库上执行。
+    exec_database: str = ""
     # 所属应用分组（新格式 db_connections 下的一级键）。旧格式为空。
     app: str = ""
     # 内联口令。密文时是 base64，AAD 用连接名，与 credentials/ 目录同一把钥匙。
