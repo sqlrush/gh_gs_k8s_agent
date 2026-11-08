@@ -1,6 +1,6 @@
 ﻿---
 name: gaussdb-health
-version: 3.8.0
+version: 3.8.1
 description: "通过内置脚本执行 OpenGauss/GaussDB 数据库健康检查。用户询问库是否健康、为什么慢或卡、是否有阻塞、长事务、膨胀、复制延迟、checkpoint 压力、归档问题、空闲会话、连接压力或无用索引时使用，包括“库健康吗”“为什么卡”“有没有阻塞”“有没有长事务”“有没有膨胀”“复制有没有延迟”“最近半小时库怎么样”“昨天 10 点到 11 点库出了什么问题”等请求；支持最近 N 分钟与指定时间段的时段体检。触发后运行 scripts/health.py，采集真实证据和确定性发现，不要只给泛化排查建议。"
 allowed-tools: ["exec", "read"]
 compatibility: opencode

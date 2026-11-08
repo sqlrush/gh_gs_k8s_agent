@@ -91,6 +91,7 @@ def _write_sql(runner, top: int) -> Tuple[list, str]:
     except access.QueryError as exc:
         return [], "写入最多的 SQL 取不到:%s" % summarize_err(exc)
     screening = syssql.screen(fetched, want=top, sql_id=lambda r: r["unique_sql_id"], text=lambda r: r["query"],
+                              user=lambda r: r.get("user_name"),
                               shown_chars=80, full_text=syssql.full_text_lookup(runner),
                               seconds=lambda r: as_float(r.get("total_sec")), cache=syssql.verdict_cache())
     return screening.kept, ""

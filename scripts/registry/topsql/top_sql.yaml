@@ -25,6 +25,9 @@
 # 排队等 CPU 等)。只加列、不改筛选与原有列,原来的 --by 取值照旧;新 --by self / self_avg 按这两列排。
 # **2026-11-05 改:多带 rows_written(插入 + 更新 + 删除的行数),支持 --by writes。** xlog 涨得快、死元组多时,
 # 要追到是哪些 SQL 在大量写(站在应用 DBA 角度:归因到业务)。只加列,筛选不动。
+# **多取执行账号 user_name(2026-11-08)。** 行方测试报告:榜首是云平台运维账号 rdsAdmin 的 ASP 采样 SQL,
+# 查的是它自己 schema 下的表,按对象认不出是非业务;按账号认(common/syssql.platform_accounts)。
+# 按 sql_id 跨账号聚合:只有一个账号跑过时才给账号,几个账号都跑过给 NULL(不能把业务账号也跑的 SQL 排掉)。
 name: topsql.top_sql
 description: 资源消耗最高的语句（dbe_perf.statement）
 sql: |
@@ -38,7 +41,8 @@ sql: |
     n_returned_rows AS rows,
     ROUND(cpu_time/1000000::numeric, 2) AS cpu_sec,
     ROUND(data_io_time/1000000::numeric, 2) AS io_sec,
-    n_tuples_written AS rows_written
+    n_tuples_written AS rows_written,
+    user_name
   FROM (SELECT unique_sql_id,
                max(query)             AS query,
                sum(n_calls)           AS n_calls,
@@ -48,7 +52,8 @@ sql: |
                sum(n_blocks_fetched)  AS n_blocks_fetched,
                sum(cpu_time)          AS cpu_time,
                sum(data_io_time)      AS data_io_time,
-               sum(n_tuples_inserted + n_tuples_updated + n_tuples_deleted) AS n_tuples_written
+               sum(n_tuples_inserted + n_tuples_updated + n_tuples_deleted) AS n_tuples_written,
+               CASE WHEN count(DISTINCT user_name) = 1 THEN max(user_name) END AS user_name
           FROM dbe_perf.statement
          GROUP BY unique_sql_id) s
   WHERE n_calls > 0

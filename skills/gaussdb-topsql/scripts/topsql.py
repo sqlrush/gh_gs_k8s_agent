@@ -75,6 +75,7 @@ class StmtRow:
     cpu_sec: Optional[float] = None
     io_sec: Optional[float] = None
     rows_written: Optional[int] = None     # None = 老白名单没有这一列
+    user: str = ""                         # 执行账号;空 = 老白名单没有这一列,或几个账号都跑过
 
     @property
     def self_sec(self) -> Optional[float]:
@@ -117,7 +118,8 @@ def top_sql(runner, by: str, limit: int) -> list[StmtRow]:
                 as_float(r["total_sec"]), as_float(r["avg_ms"]), as_int(r["rows"]),
                 # 可选列用 get:老白名单没有它们,缺列要降级成「未知」,不能 KeyError
                 as_float(r.get("cpu_sec"), None), as_float(r.get("io_sec"), None),
-                as_int(r["rows_written"]) if r.get("rows_written") not in (None, "") else None)
+                as_int(r["rows_written"]) if r.get("rows_written") not in (None, "") else None,
+                str(r.get("user_name") or ""))
         for r in rows
     ]
 
@@ -133,7 +135,7 @@ def _screener(runner, include_system: bool):
     lookup, cache = syssql.full_text_lookup(runner), syssql.verdict_cache()
 
     def run(rows, want):
-        return syssql.screen(rows, want=want, sql_id=lambda r: r.sql_id, text=lambda r: r.query,
+        return syssql.screen(rows, want=want, sql_id=lambda r: r.sql_id, text=lambda r: r.query, user=lambda r: getattr(r, "user", ""),
                              shown_chars=QUERY_CHARS, full_text=lookup, seconds=lambda r: r.total_sec,
                              cache=cache)
     return run

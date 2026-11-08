@@ -1,6 +1,6 @@
 ---
 name: gaussdb-slowsql
-version: 2.2.1
+version: 2.2.2
 description: "通过内置脚本发现 OpenGauss/GaussDB 中超过指定耗时阈值的慢 SQL。用户要按阈值筛出慢语句、找出超过某个耗时门槛的 SQL、查看高平均耗时且3已超阈值的语句，或先拿一批可调优的 SQL 候选时使用，包括“查超过 1 秒的 SQL”“找出超阈值慢 SQL”“哪些 SQL 平均耗时超过 500ms”“给我超 1 秒的 SQL 列表”等请求。触发后运行 scripts/slowsql.py，输出真实的超阈值慢 SQL 结果，不要只解释慢 SQL 的概念。"
 allowed-tools: ["exec", "read"]
 compatibility: opencode

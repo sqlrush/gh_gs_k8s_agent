@@ -6,6 +6,10 @@
 # 只能回答「占了多少、涨得多快」,回答不了「盘还剩多少」。
 # 判定文案必须跟着这个边界走 —— 说成「磁盘快满了」是在用一个取不到的事实下结论。
 #
+# **只量执行账号有权限的**(2026-11-08 行方报告:受限账号下整条 HTTP 400)。pg_database_size 要对目标库有 CONNECT 权限、
+# pg_tablespace_size 要对表空间有 CREATE 权限(或它是本库的默认表空间);原先对实例上每个库、每个表空间都量,
+# 受限账号碰到一个没权限的就整条失败。没权限的那行 bytes 为 NULL,报告里写「无权限查看」,其余照常。
+#
 # 两段 UNION ALL,缺一段就少一类根因:
 #   database    —— 哪个库在涨。多租户/多应用共用一个实例时,这是第一步定位。
 #   tablespace  —— 哪个表空间在涨。表空间常挂在不同的盘上,
@@ -20,12 +24,15 @@ readonly: true
 sql: |
   SELECT 'database' AS kind,
          d.datname  AS name,
-         pg_database_size(d.oid)::bigint AS bytes
+         CASE WHEN has_database_privilege(d.oid, 'CONNECT')
+              THEN pg_database_size(d.oid)::bigint END AS bytes
     FROM pg_database d
    WHERE d.datallowconn
   UNION ALL
   SELECT 'tablespace' AS kind,
          t.spcname    AS name,
-         pg_tablespace_size(t.oid)::bigint AS bytes
+         CASE WHEN has_tablespace_privilege(t.oid, 'CREATE')
+                OR t.oid = (SELECT dattablespace FROM pg_database WHERE datname = current_database())
+              THEN pg_tablespace_size(t.oid)::bigint END AS bytes
     FROM pg_tablespace t
-   ORDER BY bytes DESC;
+   ORDER BY bytes DESC NULLS LAST;

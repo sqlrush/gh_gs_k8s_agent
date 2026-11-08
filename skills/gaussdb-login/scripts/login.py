@@ -34,6 +34,7 @@ from common.config import MODE_API, MODE_GSQL, ConfigError, Connection  # noqa: 
 from common.credential import secret_for  # noqa: E402
 from common.db import Database  # noqa: E402
 from common.grmp import proxy as grmp_proxy  # noqa: E402
+from common.version import package_version  # noqa: E402
 
 
 def _fail(message: str) -> int:
@@ -159,9 +160,13 @@ def _verify(conn: Connection) -> tuple:
                            "常见原因：库名（dataIp）不被受理、令牌未设置或"
                            "过期、端点不通。" % exc)
         if not ops:
-            return False, ("中间件应答正常，但这个库的白名单是空的 —— "
-                           "一条脚本都没注册，任何 skill 都取不到数。"
-                           "需要先由发布流程把脚本灌进 script_config。")
+            # 白名单不配在目标库上:中间件按实例属性(部署形态、内核版本、地域等)从 script_config 里挑出匹配的脚本返回。
+            # 我方 DML 登记的是集中式(cluster_deployment_mode = 'centralization')。2026-11-08 行方批量登录 92 个库,
+            # 90 个有清单、2 个是空的 —— 原先这里说「先把脚本灌进去」,行方指出不对:脚本都在,是这个实例匹配不上。
+            return False, ("中间件对这个实例返回的脚本清单为空，任何 skill 都取不到数。"
+                           "脚本清单由中间件按实例属性（部署形态、内核版本等）匹配后返回，我方白名单登记的是集中式实例；"
+                           "同一套白名单其他实例能取到、这个实例取不到，多半是它的属性（例如是分布式实例）与脚本登记的不匹配。"
+                           "请中间件团队核对这个实例的属性与脚本配置的匹配规则。")
         return True, "中间件应答正常，白名单 %d 条脚本" % len(ops)
     return _verify_direct(conn)
 
@@ -321,10 +326,13 @@ def _describe(conn: Connection, note: str, path, role: str = "", handle: str = "
         out += render.table(
         ["项", "值"],
         [["模式", "api（GRMP 中间件）"],
+         ["技能包", package_version() or "未知（技能目录里没有 common/VERSION，可能还是旧包）"],
          ["应用", conn.app or "—"],         
          ["实例 IP（dataIp）", conn.data_ip],
-         ["数据库", conn.database] ,
-         *([["取数库", conn.exec_database]] if conn.exec_database else []),
+         # 取数库不是目标库时分两行写明:行方 11-08 批量登录后以为「登录成功」= 业务库连上了(实际全在 postgres 上取数)
+         *([["要诊断的库", "%s（未直连）" % conn.database],
+            ["实际连接", "实例 %s 的 %s 库（所有取数都在这里执行）" % (conn.data_ip, conn.exec_database)]]
+           if conn.exec_database else [["数据库", conn.database]]),
          *([["库名核对", db_note]] if db_note else []),
          ["验证", note],
          ["主备", role or "未探测"]])
@@ -332,6 +340,7 @@ def _describe(conn: Connection, note: str, path, role: str = "", handle: str = "
          out += render.table(
         ["项", "值"],
         [["模式", "gsql（直连）"],
+         ["技能包", package_version() or "未知（技能目录里没有 common/VERSION，可能还是旧包）"],
          ["应用", conn.app or "—"],
          ["连接名",  conn.name]  ,
          ["目标", "%s:%s/%s" % (conn.host, conn.port, conn.database)],

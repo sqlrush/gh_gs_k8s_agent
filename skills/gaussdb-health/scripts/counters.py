@@ -22,6 +22,11 @@ import pathlib
 import re
 from typing import Dict, NamedTuple, Optional, Tuple
 
+
+def _int(v) -> int:
+    """中间件 / 基线里的整数可能是小数形态("3704.0"):按值截断,空当 0;非数字照旧报错(2026-11-08 行方报告 M4)。"""
+    return int(float(v)) if v not in (None, "") else 0
+
 BASELINE_NAME = "_counters.json"
 
 # 要跟踪的累计计数器。键名就是报告里的说法,顺序即呈现顺序。
@@ -166,20 +171,20 @@ def compute(now: Dict[str, int], before: Dict[str, int], since: str) -> Deltas:
     """现在的计数器 vs 基线 → 每项的增量。"""
     if not before:
         # 留没留下基线这里不知道(局部巡检不留、存档目录可能没有),不在这里许诺
-        return Deltas(items={k: Delta(k, int(now.get(k, 0)), None) for k in TRACKED},
+        return Deltas(items={k: Delta(k, _int(now.get(k, 0)), None) for k in TRACKED},
                       since="", reset=False, note="没有基线,这次只能给累计值")
     # 任一项变小 → 统计被重置过。只看两边都有的项。
     shrunk = [k for k in TRACKED
-              if k in before and int(now.get(k, 0)) < int(before[k])]
+              if k in before and _int(now.get(k, 0)) < _int(before[k])]
     if shrunk:
-        return Deltas(items={k: Delta(k, int(now.get(k, 0)), None) for k in TRACKED},
+        return Deltas(items={k: Delta(k, _int(now.get(k, 0)), None) for k in TRACKED},
                       since=since, reset=True,
                       note=("计数器比上次小了(%s)—— 统计被重置过(pg_stat_reset 或实例重启),"
                             "这次给不出「距上次新增」,**不是「没有新增」**" % "、".join(shrunk)))
     items = {}
     for k in TRACKED:
-        cur = int(now.get(k, 0))
-        items[k] = Delta(k, cur, cur - int(before[k]) if k in before else None)
+        cur = _int(now.get(k, 0))
+        items[k] = Delta(k, cur, cur - _int(before[k]) if k in before else None)
     return Deltas(items=items, since=since, reset=False,
                   note="「距上次新增」是与上一次巡检(%s)相比的增量" % (since or "未知时刻"))
 

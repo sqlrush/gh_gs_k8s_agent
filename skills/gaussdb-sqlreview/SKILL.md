@@ -1,6 +1,6 @@
 ﻿---
 name: gaussdb-sqlreview
-version: 1.1.0
+version: 1.1.1
 description: "通过内置脚本对 OpenGauss/GaussDB SQL 做治理审查。用户要判断 SQL 或 DDL 是否符合规范、上线前评审 SQL、审查表/索引/列命名和主键等规则，或者检查线上 SQL 和已有 schema 对象是否有违规时使用，包括“这段 SQL 合不合规”“上线前审一下”“库里哪些表不合规范”“看看索引设计合不合规”等请求。触发后运行 scripts/sqlreview.py，输出真实规则检查结果，不要只给通用最佳实践建议。"
 allowed-tools: ["exec", "read"]
 compatibility: opencode

@@ -1,5 +1,7 @@
 # SQL 取自 common/sql.py 的 skill_health_003。列名齐全。
 # **改动：两个 %s 绑定变量换成 {{}} 占位符。** 都是数值位，无需补引号。
+# **多取执行账号 user_name(2026-11-08)。** 行方测试报告:榜首是云平台运维账号 rdsAdmin 的 ASP 采样 SQL,
+# 查的是它自己 schema 下的表,按对象认不出是非业务;按账号认(common/syssql.platform_accounts)。
 name: health.slow_sql
 description: 平均耗时超阈值的语句
 sql: |
@@ -10,7 +12,8 @@ sql: |
     ROUND((total_elapse_time/NULLIF(n_calls,0))/1000::numeric, 2) AS avg_ms,
     ROUND(total_elapse_time/1000000::numeric, 2) AS total_sec,
     ROUND(cpu_time/1000000::numeric, 2) AS cpu_sec,
-    n_returned_rows AS rows
+    n_returned_rows AS rows,
+    user_name
   FROM dbe_perf.statement
   WHERE (total_elapse_time/NULLIF(n_calls,0))/1000 > {{threshold_ms}}
     AND n_calls > 0

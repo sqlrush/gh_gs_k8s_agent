@@ -55,7 +55,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from common.grmp.values import is_null
+from common.grmp.values import as_int, is_null
 
 # 这些状态下 cancel 无效，必须 terminate
 _NEEDS_TERMINATE_PREFIX = "idle in transaction"
@@ -74,8 +74,8 @@ class KillStatement:
 def kill_for(holder: dict) -> KillStatement:
     """给一个根 holder 生成恢复语句。holder 是 lockwait 的 pairs 查询返回的一行字典。"""
     state = str(holder.get("holder_state") or "").strip().lower()
-    pid = int(holder.get("holder_pid") or 0)
-    sid = int(holder.get("holder_sessionid") or 0)
+    pid = as_int(holder.get("holder_pid"))
+    sid = as_int(holder.get("holder_sessionid"))
 
     if state == "active":
         fn = "pg_cancel_session"

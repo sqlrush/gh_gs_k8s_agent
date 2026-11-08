@@ -370,6 +370,14 @@ def _tune(runner, db, *, original_sql: str, binds: list[str], do_analyze: bool,
                       derivation_report=deriv)
 
 
+def _with_note(exc: Exception, note: str) -> Exception:
+    """原异常加一段说明;异常类的构造签名特殊(不是单个消息参数)时原样返回,不让「加说明」掩盖原始错误(行方报告 M5)。"""
+    try:
+        return type(exc)("%s\n补充:%s" % (exc, note))
+    except Exception:  # noqa: BLE001
+        return exc
+
+
 def tune_by_id(runner, db, raw_id: str, binds: list[str], do_analyze: bool,
                schema_override: str = "") -> TuneResult:
     fr = sql_fetch(runner, raw_id)
@@ -392,8 +400,7 @@ def tune_by_id(runner, db, raw_id: str, binds: list[str], do_analyze: bool,
         # schema 可能是 statement_history 记的搜索路径串(`fl, public`):DBA 命令按路径给、不再叠一个 public,
         # 「表名写全」按第一段给(写成 `fl, public.<表>` 没法照抄)。
         if "does not exist" in str(exc) and schema and "ALTER ROLE" not in str(exc):   # search_path 层已附过说明就不叠
-            raise type(exc)(
-                f"{exc}\n补充:这条 SQL 的执行 schema 是 {schema}({_SCHEMA_SOURCE_LABEL.get(schema_source, schema_source)}),"
+            raise _with_note(exc, f"这条 SQL 的执行 schema 是 {schema}({_SCHEMA_SOURCE_LABEL.get(schema_source, schema_source)}),"
                 f"执行账号当前的 search_path 里多半没有它。可让 DBA 给执行账号在该库上设置 search_path 包含 {schema}"
                 f"(ALTER ROLE <执行账号> IN DATABASE <库> SET search_path = {sp.dba_search_path(schema)}),"
                 f"或把 SQL 里的表名写成 {sp.primary_schema(schema)}.<表> 后用 --sql-stdin 重跑。") from exc

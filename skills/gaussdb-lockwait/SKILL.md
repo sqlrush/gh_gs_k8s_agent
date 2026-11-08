@@ -1,6 +1,6 @@
 ---
 name: gaussdb-lockwait
-version: 1.5.0
+version: 1.5.1
 description: "通过内置脚本对 OpenGauss/GaussDB 做锁等待与阻塞链诊断。用户觉得某条 SQL 卡住了、在等锁、堵着不动，或想知道谁把谁挡住了、挡在哪把锁上、挡了多久、阻塞链的根是谁时使用，包括“卡住了”“在等锁”“这条 SQL 不动了”“谁把谁堵住了”“是不是有锁等待”“帮我看看现在有没有阻塞”等请求。触发后运行 scripts/lockwait.py，输出真实的持有者/等待者明细、阻塞链与根，以及供人工核对的 kill 语句；不要只解释锁等待的概念。事后追查某段时间谁挡了谁（“昨晚 18:30 到 19:00 谁堵了谁”“那段时间的锁等待是谁引起的”“当时阻塞链的根是谁”）时，运行 scripts/lockwait.py --from … --to …，从活跃会话采样（ASP）回看阻塞对、阻塞链与根；采样没开或已过保留期时如实说明回看不了。用户问已经发生过的死锁（“死锁是哪几条语句”“帮我分析这段死锁日志”“deadlock detected 是怎么回事”）、或贴来含 deadlock detected 的日志时，运行 scripts/lockwait.py --deadlock-log - 解析日志段。"
 allowed-tools: ["exec", "read"]
 compatibility: opencode

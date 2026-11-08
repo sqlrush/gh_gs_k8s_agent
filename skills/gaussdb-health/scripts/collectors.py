@@ -127,6 +127,7 @@ def collect_slowsql(runner, th: Thresholds, top: int) -> DimResult:
 def _completed_slowsql(runner, th: Thresholds, top: int, fetched) -> DimResult:
     # 2026-10-22 行方要求:排除 GaussDB 自己的系统 SQL(common/syssql.py),标题里写明排除了几条
     screening = syssql.screen(fetched, want=top, sql_id=lambda r: r["unique_sql_id"], text=lambda r: r["query"],
+                              user=lambda r: r.get("user_name"),
                               shown_chars=SLOWSQL_QUERY_CHARS, full_text=syssql.full_text_lookup(runner),
                               seconds=lambda r: _f(r["total_sec"]), cache=syssql.verdict_cache())
     rows = screening.kept
@@ -749,14 +750,19 @@ def collect_storage(runner, th: Thresholds, top: int) -> DimResult:
                   headers=["类型", "名称", "占用"])
     dbs = tss = 0
     biggest = 0
+    hidden = []
     for row in rows or []:
         kind = str(row.get("kind") or "")
         name = str(row.get("name") or "")
-        n = as_int(row.get("bytes"))
         if kind == "database":
             dbs += 1
         else:
             tss += 1
+        if is_null(row.get("bytes")):          # 执行账号对这个库 / 表空间没有权限(脚本按权限只量能量的)
+            hidden.append(name)
+            d.rows.append([("库" if kind == "database" else "表空间"), trunc(name, 32), "无权限查看"])
+            continue
+        n = as_int(row.get("bytes"))
         biggest = max(biggest, n)
         d.rows.append([("库" if kind == "database" else "表空间"),
                        trunc(name, 32), human_bytes(n)])
@@ -779,6 +785,9 @@ def collect_storage(runner, th: Thresholds, top: int) -> DimResult:
         return d
     d.headline = ("%d 个库、%d 个表空间，最大 %s（剩余空间不可知，见证据）"
                   % (dbs, tss, human_bytes(biggest)))
+    if hidden:
+        d.note = ("执行账号对 %d 个库 / 表空间没有权限查看占用（%s），这几项未计入；需要时由运维用有权限的账号确认"
+                  % (len(hidden), "、".join(hidden[:5]) + ("等" if len(hidden) > 5 else "")))
     return d
 
 

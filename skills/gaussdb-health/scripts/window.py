@@ -34,6 +34,7 @@ from typing import Dict, List, Optional, Tuple
 
 from common import access, spillnote, syssql, timewin, windata
 from common.finding import findings_from_json
+from common.grmp.values import as_int
 
 from model import (DIM_WIN_COVER, DIM_WIN_IO, DIM_WIN_LOAD, DIM_WIN_TOPSQL, DIM_WIN_TXN,
                    DIM_LOCKS, DIM_WIN_WAITS, DimResult, Finding, HealthEvidence, Severity, worst)
@@ -321,7 +322,7 @@ def topsql_dim(cov: timewin.Coverage, top: int, script_path, timeout: int,
     d = DimResult(dimension=DIM_WIN_TOPSQL, available=True,
                   headers=["sql_id", "窗口内调用", "窗口内耗时(s)", "平均(ms)", "新出现", "query"])
     for r in data["rows"][:top]:
-        d.rows.append([str(r.get("sql_id", "")), "%d" % int(r.get("calls") or 0),
+        d.rows.append([str(r.get("sql_id", "")), "%d" % as_int(r.get("calls")),
                        "%.2f" % float(r.get("total_sec") or 0), "%.2f" % float(r.get("avg_ms") or 0),
                        "新" if r.get("is_new") else "", str(r.get("query") or "")[:80]])
     d.headline = ("按耗时排的前 %d 条。要看全文、执行计划或调优，直接说「看 sql_id … 的执行计划」"
@@ -388,7 +389,7 @@ def _lock_dim_from(asp: dict, findings: list) -> DimResult:
         return d
     waiters = {p.get("waiter") for p in asp.get("pairs") or []}
     top = max(chains, key=lambda c: float(c.get("wait_s") or 0))
-    r0 = max(asp.get("roots") or [{}], key=lambda r: int(r.get("blocked") or 0))
+    r0 = max(asp.get("roots") or [{}], key=lambda r: as_int(r.get("blocked")))
     d.headline = ("活跃会话采样回看：%d 条阻塞链、%d 个会话被挡，最长约 %.0f 秒；最大的根是会话 %s（%s，挡住 %s 个）"
                   % (len(chains), len(waiters), float(top.get("wait_s") or 0), r0.get("sessionid", "?"),
                      r0.get("state") or "状态未采到", r0.get("blocked", "?")))

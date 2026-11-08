@@ -1,6 +1,6 @@
 ﻿---
 name: gaussdb-topsql
-version: 2.5.0
+version: 2.5.1
 description: "通过内置脚本对 OpenGauss/GaussDB 的 Top SQL 做多维排名。用户要按总耗时、平均耗时、调用次数、逻辑读、返回行数等维度查看资源消耗榜、热点 SQL 排行榜或系统负载主导语句时使用，包括“给我最耗时的 SQL”“查 top sql”“找最耗资源的 SQL”“看 SQL 排行榜”“按平均耗时排行”“按调用次数排行”“按逻辑读排行”“哪些 SQL 最拖慢系统”“最近十分钟哪些 SQL 最耗时”“昨天下午三点那一阵谁最耗时”“10:46 到 11:07 的 top sql”等请求；支持最近 N 分钟与指定时间段。触发后运行 scripts/topsql.py，输出真实的多维排名结果，不要只解释 Top SQL 的概念。"
 allowed-tools: ["exec", "read"]
 compatibility: opencode

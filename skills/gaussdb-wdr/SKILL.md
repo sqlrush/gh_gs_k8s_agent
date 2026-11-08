@@ -1,6 +1,6 @@
 ﻿---
 name: gaussdb-wdr
-version: 2.7.0
+version: 2.7.1
 description: "通过内置脚本对 OpenGauss/GaussDB 做 WDR 窗口诊断。用户要比较两个快照、查看某个时间窗口的 WDR、分析某段时间库为什么慢、查看负载概况/Top SQL/等待/Checkpoint/缓存/文件 IO，或寻找高风险负载变化时使用，包括“看下两个快照之间的 WDR”“这段时间库为什么慢”“分析这个时间窗口的 WDR”“有没有高风险 SQL 或等待事件”等请求。触发后运行 scripts/wdr.py，输出真实 WDR 证据和发现，不要只解释 WDR 报告怎么读。"
 allowed-tools: ["exec", "read", "write"]
 compatibility: opencode

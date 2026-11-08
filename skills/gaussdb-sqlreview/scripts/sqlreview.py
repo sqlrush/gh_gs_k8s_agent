@@ -87,7 +87,8 @@ def _sql_from_top(runner, top: int) -> tuple[str, list[str]]:
     rows = runner.run(TOP_SQL_SCRIPT, {"limit": int(top)})
     if not rows:
         return "", ["dbe_perf.statement 无数据（检查 enable_stmt_track）"]
-    text = ";\n".join(str(r["query"]).rstrip().rstrip(";") for r in rows) + ";"
+    # 分号单独起一行:某条以 `-- 注释` 结尾时,同一行的分号会被注释吞掉、和下一条并成一条(2026-11-08 行方报告 Bug 3)
+    text = "\n;\n".join(str(r["query"]).rstrip().rstrip(";") for r in rows) + "\n;"
     return text, [f"取自 dbe_perf.statement 的 Top {len(rows)} SQL（按总耗时）"]
 
 

@@ -183,6 +183,17 @@ def explain_plan(runner, base_script: str, sql: str, schema: str) -> Tuple[str, 
     try:
         rows = runner.run(base_script, {"sql": qualified if changed else sql})
     except Exception as exc:               # noqa: BLE001
+        if changed:
+            # 补全出来的 SQL 执行失败:先用原 SQL 再试一次 —— 补全规则漏了某种语法时(2026-11-08 行方报告 Bug 1 那类),
+            # 原 SQL 往往本来就能执行(表在执行账号的 search_path 里),不该因为这一步把整条调优搞挂
+            try:
+                rows = runner.run(base_script, {"sql": sql})
+            except Exception:              # noqa: BLE001 —— 原 SQL 也不行:报补全后的那个错,说明照旧
+                pass
+            else:
+                return _join(rows), "", ("%s;补全表名后的 SQL 执行失败(%s),已改用原 SQL 取计划"
+                                         % (fallback_note(path, reason), str(exc).splitlines()[0][:120]))
+
         # 退回单语句模板后 EXPLAIN 又失败:这时没有报告可以放说明,把原因和 DBA 命令直接跟在报错后面——
         # 用户看到的就是这一段。
         try:

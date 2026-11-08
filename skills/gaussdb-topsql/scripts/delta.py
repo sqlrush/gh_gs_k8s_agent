@@ -40,6 +40,12 @@ from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import waits
 
+
+def _int(v) -> int:
+    """中间件 / 基线里的整数可能是小数形态("3704.0"):按值截断,空当 0;非数字照旧报错(2026-11-08 行方报告 M4)。"""
+    return int(float(v)) if v not in (None, "") else 0
+
+
 # 采样宽度:算增量时先取这么多条累计榜,再在它们之间算增量、重新排序。
 # 比最终呈现的条数宽得多 —— 累计榜靠后的语句完全可能是本窗口的冲高元凶。
 SAMPLE_WIDTH = 500
@@ -399,9 +405,9 @@ def _sample_from_dict(d) -> Optional[Sample]:
         if not isinstance(v, dict):
             continue
         try:
-            out[str(sid)] = Counters(calls=int(v.get("calls") or 0),
+            out[str(sid)] = Counters(calls=_int(v.get("calls")),
                                      total_sec=float(v.get("total_sec") or 0.0),
-                                     rows=int(v.get("rows") or 0),
+                                     rows=_int(v.get("rows")),
                                      query=str(v.get("query") or ""),
                                      # 升级前留下的基线没有这两列 —— 读成 None,不是 0
                                      cpu_sec=_opt_float(v.get("cpu_sec")),
