@@ -1,22 +1,22 @@
 {
   "format": 1,
   "package": "kbimport",
-  "version": "kbimport-v1.4.9",
+  "version": "kbimport-v1.4.10",
   "source": {
     "repo": "gh_agent_k8s",
-    "ref": "agent-v1.4.9",
-    "commit": "6c87cbaa7267ebf8238c05d2653d0a07932cac14",
-    "date": "2026-11-06T06:26:04-08:00"
+    "ref": "agent-v1.4.10",
+    "commit": "d13b6c8f57bbe931c48608c378c0d164c3fc697d",
+    "date": "2026-11-07T21:41:14-08:00"
   },
   "base": {
-    "version": "kbimport-v1.4.8",
+    "version": "kbimport-v1.4.9",
     "source": {
       "repo": "gh_agent_k8s",
-      "ref": "agent-v1.4.8",
-      "commit": "3d6faabfe93d3dfa30750ae76d1b0db4f7deebfd",
-      "date": "2026-11-06T03:09:26-08:00"
+      "ref": "agent-v1.4.9",
+      "commit": "6c87cbaa7267ebf8238c05d2653d0a07932cac14",
+      "date": "2026-11-06T06:26:04-08:00"
     }
   },
-  "files": 95,
-  "digest": "2c13a55f4f3289622839a138e8904a7f7dd378fed997d7603c377f5b12b4e8f9"
+  "files": 97,
+  "digest": "77f132d7b20e4a9cdb87e363af4b1a639d5cba6a778146020ae5163d129ccee9"
 }
