@@ -12,15 +12,15 @@ GaussDB 数据库智能体的**后端**：把 opencode 与 GaussDB / openGauss �
 
 | 分支 / 标签 | 内容 | 用在 |
 |---|---|---|
-| [`diag`](https://github.com/sqlrush/gh_gs_k8s_agent/tree/diag) / `diag-v1.4.9` | 诊断技能包：`AGENTS.md`、`common/`、17 个诊断技能 + `gaussdb-kb`、`scripts/registry/`（白名单脚本定义）、`whitelist/`（137 条白名单 DML、历次增量与清单；从 v1.4.7 / v1.4.8 升级不用导，从 v1.4.3 ~ v1.4.6 升级导 `scripts-delta-20261105.sql`）、`rootspec/search_docs.py`（根规范检索脚本）、`补充说明.md` | 诊断环境 |
-| [`kbimport`](https://github.com/sqlrush/gh_gs_k8s_agent/tree/kbimport) / `kbimport-v1.4.9` | 知识库导入技能包：`AGENTS.md`、`common/`、`gaussdb-kb-import`、`gaussdb-kb-init`、`gaussdb-kb`、`rootspec/search_docs.py`、`补充说明.md` | 知识库导入环境 |
+| [`diag`](https://github.com/sqlrush/gh_gs_k8s_agent/tree/diag) / `diag-v1.4.10` | 诊断技能包：`AGENTS.md`、`common/`、17 个诊断技能 + `gaussdb-kb`、`scripts/registry/`（白名单脚本定义）、`whitelist/`（137 条白名单 DML、历次增量与清单；从 v1.4.7 ~ v1.4.9 升级导 `scripts-delta-20261108.sql`（更新 4 条），从 v1.4.3 ~ v1.4.6 升级导 `scripts-delta-20261105.sql`）、`rootspec/search_docs.py`（根规范检索脚本）、`补充说明.md` | 诊断环境 |
+| [`kbimport`](https://github.com/sqlrush/gh_gs_k8s_agent/tree/kbimport) / `kbimport-v1.4.10` | 知识库导入技能包：`AGENTS.md`、`common/`、`gaussdb-kb-import`、`gaussdb-kb-init`、`gaussdb-kb`、`rootspec/search_docs.py`、`补充说明.md` | 知识库导入环境 |
 
 v1.4.7 起诊断站在应用 DBA / 运维 DBA 的角度（指标异常追到引起它的 SQL、会话、应用、表；处置先改应用、再做运维操作，参数只在典型场景给）。v1.4.8 修复 api 模式登录：中间件按实例 IP 固定连一个库、不按库名切换，原来填业务库名一律登录不了；v1.4.9 起库名与 schema 的限制全部放开（库名核对不拦登录；同名表跨 schema 取一个照常跑），中间件固定连 postgres 时业务库的 SQL 按执行历史调优。每个分支根目录的 `补充说明.md` 写着：版本对应、包内容与技能版本、依赖（Python 包与系统程序）、环境变量（必填 / 默认值）、SQL 白名单与上一版的差异、
 根规范目录约定、变更摘要。
 
 ```bash
-git clone -b diag-v1.4.9 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-diag          # 诊断技能包
-git clone -b kbimport-v1.4.9 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-kbimport  # 知识库导入技能包
+git clone -b diag-v1.4.10 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-diag          # 诊断技能包
+git clone -b kbimport-v1.4.10 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-kbimport  # 知识库导入技能包
 ```
 
 **拉下来之后要装进正在用的技能目录**，只 clone 不会生效。以技能目录 `/workspace/.opencode/skills` 为例（换成你们环境里的 `$GSDB_SKILLS_DIR`）：
@@ -32,10 +32,12 @@ cp -r gaussdb-diag/common/. $SK/common/
 cp -r gaussdb-diag/scripts/. $SK/scripts/
 cp -r gaussdb-diag/skills/* $SK/
 cp /tmp/config.yaml.bak $SK/common/config.yaml          # 还原本地配置
-grep ^version $SK/gaussdb-login/SKILL.md               # v1.4.9 显示 version: 1.3.5
+grep ^version $SK/gaussdb-login/SKILL.md               # v1.4.10 显示 version: 1.3.6
 ```
 
 `AGENTS.md` 放进 opencode 的配置目录。换完**新开对话**（旧对话里读进来的还是旧版技能说明）。
+
+装完后登录任一实例，在对话里说「做一次部署自检」（或运行 `python3 $SK/gaussdb-login/scripts/selfcheck.py --session <句柄>`）：它核对技能包版本、白名单是否导全、中间件能否跑多条语句、关键脚本能否执行（含执行账号权限）、数据库监控开关，逐项写明结论和找谁。
 
 `main` 上的后端代码停在 `agent-v1.4.6`，不再更新；v1.4.6 及以前的部署上线方案照旧按各自的标签使用。
 
