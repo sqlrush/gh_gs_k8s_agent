@@ -1,0 +1,401 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GaussDB 智能体 · 一次提问的全流程:步骤、耗时与 token</title><style>
+.viz-root{color-scheme:light;--surface-1:#fcfcfb;--page:#f9f9f7;--text-primary:#0b0b0b;--text-secondary:#52514e;--muted:#898781;
+--grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])) .viz-root{color-scheme:dark;--surface-1:#1a1a19;--page:#0d0d0d;
+--text-primary:#fff;--text-secondary:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);
+--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500}}
+:root[data-theme="dark"] .viz-root{color-scheme:dark;--surface-1:#1a1a19;--page:#0d0d0d;--text-primary:#fff;--text-secondary:#c3c2b7;
+--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500}
+*{box-sizing:border-box}body{margin:0;background:var(--page)}
+.viz-root{font:14px/1.7 system-ui,-apple-system,"Segoe UI","PingFang SC",sans-serif;color:var(--text-primary);background:var(--page);min-height:100vh}
+.wrap{max-width:1120px;margin:0 auto;padding:28px 20px 60px}
+h1{font-size:24px;margin:0 0 4px}h2{font-size:18px;margin:0 0 10px}h3{font-size:15px;margin:18px 0 6px}
+.sub,.note-p{color:var(--text-secondary)}.sub{margin:0 0 18px}
+section{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:18px 22px;margin:16px 0}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:8px 0 4px}
+.kpi{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:12px 16px}
+.kpi .l{color:var(--text-secondary);font-size:13px}.kpi .v{font-size:26px;font-weight:600;line-height:1.3}.kpi .d{color:var(--muted);font-size:12.5px}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{border-bottom:1px solid var(--grid);padding:6px 8px;text-align:left;vertical-align:top}
+th{color:var(--text-secondary);font-weight:600;border-bottom:1px solid var(--axis)}td{font-variant-numeric:tabular-nums}
+table.steps td:nth-child(1){color:var(--muted)}
+.chart{width:100%;height:auto;display:block;margin:6px 0}
+.chart .grid{stroke:var(--grid);stroke-width:1}.chart .tick{fill:var(--muted);font-size:11px}.chart .lab{fill:var(--text-secondary);font-size:12px}
+.chart .val{fill:var(--text-primary);font-size:12px;font-weight:600}.chart .note{fill:var(--muted);font-size:11px}.chart .inlab{font-size:11px;font-weight:600;pointer-events:none}
+.mk{cursor:default;outline:none}.mk:hover,.mk:focus{opacity:.82}
+.s1{fill:var(--s1)}.s2{fill:var(--s2)}.s3{fill:var(--s3)}.s4{fill:var(--s4)}
+.legend{display:flex;flex-wrap:wrap;gap:16px;color:var(--text-secondary);font-size:12.5px;margin:4px 0}
+.legend .sw{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.sw.s1{background:var(--s1)}.sw.s2{background:var(--s2)}.sw.s3{background:var(--s3)}.sw.s4{background:var(--s4)}
+details{margin-top:6px}summary{cursor:pointer;color:var(--text-secondary);font-size:13px}
+#tt{position:fixed;pointer-events:none;background:var(--surface-1);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;
+padding:6px 10px;font-size:12.5px;box-shadow:0 4px 14px rgba(0,0,0,.12);display:none;z-index:9;max-width:360px}
+#tt div:first-child{font-weight:600}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:8px 0 4px}.flow span{border:1px solid var(--border);border-radius:8px;padding:4px 10px;background:var(--page);font-size:13px}
+.flow .loop{border-color:var(--axis);background:transparent}.flow em{color:var(--muted);font-style:normal}
+ul.obs li,ol.qs li{margin:4px 0}.small{font-size:12.5px;color:var(--text-secondary)}
+</style></head>
+<body><div class="viz-root"><div class="wrap">
+<h1>GaussDB 智能体 · 一次提问的全流程:步骤、耗时与 token</h1>
+<p class="sub">agent-v1.4.10 测试环境 实测 · 2026-11-09(北京时间 14:40–14:55) · 9 道代表性题目各问 2 次,共 18 次对话、139 轮模型调用 · 模型 deepseek-flash</p>
+
+<div class="kpis">
+<div class="kpi"><div class="l">平均每题耗时</div><div class="v">48.9 秒</div><div class="d">中位 48.7 秒 · 从发问到回答结束</div></div>
+<div class="kpi"><div class="l">每题模型调用</div><div class="v">7.7 轮</div><div class="d">工具 8.2 次 · 中间件 21.5 次</div></div>
+<div class="kpi"><div class="l">每题送入模型</div><div class="v">25.4 万 token</div><div class="d">真正新增 2.3 万 · 命中缓存 90.9%</div></div>
+<div class="kpi"><div class="l">每题模型输出</div><div class="v">4,834 token</div><div class="d">其中思考 2,839</div></div>
+<div class="kpi"><div class="l">模型推理占时间</div><div class="v">81.8%</div><div class="d">首 token 前 18.1% · 生成 63.8%</div></div>
+</div>
+
+<section><h2>1 一次提问依次经过的步骤</h2>
+<div class="flow"><span>1 提问进入</span><em>→</em><span>2 分配槽位</span><em>→</em><span>3 建会话、发问</span><em>→</em><span>4 组装上下文</span><em>→</em>
+<span class="loop">5–6 模型推理 ⇄ 7–11 工具(每题约 7.7 轮)</span><em>→</em><span>13 输出回答</span><em>→</em><span>14 存档与回写(后台)</span></div>
+<p class="note-p">第 5–11 步是一个循环:模型每一轮读完整段上下文,决定调哪个工具或直接回答;工具结果回灌进上下文,进入下一轮,直到模型给出最终回答。下表是 18 次对话的每题平均。</p>
+<table class='steps'><tr><th>#</th><th>步骤</th><th>在哪里</th><th>做什么</th><th>耗时(每题平均)</th><th>token(每题平均)</th></tr>
+<tr><td>1</td><td><b>提问进入</b></td><td>浏览器 / 门户 → 统一认证 → 网关</td><td>认人(工号头 + 信任凭据)、按工号找到本人的槽位、反向代理(HTTP + SSE)</td><td>每次请求往返约 7 毫秒(中位;测试环境,含模拟统一认证与端口转发)</td><td>—</td></tr>
+<tr><td>2</td><td><b>分配槽位</b></td><td>网关 + 池子管家</td><td>已绑定的人直接用;新来的人分一个空槽位;闲置转保留的人回来时恢复(载入会话与报告)</td><td>已绑定时为 0;本次闲置转保留后第一次请求触发恢复,那次请求约 1.2 秒</td><td>—</td></tr>
+<tr><td>3</td><td><b>建会话、发问</b></td><td>opencode(槽位里)</td><td>新开对话、把问题交给 opencode,立刻返回,回答在后台进行</td><td>建会话 9 毫秒,发问 15 毫秒</td><td>—</td></tr>
+<tr><td>4</td><td><b>组装上下文</b></td><td>opencode</td><td>系统提示词、根提示词、技能清单(只有名字和一句话说明)、工具定义、会话历史</td><td>20 毫秒</td><td>首轮送入约 2.0 万</td></tr>
+<tr><td>5</td><td><b>模型推理 · 首 token 前</b></td><td>opencode → 凭据代理 → 模型服务</td><td>每轮把整段上下文发给模型;服务端复用前缀缓存、预填充新增部分、排队调度</td><td>每题 7.7 轮 × 1.14 秒 = 8.8 秒(18.1%)</td><td>送入 25.4 万(其中新增 2.3 万,命中缓存 90.9%)</td></tr>
+<tr><td>6</td><td><b>模型推理 · 生成</b></td><td>模型服务</td><td>逐 token 生成思考、要调的工具与参数、最终回答</td><td>31.2 秒(63.8%),约 155 token/秒</td><td>输出 4,834(其中思考 2,839)</td></tr>
+<tr><td>7</td><td><b>加载技能说明</b></td><td>opencode skill 工具</td><td>模型选中技能后读入它的 SKILL.md(用法、口径、输出要求)</td><td>每题 1.2 次,共 14 毫秒</td><td>下一轮新增约 7,468</td></tr>
+<tr><td>8</td><td><b>登录 / 会话核对</b></td><td>bash → login.py</td><td>查是否已登录、列可用实例、按别名登录(api 模式经中间件核对)</td><td>每题 2.2 次,共 1.1 秒</td><td>中间件 1.6 次 / 题</td></tr>
+<tr><td>9</td><td><b>取数技能执行</b></td><td>bash → 技能脚本 → 凭据代理 → 中间件 → 数据库</td><td>起 Python 进程、按白名单脚本逐条取数、汇总成报告文本、存档</td><td>每题 1.5 次,共 6.8 秒</td><td>中间件 19.9 次 / 题</td></tr>
+<tr><td>10</td><td><b>知识库检索</b></td><td>bash → kb.py</td><td>在本行规范、案例、官方文档里检索并给出处编号</td><td>每题 2.5 次,共 1.0 秒</td><td>—</td></tr>
+<tr><td>11</td><td><b>翻看长输出</b></td><td>bash / read</td><td>工具输出太长被截断时,模型用 grep / sed 翻看存下的全文</td><td>每题 0.5 次,共 3 毫秒</td><td>—</td></tr>
+<tr><td>12</td><td><b>编排</b></td><td>opencode</td><td>回灌工具结果、组装下一轮请求、轮与轮之间的空档</td><td>0.1 秒(0.3%)</td><td>—</td></tr>
+<tr><td>13</td><td><b>输出回答</b></td><td>模型服务 → opencode → 网关 → 浏览器(SSE)</td><td>最后一轮流式输出回答正文(计入第 6 步)</td><td>平均 23.8 秒</td><td>约 3,303(回答约 2,652 字)</td></tr>
+<tr><td>14</td><td><b>存档与回写</b></td><td>技能脚本 / 池子管家</td><td>报告存入本人报告目录;会话与报告回写共享存储(后台,不在提问的关键路径上)</td><td>后台</td><td>—</td></tr>
+</table>
+<p class="small">「首 token 前」是消息发出到模型返回第一个字(思考或正文)的时间,包含到模型服务的往返、排队、前缀缓存加载与新增部分的预填充;
+「生成」是从第一个字到本轮最后一个字;「编排」是本轮剩余时间加轮与轮之间的空档。送入 token 每轮都包含完整上下文,命中前缀缓存的部分模型服务不重新计算。</p>
+</section>
+
+<section><h2>2 时间都花在哪</h2>
+<svg class="chart" viewBox="0 0 770 64" role="img" aria-label="全部对话的时间占比">
+<path class="mk s1" tabindex="0" d="M0.0,4.0 h135.3 v30.0 h-135.3 z" data-tip="首 token 前 | 18.1%"/>
+<text class="inlab" x="67.7" y="24" text-anchor="middle" fill="#fff">首 token 前 18.1%</text>
+<path class="mk s2" tabindex="0" d="M137.3,4.0 h482.5 v30.0 h-482.5 z" data-tip="生成 | 63.8%"/>
+<text class="inlab" x="378.6" y="24" text-anchor="middle" fill="#fff">生成 63.8%</text>
+<path class="mk s3" tabindex="0" d="M621.8,4.0 h134.0 v30.0 h-134.0 z" data-tip="工具执行 | 17.9%"/>
+<text class="inlab" x="688.9" y="24" text-anchor="middle" fill="#0b0b0b">工具执行 17.9%</text>
+<path class="mk s4" tabindex="0" d="M757.9,4.0 h1.1 a1.1,1.1 0 0 1 1.1,1.1 v27.9 a1.1,1.1 0 0 1 -1.1,1.1 h-1.1 z" data-tip="编排 | 0.3%"/>
+<text class="tick" x="0" y="56">0%</text><text class="tick" x="760" y="56" text-anchor="end">100%(18 次对话合计 880.6 秒)</text>
+</svg>
+<div class='legend'><span><i class='sw s1'></i>首 token 前</span><span><i class='sw s2'></i>生成</span><span><i class='sw s3'></i>工具执行</span><span><i class='sw s4'></i>编排</span></div>
+<h3>每道题的时间构成(两次平均)</h3>
+<svg class="chart" viewBox="0 0 840 384" role="img" aria-label="每题平均耗时的构成">
+<line class="grid" x1="150.0" y1="4" x2="150.0" y2="356"/>
+<text class="tick" x="150.0" y="372" text-anchor="middle">0</text>
+<line class="grid" x1="226.5" y1="4" x2="226.5" y2="356"/>
+<text class="tick" x="226.5" y="372" text-anchor="middle">10</text>
+<line class="grid" x1="303.0" y1="4" x2="303.0" y2="356"/>
+<text class="tick" x="303.0" y="372" text-anchor="middle">20</text>
+<line class="grid" x1="379.4" y1="4" x2="379.4" y2="356"/>
+<text class="tick" x="379.4" y="372" text-anchor="middle">30</text>
+<line class="grid" x1="455.9" y1="4" x2="455.9" y2="356"/>
+<text class="tick" x="455.9" y="372" text-anchor="middle">40</text>
+<line class="grid" x1="532.4" y1="4" x2="532.4" y2="356"/>
+<text class="tick" x="532.4" y="372" text-anchor="middle">50</text>
+<line class="grid" x1="608.9" y1="4" x2="608.9" y2="356"/>
+<text class="tick" x="608.9" y="372" text-anchor="middle">60</text>
+<line class="grid" x1="685.4" y1="4" x2="685.4" y2="356"/>
+<text class="tick" x="685.4" y="372" text-anchor="middle">70</text>
+<line class="grid" x1="761.8" y1="4" x2="761.8" y2="356"/>
+<text class="tick" x="761.8" y="372" text-anchor="middle">80</text>
+<text class="tick" x="830" y="372" text-anchor="end">秒</text>
+<text class="lab" x="140" y="23.4" text-anchor="end">Q1 全面健康检查</text>
+<path class="mk s1" tabindex="0" d="M150.0,8.0 h66.2 v22.0 h-66.2 z" data-tip="Q1 全面健康检查 | 首 token 前 8.9 秒(14.4%)"/>
+<text class="inlab" x="183.1" y="23.4" text-anchor="middle" fill="#fff">8.9</text>
+<path class="mk s2" tabindex="0" d="M218.2,8.0 h259.8 v22.0 h-259.8 z" data-tip="Q1 全面健康检查 | 生成 34.2 秒(55.4%)"/>
+<text class="inlab" x="348.1" y="23.4" text-anchor="middle" fill="#fff">34.2</text>
+<path class="mk s3" tabindex="0" d="M480.0,8.0 h138.1 v22.0 h-138.1 z" data-tip="Q1 全面健康检查 | 工具执行 18.3 秒(29.6%)"/>
+<text class="inlab" x="549.0" y="23.4" text-anchor="middle" fill="#0b0b0b">18.3</text>
+<path class="mk s4" tabindex="0" d="M620.0,8.0 h1.2 a1.2,1.2 0 0 1 1.2,1.2 v19.6 a1.2,1.2 0 0 1 -1.2,1.2 h-1.2 z" data-tip="Q1 全面健康检查 | 编排 0.3 秒(0.5%)"/>
+<text class="val" x="628.4" y="23.4">61.8 秒</text>
+<text class="lab" x="140" y="61.4" text-anchor="end">Q2 快速概况</text>
+<path class="mk s1" tabindex="0" d="M150.0,46.0 h80.0 v22.0 h-80.0 z" data-tip="Q2 快速概况 | 首 token 前 10.7 秒(15.4%)"/>
+<text class="inlab" x="190.0" y="61.4" text-anchor="middle" fill="#fff">10.7</text>
+<path class="mk s2" tabindex="0" d="M232.0,46.0 h319.0 v22.0 h-319.0 z" data-tip="Q2 快速概况 | 生成 42.0 秒(60.2%)"/>
+<text class="inlab" x="391.5" y="61.4" text-anchor="middle" fill="#fff">42.0</text>
+<path class="mk s3" tabindex="0" d="M553.0,46.0 h127.0 v22.0 h-127.0 z" data-tip="Q2 快速概况 | 工具执行 16.9 秒(24.2%)"/>
+<text class="inlab" x="616.5" y="61.4" text-anchor="middle" fill="#0b0b0b">16.9</text>
+<path class="mk s4" tabindex="0" d="M682.0,46.0 h0.7 a0.7,0.7 0 0 1 0.7,0.7 v20.6 a0.7,0.7 0 0 1 -0.7,0.7 h-0.7 z" data-tip="Q2 快速概况 | 编排 0.2 秒(0.3%)"/>
+<text class="val" x="689.4" y="61.4">69.7 秒</text>
+<text class="lab" x="140" y="99.4" text-anchor="end">Q3 慢 SQL 排行</text>
+<path class="mk s1" tabindex="0" d="M150.0,84.0 h64.9 v22.0 h-64.9 z" data-tip="Q3 慢 SQL 排行 | 首 token 前 8.7 秒(30.4%)"/>
+<text class="inlab" x="182.4" y="99.4" text-anchor="middle" fill="#fff">8.7</text>
+<path class="mk s2" tabindex="0" d="M216.9,84.0 h137.3 v22.0 h-137.3 z" data-tip="Q3 慢 SQL 排行 | 生成 18.2 秒(63.4%)"/>
+<text class="inlab" x="285.5" y="99.4" text-anchor="middle" fill="#fff">18.2</text>
+<path class="mk s3" tabindex="0" d="M356.1,84.0 h10.8 v22.0 h-10.8 z" data-tip="Q3 慢 SQL 排行 | 工具执行 1.7 秒(5.8%)"/>
+<path class="mk s4" tabindex="0" d="M369.0,84.0 h0.4 a0.4,0.4 0 0 1 0.4,0.4 v21.1 a0.4,0.4 0 0 1 -0.4,0.4 h-0.4 z" data-tip="Q3 慢 SQL 排行 | 编排 0.1 秒(0.4%)"/>
+<text class="val" x="375.8" y="99.4">28.7 秒</text>
+<text class="lab" x="140" y="137.4" text-anchor="end">Q4 参数体检</text>
+<path class="mk s1" tabindex="0" d="M150.0,122.0 h42.9 v22.0 h-42.9 z" data-tip="Q4 参数体检 | 首 token 前 5.9 秒(31.8%)"/>
+<text class="inlab" x="171.5" y="137.4" text-anchor="middle" fill="#fff">5.9</text>
+<path class="mk s2" tabindex="0" d="M194.9,122.0 h74.5 v22.0 h-74.5 z" data-tip="Q4 参数体检 | 生成 10.0 秒(54.1%)"/>
+<text class="inlab" x="232.2" y="137.4" text-anchor="middle" fill="#fff">10.0</text>
+<path class="mk s3" tabindex="0" d="M271.5,122.0 h17.5 v22.0 h-17.5 z" data-tip="Q4 参数体检 | 工具执行 2.5 秒(13.8%)"/>
+<path class="mk s4" tabindex="0" d="M291.0,122.0 h0.2 a0.2,0.2 0 0 1 0.2,0.2 v21.5 a0.2,0.2 0 0 1 -0.2,0.2 h-0.2 z" data-tip="Q4 参数体检 | 编排 0.1 秒(0.3%)"/>
+<text class="val" x="297.4" y="137.4">18.5 秒</text>
+<text class="lab" x="140" y="175.4" text-anchor="end">Q5 实时定位(内存)</text>
+<path class="mk s1" tabindex="0" d="M150.0,160.0 h71.5 v22.0 h-71.5 z" data-tip="Q5 实时定位(内存) | 首 token 前 9.6 秒(12.8%)"/>
+<text class="inlab" x="185.7" y="175.4" text-anchor="middle" fill="#fff">9.6</text>
+<path class="mk s2" tabindex="0" d="M223.5,160.0 h318.9 v22.0 h-318.9 z" data-tip="Q5 实时定位(内存) | 生成 42.0 秒(55.9%)"/>
+<text class="inlab" x="382.9" y="175.4" text-anchor="middle" fill="#fff">42.0</text>
+<path class="mk s3" tabindex="0" d="M544.4,160.0 h177.0 v22.0 h-177.0 z" data-tip="Q5 实时定位(内存) | 工具执行 23.4 秒(31.2%)"/>
+<text class="inlab" x="632.9" y="175.4" text-anchor="middle" fill="#0b0b0b">23.4</text>
+<path class="mk s4" tabindex="0" d="M723.4,160.0 h0.3 a0.3,0.3 0 0 1 0.3,0.3 v21.3 a0.3,0.3 0 0 1 -0.3,0.3 h-0.3 z" data-tip="Q5 实时定位(内存) | 编排 0.1 秒(0.1%)"/>
+<text class="val" x="730.1" y="175.4">75.1 秒</text>
+<text class="lab" x="140" y="213.4" text-anchor="end">Q6 存储过程诊断</text>
+<path class="mk s1" tabindex="0" d="M150.0,198.0 h59.0 v22.0 h-59.0 z" data-tip="Q6 存储过程诊断 | 首 token 前 8.0 秒(13.4%)"/>
+<text class="inlab" x="179.5" y="213.4" text-anchor="middle" fill="#fff">8.0</text>
+<path class="mk s2" tabindex="0" d="M211.0,198.0 h348.0 v22.0 h-348.0 z" data-tip="Q6 存储过程诊断 | 生成 45.8 秒(76.7%)"/>
+<text class="inlab" x="385.0" y="213.4" text-anchor="middle" fill="#fff">45.8</text>
+<path class="mk s3" tabindex="0" d="M561.0,198.0 h42.2 v22.0 h-42.2 z" data-tip="Q6 存储过程诊断 | 工具执行 5.8 秒(9.7%)"/>
+<text class="inlab" x="582.1" y="213.4" text-anchor="middle" fill="#0b0b0b">5.8</text>
+<path class="mk s4" tabindex="0" d="M605.2,198.0 h0.5 a0.5,0.5 0 0 1 0.5,0.5 v21.1 a0.5,0.5 0 0 1 -0.5,0.5 h-0.5 z" data-tip="Q6 存储过程诊断 | 编排 0.1 秒(0.2%)"/>
+<text class="val" x="612.1" y="213.4">59.6 秒</text>
+<text class="lab" x="140" y="251.4" text-anchor="end">Q7 知识问答</text>
+<path class="mk s1" tabindex="0" d="M150.0,236.0 h66.4 v22.0 h-66.4 z" data-tip="Q7 知识问答 | 首 token 前 8.9 秒(18.4%)"/>
+<text class="inlab" x="183.2" y="251.4" text-anchor="middle" fill="#fff">8.9</text>
+<path class="mk s2" tabindex="0" d="M218.4,236.0 h282.3 v22.0 h-282.3 z" data-tip="Q7 知识问答 | 生成 37.2 秒(76.4%)"/>
+<text class="inlab" x="359.5" y="251.4" text-anchor="middle" fill="#fff">37.2</text>
+<path class="mk s3" tabindex="0" d="M502.7,236.0 h16.6 v22.0 h-16.6 z" data-tip="Q7 知识问答 | 工具执行 2.4 秒(5.0%)"/>
+<path class="mk s4" tabindex="0" d="M521.3,236.0 h0.4 a0.4,0.4 0 0 1 0.4,0.4 v21.1 a0.4,0.4 0 0 1 -0.4,0.4 h-0.4 z" data-tip="Q7 知识问答 | 编排 0.1 秒(0.2%)"/>
+<text class="val" x="528.2" y="251.4">48.7 秒</text>
+<text class="lab" x="140" y="289.4" text-anchor="end">Q8 案例检索</text>
+<path class="mk s1" tabindex="0" d="M150.0,274.0 h87.2 v22.0 h-87.2 z" data-tip="Q8 案例检索 | 首 token 前 11.7 秒(21.0%)"/>
+<text class="inlab" x="193.6" y="289.4" text-anchor="middle" fill="#fff">11.7</text>
+<path class="mk s2" tabindex="0" d="M239.2,274.0 h294.7 v22.0 h-294.7 z" data-tip="Q8 案例检索 | 生成 38.8 秒(69.9%)"/>
+<text class="inlab" x="386.5" y="289.4" text-anchor="middle" fill="#fff">38.8</text>
+<path class="mk s3" tabindex="0" d="M535.8,274.0 h35.1 v22.0 h-35.1 z" data-tip="Q8 案例检索 | 工具执行 4.9 秒(8.8%)"/>
+<path class="mk s4" tabindex="0" d="M573.0,274.0 h0.6 a0.6,0.6 0 0 1 0.6,0.6 v20.8 a0.6,0.6 0 0 1 -0.6,0.6 h-0.6 z" data-tip="Q8 案例检索 | 编排 0.2 秒(0.3%)"/>
+<text class="val" x="580.1" y="289.4">55.5 秒</text>
+<text class="lab" x="140" y="327.4" text-anchor="end">Q9 红线(要求改参数)</text>
+<path class="mk s1" tabindex="0" d="M150.0,312.0 h52.4 v22.0 h-52.4 z" data-tip="Q9 红线(要求改参数) | 首 token 前 7.1 秒(31.3%)"/>
+<text class="inlab" x="176.2" y="327.4" text-anchor="middle" fill="#fff">7.1</text>
+<path class="mk s2" tabindex="0" d="M204.4,312.0 h94.3 v22.0 h-94.3 z" data-tip="Q9 红线(要求改参数) | 生成 12.6 秒(55.4%)"/>
+<text class="inlab" x="251.6" y="327.4" text-anchor="middle" fill="#fff">12.6</text>
+<path class="mk s3" tabindex="0" d="M300.8,312.0 h20.4 v22.0 h-20.4 z" data-tip="Q9 红线(要求改参数) | 工具执行 2.9 秒(12.9%)"/>
+<path class="mk s4" tabindex="0" d="M323.1,312.0 h0.3 a0.3,0.3 0 0 1 0.3,0.3 v21.4 a0.3,0.3 0 0 1 -0.3,0.3 h-0.3 z" data-tip="Q9 红线(要求改参数) | 编排 0.1 秒(0.4%)"/>
+<text class="val" x="329.8" y="327.4">22.7 秒</text>
+</svg>
+<details><summary>表格版</summary><table><tr><th>题目</th><th>合计(秒)</th><th>首 token 前</th><th>生成</th><th>工具执行</th><th>编排</th></tr>
+<tr><td>Q1 全面健康检查</td><td>61.8</td><td>8.9(14.4%)</td><td>34.2(55.4%)</td><td>18.3(29.6%)</td><td>0.3(0.5%)</td></tr>
+<tr><td>Q2 快速概况</td><td>69.7</td><td>10.7(15.4%)</td><td>42.0(60.2%)</td><td>16.9(24.2%)</td><td>0.2(0.3%)</td></tr>
+<tr><td>Q3 慢 SQL 排行</td><td>28.7</td><td>8.7(30.4%)</td><td>18.2(63.4%)</td><td>1.7(5.8%)</td><td>0.1(0.4%)</td></tr>
+<tr><td>Q4 参数体检</td><td>18.5</td><td>5.9(31.8%)</td><td>10.0(54.1%)</td><td>2.5(13.8%)</td><td>0.1(0.3%)</td></tr>
+<tr><td>Q5 实时定位(内存)</td><td>75.1</td><td>9.6(12.8%)</td><td>42.0(55.9%)</td><td>23.4(31.2%)</td><td>0.1(0.1%)</td></tr>
+<tr><td>Q6 存储过程诊断</td><td>59.6</td><td>8.0(13.4%)</td><td>45.8(76.7%)</td><td>5.8(9.7%)</td><td>0.1(0.2%)</td></tr>
+<tr><td>Q7 知识问答</td><td>48.7</td><td>8.9(18.4%)</td><td>37.2(76.4%)</td><td>2.4(5.0%)</td><td>0.1(0.2%)</td></tr>
+<tr><td>Q8 案例检索</td><td>55.5</td><td>11.7(21.0%)</td><td>38.8(69.9%)</td><td>4.9(8.8%)</td><td>0.2(0.3%)</td></tr>
+<tr><td>Q9 红线(要求改参数)</td><td>22.7</td><td>7.1(31.3%)</td><td>12.6(55.4%)</td><td>2.9(12.9%)</td><td>0.1(0.4%)</td></tr>
+</table></details>
+</section>
+
+<section><h2>3 token 都花在哪</h2>
+<p class="note-p">每一轮都要把「系统提示词 + 根提示词 + 技能说明 + 之前所有轮的工具结果与回答」整段送给模型,所以送入 token 随轮次增长;
+模型服务对重复的前缀做了缓存,90.9% 的送入 token 命中缓存、不重新计算,真正新增的只有每题约 2.3 万。输出 token(思考 + 工具参数 + 回答)每题约 4,834,是时间的大头(见第 2 节「生成」)。</p>
+<table><tr><th>题目</th><th>轮次</th><th>送入:新增</th><th>送入:命中缓存</th><th>输出</th><th>其中思考</th><th>首轮送入</th><th>末轮送入</th><th>回答字数</th></tr>
+<tr><td>Q1 全面健康检查</td><td>7.5</td><td>4.3 万</td><td>21.1 万</td><td>5,534</td><td>2,917</td><td>2.0 万</td><td>5.4 万</td><td>3,878</td></tr>
+<tr><td>Q2 快速概况</td><td>9.5</td><td>4.8 万</td><td>34.4 万</td><td>6,656</td><td>3,882</td><td>2.0 万</td><td>6.9 万</td><td>3,896</td></tr>
+<tr><td>Q3 慢 SQL 排行</td><td>7.5</td><td>1.2 万</td><td>18.6 万</td><td>3,178</td><td>984</td><td>2.0 万</td><td>3.2 万</td><td>3,732</td></tr>
+<tr><td>Q4 参数体检</td><td>5.5</td><td>7,519</td><td>13.0 万</td><td>1,786</td><td>226</td><td>2.0 万</td><td>2.8 万</td><td>2,286</td></tr>
+<tr><td>Q5 实时定位(内存)</td><td>7.5</td><td>2.9 万</td><td>23.7 万</td><td>6,044</td><td>4,199</td><td>2.0 万</td><td>5.0 万</td><td>2,326</td></tr>
+<tr><td>Q6 存储过程诊断</td><td>6.5</td><td>1.6 万</td><td>19.3 万</td><td>5,928</td><td>3,969</td><td>2.0 万</td><td>3.7 万</td><td>2,606</td></tr>
+<tr><td>Q7 知识问答</td><td>8.5</td><td>2.1 万</td><td>25.7 万</td><td>6,204</td><td>4,134</td><td>2.0 万</td><td>4.4 万</td><td>2,262</td></tr>
+<tr><td>Q8 案例检索</td><td>10.5</td><td>2.1 万</td><td>36.1 万</td><td>6,210</td><td>3,986</td><td>2.0 万</td><td>4.3 万</td><td>2,216</td></tr>
+<tr><td>Q9 红线(要求改参数)</td><td>6.5</td><td>1.0 万</td><td>16.3 万</td><td>1,963</td><td>1,249</td><td>2.0 万</td><td>3.1 万</td><td>666</td></tr>
+</table>
+<h3>代表题 Q1 全面健康检查(第 1 次):每轮送入模型的上下文</h3>
+<svg class="chart" viewBox="0 0 1060 294" role="img" aria-label="每轮送入模型的上下文">
+<line class="grid" x1="60" y1="254.0" x2="1040" y2="254.0"/>
+<text class="tick" x="54" y="258.0" text-anchor="end">0</text>
+<line class="grid" x1="60" y1="214.0" x2="1040" y2="214.0"/>
+<text class="tick" x="54" y="218.0" text-anchor="end">1 万</text>
+<line class="grid" x1="60" y1="174.0" x2="1040" y2="174.0"/>
+<text class="tick" x="54" y="178.0" text-anchor="end">2 万</text>
+<line class="grid" x1="60" y1="134.0" x2="1040" y2="134.0"/>
+<text class="tick" x="54" y="138.0" text-anchor="end">3 万</text>
+<line class="grid" x1="60" y1="94.0" x2="1040" y2="94.0"/>
+<text class="tick" x="54" y="98.0" text-anchor="end">4 万</text>
+<line class="grid" x1="60" y1="54.0" x2="1040" y2="54.0"/>
+<text class="tick" x="54" y="58.0" text-anchor="end">5 万</text>
+<line class="grid" x1="60" y1="14.0" x2="1040" y2="14.0"/>
+<text class="tick" x="54" y="18.0" text-anchor="end">6 万</text>
+<path class="mk s1" tabindex="0" d="M109.2,254.0 V246.8 A0.0,0.0 0 0 1 109.2,246.8 H133.2 A0.0,0.0 0 0 1 133.2,246.8 V254.0 Z" data-tip="第 1 轮 | 命中缓存 1,792 | 新增 1.8 万"/>
+<path class="mk s2" tabindex="0" d="M109.2,244.8 V175.3 A4.0,4.0 0 0 1 113.2,171.3 H129.2 A4.0,4.0 0 0 1 133.2,175.3 V244.8 Z" data-tip="第 1 轮 | 新增 1.8 万 | 命中缓存 1,792"/>
+<text class="val" x="121.2" y="165.3" text-anchor="middle">2.0 万</text>
+<text class="tick" x="121.2" y="270" text-anchor="middle">1</text>
+<path class="mk s1" tabindex="0" d="M231.8,254.0 V173.6 A0.0,0.0 0 0 1 231.8,173.6 H255.8 A0.0,0.0 0 0 1 255.8,173.6 V254.0 Z" data-tip="第 2 轮 | 命中缓存 2.0 万 | 新增 203"/>
+<path class="mk s2" tabindex="0" d="M231.8,171.8 V171.8 A1.0,1.0 0 0 1 232.8,170.8 H254.8 A1.0,1.0 0 0 1 255.8,171.8 V171.8 Z" data-tip="第 2 轮 | 新增 203 | 命中缓存 2.0 万"/>
+<text class="tick" x="243.8" y="270" text-anchor="middle">2</text>
+<path class="mk s1" tabindex="0" d="M354.2,254.0 V172.6 A0.0,0.0 0 0 1 354.2,172.6 H378.2 A0.0,0.0 0 0 1 378.2,172.6 V254.0 Z" data-tip="第 3 轮 | 命中缓存 2.0 万 | 新增 204"/>
+<path class="mk s2" tabindex="0" d="M354.2,170.8 V170.8 A1.0,1.0 0 0 1 355.2,169.8 H377.2 A1.0,1.0 0 0 1 378.2,170.8 V170.8 Z" data-tip="第 3 轮 | 新增 204 | 命中缓存 2.0 万"/>
+<text class="tick" x="366.2" y="270" text-anchor="middle">3</text>
+<path class="mk s1" tabindex="0" d="M476.8,254.0 V171.6 A0.0,0.0 0 0 1 476.8,171.6 H500.8 A0.0,0.0 0 0 1 500.8,171.6 V254.0 Z" data-tip="第 4 轮 | 命中缓存 2.1 万 | 新增 926"/>
+<path class="mk s2" tabindex="0" d="M476.8,169.6 V169.6 A3.7,3.7 0 0 1 480.5,165.9 H497.0 A3.7,3.7 0 0 1 500.8,169.6 V169.6 Z" data-tip="第 4 轮 | 新增 926 | 命中缓存 2.1 万"/>
+<text class="tick" x="488.8" y="270" text-anchor="middle">4</text>
+<path class="mk s1" tabindex="0" d="M599.2,254.0 V168.0 A0.0,0.0 0 0 1 599.2,168.0 H623.2 A0.0,0.0 0 0 1 623.2,168.0 V254.0 Z" data-tip="第 5 轮 | 命中缓存 2.2 万 | 新增 1.2 万"/>
+<path class="mk s2" tabindex="0" d="M599.2,166.0 V121.9 A4.0,4.0 0 0 1 603.2,117.9 H619.2 A4.0,4.0 0 0 1 623.2,121.9 V166.0 Z" data-tip="第 5 轮 | 新增 1.2 万 | 命中缓存 2.2 万"/>
+<text class="tick" x="611.2" y="270" text-anchor="middle">5</text>
+<path class="mk s1" tabindex="0" d="M721.8,254.0 V119.9 A0.0,0.0 0 0 1 721.8,119.9 H745.8 A0.0,0.0 0 0 1 745.8,119.9 V254.0 Z" data-tip="第 6 轮 | 命中缓存 3.4 万 | 新增 1.5 万"/>
+<path class="mk s2" tabindex="0" d="M721.8,117.9 V60.3 A4.0,4.0 0 0 1 725.8,56.3 H741.8 A4.0,4.0 0 0 1 745.8,60.3 V117.9 Z" data-tip="第 6 轮 | 新增 1.5 万 | 命中缓存 3.4 万"/>
+<text class="tick" x="733.8" y="270" text-anchor="middle">6</text>
+<path class="mk s1" tabindex="0" d="M844.2,254.0 V57.9 A0.0,0.0 0 0 1 844.2,57.9 H868.2 A0.0,0.0 0 0 1 868.2,57.9 V254.0 Z" data-tip="第 7 轮 | 命中缓存 4.9 万 | 新增 794"/>
+<path class="mk s2" tabindex="0" d="M844.2,55.9 V55.9 A3.2,3.2 0 0 1 847.4,52.7 H865.1 A3.2,3.2 0 0 1 868.2,55.9 V55.9 Z" data-tip="第 7 轮 | 新增 794 | 命中缓存 4.9 万"/>
+<text class="tick" x="856.2" y="270" text-anchor="middle">7</text>
+<path class="mk s1" tabindex="0" d="M966.8,254.0 V54.8 A0.0,0.0 0 0 1 966.8,54.8 H990.8 A0.0,0.0 0 0 1 990.8,54.8 V254.0 Z" data-tip="第 8 轮 | 命中缓存 5.0 万 | 新增 1,845"/>
+<path class="mk s2" tabindex="0" d="M966.8,52.8 V49.5 A4.0,4.0 0 0 1 970.8,45.5 H986.8 A4.0,4.0 0 0 1 990.8,49.5 V52.8 Z" data-tip="第 8 轮 | 新增 1,845 | 命中缓存 5.0 万"/>
+<text class="val" x="978.8" y="39.5" text-anchor="middle">5.2 万</text>
+<text class="tick" x="978.8" y="270" text-anchor="middle">8</text>
+<text class="tick" x="1040" y="288" text-anchor="end">第几轮</text>
+</svg>
+<div class='legend'><span><i class='sw s1'></i>命中缓存</span><span><i class='sw s2'></i>新增</span></div>
+</section>
+
+<section><h2>4 一道题逐轮拆开看:Q1 全面健康检查(第 1 次,60.0 秒)</h2>
+<div class='legend'><span><i class='sw s1'></i>首 token 前</span><span><i class='sw s2'></i>生成</span><span><i class='sw s3'></i>工具执行</span></div>
+<svg class="chart" viewBox="0 0 940 280" role="img" aria-label="逐轮时间线">
+<line class="grid" x1="70.0" y1="6" x2="70.0" y2="256"/>
+<text class="tick" x="70.0" y="272" text-anchor="middle">0</text>
+<line class="grid" x1="121.3" y1="6" x2="121.3" y2="256"/>
+<text class="tick" x="121.3" y="272" text-anchor="middle">5</text>
+<line class="grid" x1="172.6" y1="6" x2="172.6" y2="256"/>
+<text class="tick" x="172.6" y="272" text-anchor="middle">10</text>
+<line class="grid" x1="223.9" y1="6" x2="223.9" y2="256"/>
+<text class="tick" x="223.9" y="272" text-anchor="middle">15</text>
+<line class="grid" x1="275.3" y1="6" x2="275.3" y2="256"/>
+<text class="tick" x="275.3" y="272" text-anchor="middle">20</text>
+<line class="grid" x1="326.6" y1="6" x2="326.6" y2="256"/>
+<text class="tick" x="326.6" y="272" text-anchor="middle">25</text>
+<line class="grid" x1="377.9" y1="6" x2="377.9" y2="256"/>
+<text class="tick" x="377.9" y="272" text-anchor="middle">30</text>
+<line class="grid" x1="429.2" y1="6" x2="429.2" y2="256"/>
+<text class="tick" x="429.2" y="272" text-anchor="middle">35</text>
+<line class="grid" x1="480.5" y1="6" x2="480.5" y2="256"/>
+<text class="tick" x="480.5" y="272" text-anchor="middle">40</text>
+<line class="grid" x1="531.8" y1="6" x2="531.8" y2="256"/>
+<text class="tick" x="531.8" y="272" text-anchor="middle">45</text>
+<line class="grid" x1="583.2" y1="6" x2="583.2" y2="256"/>
+<text class="tick" x="583.2" y="272" text-anchor="middle">50</text>
+<line class="grid" x1="634.5" y1="6" x2="634.5" y2="256"/>
+<text class="tick" x="634.5" y="272" text-anchor="middle">55</text>
+<line class="grid" x1="685.8" y1="6" x2="685.8" y2="256"/>
+<text class="tick" x="685.8" y="272" text-anchor="middle">60</text>
+<text class="lab" x="62" y="25.4" text-anchor="end">第 1 轮</text>
+<path class="mk s1" tabindex="0" d="M72.6,10.0 h10.4 v22.0 h-10.4 z" data-tip="第 1 轮 | 首 token 前 1.21 秒 | 送入 2.0 万(新增 1.8 万) | 输出 58(思考 23)"/>
+<path class="mk s2" tabindex="0" d="M85.0,10.0 h1.8 v22.0 h-1.8 z" data-tip="第 1 轮 | 生成 0.37 秒 | 送入 2.0 万(新增 1.8 万) | 输出 58(思考 23)"/>
+<path class="mk s3" tabindex="0" d="M88.9,10.0 h1.2 a1.2,1.2 0 0 1 1.2,1.2 v19.5 a1.2,1.2 0 0 1 -1.2,1.2 h-1.2 z" data-tip="第 1 轮 | 工具执行 0.24 秒 | 送入 2.0 万(新增 1.8 万) | 输出 58(思考 23)"/>
+<text class="note" x="97.3" y="25.4">login.py</text>
+<text class="lab" x="62" y="55.4" text-anchor="end">第 2 轮</text>
+<path class="mk s1" tabindex="0" d="M91.5,40.0 h9.9 v22.0 h-9.9 z" data-tip="第 2 轮 | 首 token 前 1.16 秒 | 送入 2.0 万(新增 203) | 输出 58(思考 70)"/>
+<path class="mk s2" tabindex="0" d="M103.4,40.0 h5.3 v22.0 h-5.3 z" data-tip="第 2 轮 | 生成 0.71 秒 | 送入 2.0 万(新增 203) | 输出 58(思考 70)"/>
+<path class="mk s3" tabindex="0" d="M110.7,40.0 h0.9 a0.9,0.9 0 0 1 0.9,0.9 v20.2 a0.9,0.9 0 0 1 -0.9,0.9 h-0.9 z" data-tip="第 2 轮 | 工具执行 0.18 秒 | 送入 2.0 万(新增 203) | 输出 58(思考 70)"/>
+<text class="note" x="118.5" y="55.4">login.py</text>
+<text class="lab" x="62" y="85.4" text-anchor="end">第 3 轮</text>
+<path class="mk s1" tabindex="0" d="M112.5,70.0 h8.3 v22.0 h-8.3 z" data-tip="第 3 轮 | 首 token 前 1.01 秒 | 送入 2.1 万(新增 204) | 输出 60(思考 0)"/>
+<path class="mk s3" tabindex="0" d="M122.9,70.0 h1.4 a1.4,1.4 0 0 1 1.4,1.4 v19.2 a1.4,1.4 0 0 1 -1.4,1.4 h-1.4 z" data-tip="第 3 轮 | 工具执行 0.27 秒 | 送入 2.1 万(新增 204) | 输出 60(思考 0)"/>
+<text class="note" x="131.6" y="85.4">login.py</text>
+<text class="lab" x="62" y="115.4" text-anchor="end">第 4 轮</text>
+<path class="mk s1" tabindex="0" d="M125.7,100.0 h9.4 v22.0 h-9.4 z" data-tip="第 4 轮 | 首 token 前 1.11 秒 | 送入 2.2 万(新增 926) | 输出 40(思考 15)"/>
+<path class="mk s2" tabindex="0" d="M137.1,100.0 h1.7 v22.0 h-1.7 z" data-tip="第 4 轮 | 生成 0.36 秒 | 送入 2.2 万(新增 926) | 输出 40(思考 15)"/>
+<path class="mk s3" tabindex="0" d="M140.8,100.0 h0.4 a0.4,0.4 0 0 1 0.4,0.4 v21.2 a0.4,0.4 0 0 1 -0.4,0.4 h-0.4 z" data-tip="第 4 轮 | 工具执行 0.03 秒 | 送入 2.2 万(新增 926) | 输出 40(思考 15)"/>
+<text class="note" x="147.1" y="115.4">gaussdb-health</text>
+<text class="lab" x="62" y="145.4" text-anchor="end">第 5 轮</text>
+<path class="mk s1" tabindex="0" d="M141.4,130.0 h8.5 v22.0 h-8.5 z" data-tip="第 5 轮 | 首 token 前 1.02 秒 | 送入 3.4 万(新增 1.2 万) | 输出 84(思考 0)"/>
+<path class="mk s3" tabindex="0" d="M151.8,130.0 h159.6 a4.0,4.0 0 0 1 4.0,4.0 v14.0 a4.0,4.0 0 0 1 -4.0,4.0 h-159.6 z" data-tip="第 5 轮 | 工具执行 15.94 秒 | 送入 3.4 万(新增 1.2 万) | 输出 84(思考 0)"/>
+<text class="note" x="321.4" y="145.4">health/health.py</text>
+<text class="lab" x="62" y="175.4" text-anchor="end">第 6 轮</text>
+<path class="mk s1" tabindex="0" d="M315.5,160.0 h12.1 v22.0 h-12.1 z" data-tip="第 6 轮 | 首 token 前 1.37 秒 | 送入 4.9 万(新增 1.5 万) | 输出 109(思考 42)"/>
+<path class="mk s2" tabindex="0" d="M329.6,160.0 h6.5 v22.0 h-6.5 z" data-tip="第 6 轮 | 生成 0.82 秒 | 送入 4.9 万(新增 1.5 万) | 输出 109(思考 42)"/>
+<path class="mk s3" tabindex="0" d="M338.1,160.0 h0.4 a0.4,0.4 0 0 1 0.4,0.4 v21.2 a0.4,0.4 0 0 1 -0.4,0.4 h-0.4 z" data-tip="第 6 轮 | 工具执行 0.01 秒 | 送入 4.9 万(新增 1.5 万) | 输出 109(思考 42)"/>
+<text class="note" x="344.3" y="175.4">grep / sed</text>
+<text class="lab" x="62" y="205.4" text-anchor="end">第 7 轮</text>
+<path class="mk s1" tabindex="0" d="M339.3,190.0 h7.6 a4.0,4.0 0 0 1 4.0,4.0 v14.0 a4.0,4.0 0 0 1 -4.0,4.0 h-7.6 z" data-tip="第 7 轮 | 首 token 前 1.13 秒 | 送入 5.0 万(新增 794) | 输出 84(思考 0)"/>
+<text class="note" x="356.9" y="205.4">read</text>
+<text class="lab" x="62" y="235.4" text-anchor="end">第 8 轮</text>
+<path class="mk s1" tabindex="0" d="M351.3,220.0 h10.3 v22.0 h-10.3 z" data-tip="第 8 轮 | 首 token 前 1.20 秒 | 送入 5.2 万(新增 1,845) | 输出 2196(思考 2833)"/>
+<path class="mk s2" tabindex="0" d="M363.6,220.0 h317.7 a4.0,4.0 0 0 1 4.0,4.0 v14.0 a4.0,4.0 0 0 1 -4.0,4.0 h-317.7 z" data-tip="第 8 轮 | 生成 31.34 秒 | 送入 5.2 万(新增 1,845) | 输出 2196(思考 2833)"/>
+<text class="note" x="691.3" y="235.4">输出回答</text>
+<text class="tick" x="930" y="272" text-anchor="end">秒(从发问算起)</text>
+</svg>
+<details open><summary>逐轮明细</summary><table><tr><th>轮</th><th>这一轮做了什么</th><th>首 token 前</th><th>生成</th><th>工具执行</th><th>送入 token(新增 / 命中缓存)</th><th>输出 token(其中思考)</th></tr>
+<tr><td>1</td><td>登录 / 会话核对 login.py</td><td>1.21 s</td><td>0.37 s</td><td>0.24 s</td><td>1.8 万 / 1,792</td><td>58(23)</td></tr>
+<tr><td>2</td><td>登录 / 会话核对 login.py</td><td>1.16 s</td><td>0.71 s</td><td>0.18 s</td><td>203 / 2.0 万</td><td>58(70)</td></tr>
+<tr><td>3</td><td>登录 / 会话核对 login.py(中间件 2 次)</td><td>1.01 s</td><td>0.00 s</td><td>0.27 s</td><td>204 / 2.0 万</td><td>60(0)</td></tr>
+<tr><td>4</td><td>加载技能说明 gaussdb-health</td><td>1.11 s</td><td>0.36 s</td><td>0.03 s</td><td>926 / 2.1 万</td><td>40(15)</td></tr>
+<tr><td>5</td><td>取数技能执行 health/health.py(中间件 58 次)</td><td>1.02 s</td><td>0.00 s</td><td>15.94 s</td><td>1.2 万 / 2.2 万</td><td>84(0)</td></tr>
+<tr><td>6</td><td>翻看长输出 grep / sed</td><td>1.37 s</td><td>0.82 s</td><td>0.01 s</td><td>1.5 万 / 3.4 万</td><td>109(42)</td></tr>
+<tr><td>7</td><td>翻看长输出 read</td><td>1.13 s</td><td>0.00 s</td><td>0.01 s</td><td>794 / 4.9 万</td><td>84(0)</td></tr>
+<tr><td>8</td><td>输出最终回答(3914 字)</td><td>1.20 s</td><td>31.34 s</td><td>0.00 s</td><td>1,845 / 5.0 万</td><td>2,196(2,833)</td></tr>
+</table></details>
+</section>
+
+<section><h2>5 工具与中间件</h2>
+<p class="note-p">工具执行时间里,技能脚本要起一个 Python 进程(实测启动加导入约 194 毫秒),再经凭据代理(加令牌、SM2 签名)调中间件执行白名单脚本。中间件调用按秒级日志对到每次工具调用上。</p>
+<table><tr><th>步骤</th><th>脚本 / 工具</th><th>次数</th><th>平均每次</th><th>中间件调用(平均每次)</th><th>每次中间件约</th></tr>
+<tr><td>取数技能执行</td><td>health/health.py</td><td>10</td><td>7.93 秒</td><td>25.1</td><td>0.32 秒</td></tr>
+<tr><td>取数技能执行</td><td>memanalyze/memanalyze.py</td><td>3</td><td>10.03 秒</td><td>29.0</td><td>0.35 秒</td></tr>
+<tr><td>取数技能执行</td><td>config/config.py</td><td>4</td><td>1.13 秒</td><td>1.0</td><td>—</td></tr>
+<tr><td>取数技能执行</td><td>topsql/topsql.py</td><td>1</td><td>3.11 秒</td><td>3.0</td><td>—</td></tr>
+<tr><td>取数技能执行</td><td>proctune/proctune.py</td><td>4</td><td>0.63 秒</td><td>1.5</td><td>—</td></tr>
+<tr><td>取数技能执行</td><td>topproc/topproc.py</td><td>2</td><td>0.84 秒</td><td>0.5</td><td>—</td></tr>
+<tr><td>取数技能执行</td><td>slowsql/slowsql.py</td><td>3</td><td>0.25 秒</td><td>2.3</td><td>—</td></tr>
+<tr><td>登录 / 会话核对</td><td>login.py</td><td>39</td><td>0.52 秒</td><td>0.7</td><td>—</td></tr>
+<tr><td>知识库检索</td><td>kb.py</td><td>43</td><td>0.42 秒</td><td>—</td><td>—</td></tr>
+<tr><td>知识库检索</td><td>kb_cite.py</td><td>2</td><td>5 毫秒</td><td>—</td><td>—</td></tr>
+<tr><td>加载技能说明</td><td>gaussdb-health、gaussdb-login、gaussdb-kb、gaussdb-memanalyze、gaussdb-config、gaussdb-proctune、gaussdb-slowsql</td><td>22</td><td>11 毫秒</td><td>—</td><td>—</td></tr>
+<tr><td>翻看长输出</td><td>read、grep / sed</td><td>9</td><td>6 毫秒</td><td>—</td><td>—</td></tr>
+<tr><td>读文件</td><td>read、列技能目录</td><td>5</td><td>6 毫秒</td><td>—</td><td>—</td></tr>
+</table>
+<p class='small'>「每次中间件约」只对平均每次调用中间件 5 次以上的脚本给出(= 脚本用时 ÷ 调用次数,含少量脚本自身处理);次数少的脚本用时主要是进程启动与处理。</p>
+</section>
+
+<section><h2>6 观察</h2><ul class="obs"><li><b>时间主要花在模型上</b>:模型推理占 81.8%(生成 63.8%、首 token 前 18.1%),工具执行 17.9%,opencode 编排 0.3%;接入网关、建会话、组装上下文都在毫秒级。</li><li><b>最后一轮写回答几乎占一半时间</b>:最后一轮(首 token 前 + 生成)占全部时间的 48.7%。回答越长、思考越多,这一段越长。</li><li><b>思考占输出的大头</b>:输出 token 里 58.7% 是模型的思考,其余是工具调用参数与回答正文;生成速度约 155 token/秒。</li><li><b>每多一轮多约 1.1 秒固定开销</b>:每轮等第一个字约 1.14 秒(中位 1.10 秒),与送入多少 token 关系不大(送入 2.5 万以下与 4 万以上的中位只差约 0.1 秒,前缀缓存让长上下文不必重算);每题 7.7 轮,合计约 8.8 秒。轮数越少越快。</li><li><b>送入 token 多,但九成命中缓存</b>:首轮送入约 2.0 万(系统提示词、根提示词、技能清单、工具定义),之后每轮带上之前全部内容,末轮到 3–7 万;90.9% 命中前缀缓存。每加载一份技能说明,下一轮新增约 7,468 token。</li><li><b>取数最重的是健康检查与内存定位</b>:全面健康检查时 health.py 一次调中间件 58 次、用时 13–19 秒(子技能与各项取数依次执行);memanalyze.py 平均 29 次、10.0 秒;每次中间件调用约 0.32 秒(测试环境的模拟中间件与网关同机)。行内真实中间件每次调用更慢时,这两类题的工具时间会按调用次数成比例变长。</li><li><b>技能脚本进程启动不是瓶颈</b>:每次起 Python 进程加导入约 0.19 秒,每题约 6.2 次,合计约 1.2 秒。</li><li><b>和 v1.4.3 的测量量级一致</b>:鲲鹏池化方案里用 48 道验收题测得每题 51 秒、9.5 轮、模型占 84.7%、每轮送入约 4 万 token、命中 94%;本次每题 48.9 秒、7.7 轮、模型占 81.8%、每轮送入约 3.3 万、命中 90.9%。两次题目不同,只比量级、不比快慢。</li></ul></section>
+
+<section><h2>7 怎么测的</h2>
+<ul class="obs">
+<li><b>环境</b>:agent-v1.4.10;单机 Kubernetes(arm64),网关 2 副本,固定池 3 Pod × 3 槽位;opencode 1.18.27;模型 DeepSeek(deepseek-flash,公网接口);中间件为模拟服务(签名校验开,与网关同机);数据库为 openGauss-lite 5.0.3 测试库(og5);用户入口为模拟统一认证 + 端口转发。</li>
+<li><b>题目</b>(诊断、问答、红线各类都有,都是只读):<ol class='qs'><li><b>Q1 全面健康检查</b>:对 og5 做一次健康检查。</li><li><b>Q2 快速概况</b>:og5 现在怎么样?</li><li><b>Q3 慢 SQL 排行</b>:给我 og5 最近的慢 SQL 列表。</li><li><b>Q4 参数体检</b>:og5 的参数配置有没有问题?</li><li><b>Q5 实时定位(内存)</b>:og5 内存使用很高,是谁占的?</li><li><b>Q6 存储过程诊断</b>:og5 上的存储过程 fl.fl_slow_key 跑得很慢,帮我看看哪里慢、怎么改。</li><li><b>Q7 知识问答</b>:lockwait_timeout 默认是多少?DDL 等锁也受它控制吗?我们行里做 DDL 变更有什么要求?</li><li><b>Q8 案例检索</b>:单条 update 平时几毫秒,偶尔要好几秒,我们行以前遇到过吗?是什么原因?</li><li><b>Q9 红线(要求改参数)</b>:帮我把 og5 的 shared_buffers 改成 16GB。</li></ol></li>
+<li><b>采集</b>:经用户入口(模拟统一认证 → 网关 → 本人槽位里的 opencode)新开对话发问,等答完后取会话全部消息。每轮模型调用的创建 / 完成时间、
+第一个思考或正文片段的时间、每次工具调用的起止、每轮 token(新增、命中缓存、输出、思考)都是 opencode 记下的原始数据;同一时刻只问一题,避免互相干扰。</li>
+<li><b>口径</b>:耗时 = 用户消息创建到最后一轮完成;token 是模型服务返回的计数。不含用户读回答、思考下一句的时间。</li>
+<li><b>局限</b>:中间件是测试环境的模拟服务(与网关同机、库是小型测试库),行内真实中间件与生产库每次调用会更慢,第 9 步在行内会更长;
+模型走公网 DeepSeek,首 token 前与生成速度随服务方负载波动;每题只问 2 次,单题数字仅供参考,看占比与量级。</li>
+</ul>
+<details><summary>18 次对话明细</summary><table><tr><th>题目</th><th>第几次</th><th>结果</th><th>耗时</th><th>轮次</th><th>工具</th><th>中间件</th><th>送入</th><th>输出</th></tr>
+<tr><td>Q1 全面健康检查</td><td>1</td><td>答完</td><td>60.0 秒</td><td>8</td><td>7</td><td>60</td><td>26.6 万</td><td>5,672</td></tr>
+<tr><td>Q1 全面健康检查</td><td>2</td><td>答完</td><td>63.6 秒</td><td>7</td><td>6</td><td>60</td><td>24.0 万</td><td>5,397</td></tr>
+<tr><td>Q2 快速概况</td><td>1</td><td>答完</td><td>51.6 秒</td><td>10</td><td>10</td><td>60</td><td>45.4 万</td><td>4,391</td></tr>
+<tr><td>Q2 快速概况</td><td>2</td><td>答完</td><td>87.9 秒</td><td>9</td><td>8</td><td>60</td><td>33.1 万</td><td>8,921</td></tr>
+<tr><td>Q3 慢 SQL 排行</td><td>1</td><td>答完</td><td>22.6 秒</td><td>7</td><td>6</td><td>7</td><td>17.9 万</td><td>2,538</td></tr>
+<tr><td>Q3 慢 SQL 排行</td><td>2</td><td>答完</td><td>34.9 秒</td><td>8</td><td>7</td><td>4</td><td>21.8 万</td><td>3,818</td></tr>
+<tr><td>Q4 参数体检</td><td>1</td><td>答完</td><td>15.6 秒</td><td>5</td><td>5</td><td>3</td><td>12.6 万</td><td>1,696</td></tr>
+<tr><td>Q4 参数体检</td><td>2</td><td>答完</td><td>21.4 秒</td><td>6</td><td>5</td><td>3</td><td>14.9 万</td><td>1,877</td></tr>
+<tr><td>Q5 实时定位(内存)</td><td>1</td><td>答完</td><td>53.6 秒</td><td>8</td><td>8</td><td>40</td><td>27.1 万</td><td>5,382</td></tr>
+<tr><td>Q5 实时定位(内存)</td><td>2</td><td>答完</td><td>96.6 秒</td><td>7</td><td>8</td><td>70</td><td>26.1 万</td><td>6,705</td></tr>
+<tr><td>Q6 存储过程诊断</td><td>1</td><td>答完</td><td>45.8 秒</td><td>5</td><td>7</td><td>5</td><td>16.3 万</td><td>5,255</td></tr>
+<tr><td>Q6 存储过程诊断</td><td>2</td><td>答完</td><td>73.4 秒</td><td>8</td><td>8</td><td>9</td><td>25.7 万</td><td>6,600</td></tr>
+<tr><td>Q7 知识问答</td><td>1</td><td>答完</td><td>62.3 秒</td><td>11</td><td>13</td><td>0</td><td>38.0 万</td><td>7,726</td></tr>
+<tr><td>Q7 知识问答</td><td>2</td><td>答完</td><td>35.0 秒</td><td>6</td><td>9</td><td>0</td><td>17.5 万</td><td>4,681</td></tr>
+<tr><td>Q8 案例检索</td><td>1</td><td>答完</td><td>43.8 秒</td><td>7</td><td>6</td><td>0</td><td>19.6 万</td><td>4,675</td></tr>
+<tr><td>Q8 案例检索</td><td>2</td><td>答完</td><td>67.1 秒</td><td>14</td><td>22</td><td>0</td><td>56.8 万</td><td>7,744</td></tr>
+<tr><td>Q9 红线(要求改参数)</td><td>1</td><td>答完</td><td>23.2 秒</td><td>6</td><td>6</td><td>3</td><td>15.5 万</td><td>2,179</td></tr>
+<tr><td>Q9 红线(要求改参数)</td><td>2</td><td>答完</td><td>22.2 秒</td><td>7</td><td>6</td><td>3</td><td>19.1 万</td><td>1,747</td></tr>
+</table></details>
+</section>
+<div id="tt" role="tooltip"></div>
+</div></div><script>
+(function(){var tt=document.getElementById('tt');
+function show(el,x,y){var p=el.getAttribute('data-tip').split(' | ');tt.textContent='';
+p.forEach(function(s,i){var d=document.createElement('div');d.textContent=s;tt.appendChild(d);});
+tt.style.display='block';var w=tt.offsetWidth,h=tt.offsetHeight;
+tt.style.left=Math.min(x+14,innerWidth-w-8)+'px';tt.style.top=Math.max(8,y-h-10)+'px';}
+document.querySelectorAll('[data-tip]').forEach(function(el){
+el.addEventListener('pointermove',function(ev){show(el,ev.clientX,ev.clientY);});
+el.addEventListener('pointerleave',function(){tt.style.display='none';});
+el.addEventListener('focus',function(){var r=el.getBoundingClientRect();show(el,r.left+r.width/2,r.top);});
+el.addEventListener('blur',function(){tt.style.display='none';});});})();
+</script></body></html>
