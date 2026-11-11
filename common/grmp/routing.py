@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict
 
 APPBUSINESS = "appbusiness"
@@ -57,6 +58,15 @@ BUSINESS_DB_SCRIPTS = frozenset({
 # 登录时核实「是不是真的切到了业务库」用的探针(appbusiness,SELECT current_database())
 PROBE = "login.current_db"
 
+# 行方中间件对声明了 dbName 的脚本:不带 dbName 不会退回 postgres,而是按空库名去连,报
+# 「数据库[]在目标高斯实例中不存在」(HTTP 400,2026-11-11 现场)。行方白名单的执行库标注与本版不一致时
+# (增量 20261111 没导入、手工改过的记录)就会撞上 —— 客户端据此对这类脚本明确带 postgres。
+EMPTY_DB_ERROR = re.compile(r"数据库\[\s*\]在目标高斯实例中不存在")
+
 
 def is_business(script_name: str) -> bool:
     return script_name in BUSINESS_DB_SCRIPTS
+
+
+def is_empty_db_error(message: str) -> bool:
+    return bool(EMPTY_DB_ERROR.search(message or ""))

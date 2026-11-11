@@ -26,6 +26,8 @@ _HINTS: Sequence[Tuple[Tuple[str, ...], str]] = (
     (("permission denied",), ""),                     # 占位:文案由 _permission_hint 按对象名生成
     (("canceling statement due to statement timeout", "statement timeout", "query timeout"),
      "语句超时被取消:缩小时间窗或提高阈值让结果变少;中间件侧的超时由 GRMP 配置决定"),
+    # 行方中间件的切库(dbName)报错(2026-11-11 现场):库名为空 = 白名单把这条登记成要带库名、本次没带
+    (("在目标高斯实例中不存在",), ""),                 # 占位:文案由 _db_missing_hint 按库名空 / 非空生成
     (("查询不到对应高斯实例", "instance not found"),
      "中间件按 dataIp 找不到实例:登录用的 IP 必须是 GRMP 里登记的实例 IP,不是主机管理 IP"),
     # 函数级 does not exist 必须排在通用 does not exist 之前:三种原因不同,给的动作也不同
@@ -97,10 +99,39 @@ def _relation_hint(text: str) -> str:
             f"解决:由 DBA 给执行账号在该库上把 search_path 设成包含业务 schema,或在 SQL 里写全 schema.表 后重跑")
 
 
+_DB_MISSING_RE = re.compile(r"数据库\[([^\]]*)\]在目标高斯实例中不存在")
+
+
+def _db_missing_hint(text: str) -> str:
+    """行方中间件按 dbName 切库时库不存在。库名为空:这条脚本在行方白名单里声明了 dbName(登记成业务库类)而本次没带——
+    中间件不会退回 postgres,直接报这一句(11-11 现场实测)。库名非空:登录给的业务库名在实例上找不到。"""
+    m = _DB_MISSING_RE.search(text or "")
+    if not m:
+        return ""
+    name = m.group(1).strip()
+    if not name:
+        return ("中间件要求这条脚本带库名(dbName)而这次没带:行方白名单里这条脚本的执行库标注与本版不一致(被登记成了业务库类)。"
+                "智能体会自动按 postgres 库重试一次;要根治,请白名单团队导入 scripts-delta-20261111.sql,"
+                "以它为准覆盖手工改过的记录。这不是数据库或参数的问题,不要让 DBA 改库")
+    return (f"实例上没有库「{name}」:核对登录时 --database 给的业务库名(拼写、大小写),"
+            f"或换一个确实存在的业务库重新 gaussdb-login;它会作为 dbName 传给中间件去切库")
+
+
 def explain(text: str) -> str:
     """已知报错模式对应的中文提示;认不出来返回空串,由调用方决定要不要追加。"""
     low = (text or "").lower()
     for needles, hint in _HINTS:
+        if needles == ("在目标高斯实例中不存在",):
+            if needles[0] in (text or ""):
+                made = _db_missing_hint(text)
+                if made:
+                    return made
+            continue
+        if needles == ("schema ", " does not exist"):
+            # 两个子串都要命中:只看「任一」会把 column / type … does not exist 都说成 schema 不存在(1.4.11 的缺陷)
+            if all(n in low for n in needles):
+                return hint
+            continue
         if needles == ("function ", " does not exist"):
             if all(n in low for n in needles):
                 made = _function_hint(text)

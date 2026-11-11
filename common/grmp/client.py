@@ -55,7 +55,7 @@ def _error_detail(raw: str) -> str:
     try:
         parsed = json.loads(raw)
         if isinstance(parsed, dict):
-            for key in ("msg", "message", "error", "detail"):
+            for key in ("msg", "message", "error_msg", "error", "detail"):   # error_msg:行方切库报错的形态
                 if parsed.get(key):
                     detail = str(parsed[key])
                     break
@@ -102,6 +102,8 @@ class GrmpClient:
         self._declared: Dict[str, set] = {}
         # 切到业务库(common/grmp/routing.py):登录时核实过中间件真的会切,会话才带上这个库名;空 = 一律连 postgres
         self.target_db = target_db
+        # 接口一没列出 dbName、执行时却报「数据库[]不存在」的脚本:本进程里之后直接带 postgres,不再撞一次
+        self._needs_db: set = set()
 
     @property
     def signer(self) -> Optional[Any]:
@@ -226,6 +228,20 @@ class GrmpClient:
         行方接口一里这条脚本声明了 dbName(说明行方已配好,没配好时多传参数会被拒)。"""
         return bool(self.target_db) and routing.is_business(script_name) and self.declares(script_name, routing.PARAM)
 
+    def db_name_for(self, script_name: str) -> str:
+        """这次调用带的 dbName;空串 = 不带。
+
+        - routes() 成立 → 目标业务库;
+        - 行方声明了 dbName、但我们不切(读 SQL 历史 / WDR 快照 / 实例级视图的脚本,或会话没切过去)→ 明确带 postgres:
+          行方中间件对声明了 dbName 的脚本不带就报「数据库[]在目标高斯实例中不存在」,不会退回 postgres(11-11 现场);
+          所以本版不再依赖行方白名单的执行库标注与我们一致;
+        - 行方没声明 → 不带(没声明时多传参数会不会被拒,行方未答复)。"""
+        if self.routes(script_name):
+            return self.target_db
+        if script_name in self._needs_db or self.declares(script_name, routing.PARAM):
+            return routing.POSTGRES
+        return ""
+
     def resolve_id(self, script_name: str) -> str:
         ids = self._id_map()
         if script_name not in ids:
@@ -244,13 +260,26 @@ class GrmpClient:
     def invoke(
         self, script_name: str, values: Mapping[str, Any] = None
     ) -> List[Dict[str, str]]:
+        values = dict(values or {})
+        if routing.PARAM not in values:
+            db = self.db_name_for(script_name)
+            if db:
+                values = {routing.PARAM: db, **values}
+        try:
+            return self._invoke_once(script_name, values)
+        except GrmpError as exc:
+            # 兜底:接口一没列出 dbName(或清单是旧的),中间件却要库名 —— 按 postgres 重试一次并记住。
+            # 只认「库名为空」这一种报错;带了库名还报不存在是真的库名错了,不重试
+            if routing.PARAM in values or not routing.is_empty_db_error(str(exc)):
+                raise
+        self._needs_db.add(script_name)
+        return self._invoke_once(script_name, {routing.PARAM: routing.POSTGRES, **values})
+
+    def _invoke_once(self, script_name: str, values: Dict[str, Any]) -> List[Dict[str, str]]:
         payload: Dict[str, Any] = {
             "dataIp": self.data_ip,
             "id": self.resolve_id(script_name),
         }
-        values = dict(values or {})
-        if routing.PARAM not in values and self.routes(script_name):
-            values = {routing.PARAM: self.target_db, **values}
         if values:
             payload["param"] = [
                 {"param_name": key, "param_value": to_param_value(val)}

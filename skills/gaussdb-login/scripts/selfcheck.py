@@ -180,7 +180,7 @@ def check_routing(conn, runner) -> List[Item]:
             parts.append("%d 条该切库的没带 dbName(%s%s),它们仍在 postgres 上执行"
                          % (len(missing), "、".join(missing[:4]), "等" if len(missing) > 4 else ""))
         if others:
-            parts.append("%d 条读 SQL 历史 / WDR 快照 / 实例级视图的带了 dbName(%s%s),我们不会给它们传 dbName"
+            parts.append("%d 条读 SQL 历史 / WDR 快照 / 实例级视图的带了 dbName(%s%s),本版对它们明确带 postgres,照常可用"
                          % (len(others), "、".join(others[:4]), "等" if len(others) > 4 else ""))
         items.append(Item("白名单切库标注", WARN, ";".join(parts) + "。按本版增量白名单导入后一致", MIDDLEWARE))
     elif reg:
