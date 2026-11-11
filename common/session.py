@@ -49,6 +49,13 @@ NOT_LOGGED_IN = ("本对话未登录。请先运行 gaussdb-login 登录要访�
 _ALLOWED = frozenset({"name", "type", "host", "port", "database", "user",
                       "sslmode", "driver", "data_ip", "app", "exec_database"})
 
+# 切到业务库的库名(route_db,v1.4.11)不进会话 yaml,单独写在同名的 ``<句柄>.route`` 里:
+# v1.4.10 及以前每次取数都先读一遍目录里全部 *.yaml、见到不认识的键就报错退出 —— 键写进 yaml 的话,
+# 回滚到 1.4.10 或按槽位替换期间新旧混跑时,这个用户的所有取数技能都会失败(11-11 测试环境回滚实测)。
+# 旧版不读 .route,把这种会话当成「库名 = 业务库、不切库」,与 1.4.10 本来的行为相同。
+ROUTE_SUFFIX = ".route"
+_ROUTE_MAX = 128
+
 _selected: Optional[str] = None      # 本进程用 use() 选中的句柄（来自 --session）
 
 
@@ -113,12 +120,38 @@ def path_for(handle: str) -> pathlib.Path:
 
 
 def _write(path: pathlib.Path, payload: dict) -> None:
+    _write_text(path, yaml.safe_dump(payload, allow_unicode=True, sort_keys=False))
+
+
+def _write_text(path: pathlib.Path, text: str) -> None:
     # 先写临时文件再改名：中途失败不会留下半个会话文件，
     # 而半个文件解析出来可能正好是另一个合法连接
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
     os.chmod(tmp, 0o600)
     tmp.replace(path)
+
+
+def _route_path(path: pathlib.Path) -> pathlib.Path:
+    return path.with_suffix(ROUTE_SUFFIX)
+
+
+def _read_route(path: pathlib.Path) -> str:
+    rp = _route_path(path)
+    if not rp.exists():
+        return ""
+    value = rp.read_text(encoding="utf-8").strip()
+    if not value or len(value) > _ROUTE_MAX or any(c.isspace() for c in value):
+        raise ConfigError("会话文件 %s 里的业务库名不合法。删掉它和 %s 重新运行 gaussdb-login 即可。" % (rp, path.name))
+    return value
+
+
+def _unlink(path: pathlib.Path) -> None:
+    for p in (path, _route_path(path)):
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _read(path: pathlib.Path) -> Connection:
@@ -145,6 +178,7 @@ def _read(path: pathlib.Path) -> Connection:
         data_ip=raw.get("data_ip", "") or "",
         app=raw.get("app", "") or "",
         exec_database=raw.get("exec_database", "") or "",
+        route_db=_read_route(path),
     )
     if conn.driver == "grmp":
         # 会话文件只是登录那一刻的快照。中间件地址属于环境配置,不属于会话:
@@ -192,7 +226,12 @@ def save(conn: Connection, handle: Optional[str] = None) -> str:
     }
     if conn.exec_database:
         payload["exec_database"] = conn.exec_database
-    _write(path_for(handle), payload)
+    path = path_for(handle)
+    if conn.route_db:                            # 先写库名再写会话:读到会话时库名一定已在
+        _write_text(_route_path(path), conn.route_db + "\n")
+    elif _route_path(path).exists():
+        _route_path(path).unlink()
+    _write(path, payload)
     legacy = _legacy_path()                     # 旧版单文件:谁都能用的口子,见到就删
     if legacy.exists():
         try:
@@ -218,11 +257,18 @@ def list_sessions(prune: bool = True) -> List[SessionInfo]:
         if now - last_used > ttl:
             if prune:
                 try:
-                    path.unlink()
+                    _unlink(path)
                 except OSError:
                     pass
             continue
         out.append(SessionInfo(handle=path.stem, conn=_read(path), last_used=last_used, path=path))
+    if prune:                               # 旧版清掉过期会话时不认 .route,留下的孤儿顺手删
+        for rp in d.glob("*" + ROUTE_SUFFIX):
+            if HANDLE_RE.match(rp.stem) and not rp.with_suffix(".yaml").exists():
+                try:
+                    rp.unlink()
+                except OSError:
+                    pass
     return sorted(out, key=lambda s: s.last_used, reverse=True)
 
 
@@ -255,7 +301,7 @@ def clear(handle: Optional[str] = None) -> bool:
         raise ConfigError("退出会话要带 `--session <句柄>`（登录时输出的那一串）；运维清空沙箱里全部会话用 `--all`。")
     path = path_for(handle)
     if path.exists():
-        path.unlink()
+        _unlink(path)
         return True
     return False
 
@@ -264,7 +310,7 @@ def clear_all() -> int:
     """清掉沙箱里全部会话（含旧的单文件），返回删掉的个数。"""
     n = 0
     for s in list_sessions(prune=False):
-        s.path.unlink()
+        _unlink(s.path)
         n += 1
     legacy = _legacy_path()
     if legacy.exists():
