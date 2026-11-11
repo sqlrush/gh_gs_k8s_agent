@@ -30,6 +30,7 @@
 #         ② 冻结页数与实时页数偏离比例（判定用的同一个量）从高到低；③ 实时页数从大到小。
 # pg_stats 的列数要参与排序，所以挪进了子查询，对每张候选表都数一次（og5 36 张候选 36 毫秒）。
 name: health.stale_stats
+database_type: appbusiness
 description: 表的统计信息新鲜度证据（页数漂移 + 统计列数 + 上次 ANALYZE）
 sql: |
   SELECT tbl_name, frozen_pages, cur_pages, frozen_tuples, live_tuples,

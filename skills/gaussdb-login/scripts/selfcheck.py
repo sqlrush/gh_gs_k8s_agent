@@ -27,13 +27,14 @@ for _anc in _HERE.parents:
 import render  # noqa: E402
 from common import access, cli, config  # noqa: E402
 from common.version import package_version  # noqa: E402
+from common.grmp import routing  # noqa: E402
 from common.grmp.registry import Registry  # noqa: E402
 
 OK, WARN, FAIL = "✓", "！", "✕"
 DEPLOY, MIDDLEWARE, OPS = "部署方", "中间件团队", "运维 DBA"
 BANK_OPAQUE = "agent诊断脚本执行失败"      # 行方 GRMP 执行失败时只回这一句,数据库的原始报错留在中间件日志里
 
-# 关键脚本试跑:(脚本, 参数, 新版本才有的列, 用途)。只挑每类能力的入口与现场出过问题的几条,不逐条跑全部 137 条
+# 关键脚本试跑:(脚本, 参数, 新版本才有的列, 用途)。只挑每类能力的入口与现场出过问题的几条,不逐条跑全部 138 条
 PROBES = (
     ("health.overview", {}, (), "健康检查总览"),
     ("health.storage", {}, (), "健康检查 Storage(库与表空间占用)"),
@@ -84,14 +85,18 @@ def check_install() -> List[Item]:
     return items
 
 
-def used_names(registry: Registry) -> set:
+def used_names(registry: Registry, skills: Optional[pathlib.Path] = None) -> set:
     """有技能调用的脚本:逻辑名全串出现在技能代码里(与 grmp_register 交付时剔掉「没有任何 skill 调用」的规则一致)。
 
-    容器镜像里带着全部定义(含 13 条不交付的),技能包里只带交付的 137 条 —— 按「有人调用」比,两种部署结论一致,
-    不会把没交付的那几条报成「缺」。"""
-    skills = pathlib.Path(__file__).resolve().parents[2]
+    容器镜像里带着全部定义(含 13 条不交付的),技能包里只带交付的 138 条 —— 按「有人调用」比,两种部署结论一致,
+    不会把没交付的那几条报成「缺」。交付规则只搜各技能目录,所以这里也跳过部署后放进技能目录的 ``common/``:
+    里面的 ``common/grmp/routing.py`` 是切库脚本的名单(数据,不是调用),含 2 条不交付的,
+    不跳过的话容器里会把那 2 条报成「白名单缺」(11-11 测试环境实测查出)。
+    注意:技能代码(含注释)里别写不交付脚本的全名 —— 交付按全名出现与否决定带哪些定义。"""
+    skills = skills or pathlib.Path(__file__).resolve().parents[2]
+    me = pathlib.Path(__file__).name
     text = "\n".join(f.read_text(encoding="utf-8", errors="replace") for f in skills.rglob("*.py")
-                     if f.name != pathlib.Path(__file__).name)
+                     if f.name != me and f.relative_to(skills).parts[0] != "common")
     return {n for n in registry.names() if n in text}
 
 
@@ -140,6 +145,49 @@ def check_scripts(runner) -> List[Item]:
     return items
 
 
+def check_routing(conn, runner) -> List[Item]:
+    """切到业务库(dbName,2026-11-11 行方切库方案):本会话切过去没有;行方白名单里的标注与本版是否一致。"""
+    client = getattr(runner, "client", None)
+    if client is None:
+        return []
+    try:
+        reg = {n for n in routing.BUSINESS_DB_SCRIPTS if client.registered(n)}
+        missing = sorted(n for n in reg if not client.declares(n, routing.PARAM))
+        others = sorted(n for n in client.names() if n not in routing.BUSINESS_DB_SCRIPTS
+                        and client.declares(n, routing.PARAM))
+    except Exception as exc:  # noqa: BLE001
+        return [Item("业务库切换", WARN, "命令清单取不到:%s" % _err(exc), MIDDLEWARE)]
+    items = []
+    if conn.route_db:
+        try:
+            got = str((runner.run(routing.PROBE) or [{}])[0].get("db") or "")
+        except Exception as exc:  # noqa: BLE001
+            got = "(调用失败:%s)" % _err(exc)
+        ok = got.lower() == conn.route_db.lower()
+        items.append(Item("业务库切换", OK if ok else FAIL,
+                          "已切到「%s」:表、索引、执行计划、统计信息、存储过程在这个库上取" % got if ok else
+                          "会话记的是「%s」,探针带 dbName 回的是「%s」:中间件没按 dbName 切库" % (conn.route_db, got),
+                          "" if ok else MIDDLEWARE))
+    elif not reg or not any(client.declares(n, routing.PARAM) for n in reg):
+        items.append(Item("业务库切换", WARN, "行方白名单还没有带 dbName 的脚本:对象类取数(执行计划、表结构、索引等)只能在 postgres 上做。"
+                          "按本版增量白名单导入后,登录时带 --database <业务库> 即可切库", MIDDLEWARE))
+    else:
+        items.append(Item("业务库切换", WARN, "本会话没有切到业务库(登录时没给业务库名,或核实没通过 —— 见登录输出)。"
+                          "要诊断某个业务库的表、执行计划,登录时带 --database <业务库>", ""))
+    if missing or others:
+        parts = []
+        if missing:
+            parts.append("%d 条该切库的没带 dbName(%s%s),它们仍在 postgres 上执行"
+                         % (len(missing), "、".join(missing[:4]), "等" if len(missing) > 4 else ""))
+        if others:
+            parts.append("%d 条读 SQL 历史 / WDR 快照 / 实例级视图的带了 dbName(%s%s),我们不会给它们传 dbName"
+                         % (len(others), "、".join(others[:4]), "等" if len(others) > 4 else ""))
+        items.append(Item("白名单切库标注", WARN, ";".join(parts) + "。按本版增量白名单导入后一致", MIDDLEWARE))
+    elif reg:
+        items.append(Item("白名单切库标注", OK, "与本版一致(%d 条在业务库执行)" % len(reg)))
+    return items
+
+
 def check_switches(runner) -> List[Item]:
     try:
         rows = runner.run("config.settings", {})
@@ -178,7 +226,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(render_report(items), end="")
         return 1
     if conn.driver == "grmp":
-        items += check_whitelist(conn, Registry())
+        items += check_whitelist(conn, Registry()) + check_routing(conn, runner)
     items += check_scripts(runner) + check_switches(runner)
     print(render_report(items), end="")
     return 0 if all(i.mark != FAIL for i in items) else 1

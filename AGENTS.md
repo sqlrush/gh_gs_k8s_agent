@@ -156,9 +156,13 @@ permission:
 
 ## 数据库连接规则
 
-1. **选择连接 —— 先登录，不要自己猜连接名。** 取数前确认已登录：
-   `python3 {baseDir}/../gaussdb-login/scripts/login.py --status`。
-   没有会话就先调 **gaussdb-login**：它读 `$GSDB_HOME/config.yaml`的首行 `connection_mode`，是 `api` 就先 `login.py --list` 看部署时登记的实例别名：用户说的是别名（如「og5」）就用 `--alias <别名>` 登录，不在清单里才向用户要实例 IP 和库名；是 `gsql` 就把可选连接列成菜单让用户挑。
+1. **选择连接 —— 先登录，不要自己猜连接名；一步登录。** 本对话里已经登录过就直接用登录输出里的句柄，不必再 `--status`
+   （新对话里它永远回「本对话未登录」，问不出东西）。没登录就调 **gaussdb-login**，按用户说的直接登录：
+   - 点名了实例别名（如「og5」）：`python3 {baseDir}/../gaussdb-login/scripts/login.py --alias <别名>`；还说了业务库（如「og5 上的 appdb」）
+     就加 `--database <库名>`。别名不存在时脚本会列出全部登记过的别名，从中选或向用户要实例 IP 和库名——不必先 `--list`。
+   - 给了实例 IP 和库名：`login.py --ip <实例IP> --database <库名>`。
+   - 没说是哪个实例（如「数据库现在有没有问题」）才先 `login.py --list` 列出来让用户选；`gsql` 模式下 `--list` 列出可选连接让用户挑。
+   登录输出写「**已直连**」是中间件已切到该业务库（表、索引、执行计划在这个库上取）；写「**未直连**」是取数仍在 postgres 上，按输出里的说明转告用户。
 2. 如果用户没有明确指定方式，优先使用 `api`。
 3. 不要手工读取、展示、解密或改写凭据文件；应只通过各 skill 脚本取用。
 4. **会话句柄只能来自本对话里 gaussdb-login 的输出**（或平台注入的环境变量 `GSDB_SESSION`）。脚本报「本对话未登录」就让用户登录；

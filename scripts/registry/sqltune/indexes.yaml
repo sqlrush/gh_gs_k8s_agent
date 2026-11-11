@@ -18,6 +18,7 @@
 # **索引那一行**（i.relpages/i.reltuples），不是表那一行 —— 两者差着数量级，
 # 取错了算出来的树高会小得离谱，而结果依然是个像模像样的数字。
 name: sqltune.indexes
+database_type: appbusiness
 description: SQL 涉及的表上已有的索引（证据包 ## Indexes）
 sql: |
   SELECT n.nspname AS schema_name, t.relname AS table_name,

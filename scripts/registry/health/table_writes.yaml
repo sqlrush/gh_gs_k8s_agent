@@ -9,6 +9,7 @@
 # 按累计写入量排会把「历史上写得多、现在不写」的表排进来,而把正在猛写的新表挤掉。
 # 系统 schema 排除表照抄 health/bloat.yaml;找不到所属表的 TOAST(系统表的)随 pg_toast 一起排除。
 name: health.table_writes
+database_type: appbusiness
 description: 各表（大字段写入折回所属表）的插入 / 更新 / 删除行数与 TOAST 大小
 readonly: true
 params:

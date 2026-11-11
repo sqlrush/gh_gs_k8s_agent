@@ -9,6 +9,7 @@
 # 来自 NULL；填 0.0 会被读成「物理顺序与索引顺序完全无关」，那是一个结论，
 # 不是「不知道」。
 name: proctune.column_stats
+database_type: appbusiness
 description: 游标 SQL 涉及的表的列级统计信息（证据包 ## Column Statistics）
 sql: |
   SELECT schemaname, tablename, attname, n_distinct, null_frac, avg_width, correlation,

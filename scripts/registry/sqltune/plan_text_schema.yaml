@@ -5,6 +5,7 @@
 # 先验,不行就用不带 _schema 的单语句模板(common/search_path.py)。
 # {{schema}} 进了引号里、且 skill 侧只放行合法标识符(^[A-Za-z_][A-Za-z0-9_$]*$);{{sql}} 的三道防线同单语句模板。
 name: sqltune.plan_text_schema
+database_type: appbusiness
 description: 先把 search_path 切到指定 schema,再取一条只读 SQL 的执行计划(TEXT格式,不执行该 SQL)
 readonly: true
 sql: |

@@ -9,6 +9,7 @@
 #
 # 实测注入载荷全部被拒:多语句 DROP、直接 DDL、括号逃逸。
 name: sqltune.plan_text
+database_type: appbusiness
 description: 取一条只读 SQL 的执行计划（TEXT 格式，不执行该 SQL）
 readonly: true
 sql: |

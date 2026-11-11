@@ -20,6 +20,7 @@
 # 在 ORDER BY waiter_wait_s DESC LIMIT 之下排到最后、掉出返回页，而这恰恰
 # 是这个 skill 最该报出来的那一行。别把 COALESCE(...,0) 加回这两列。
 name: lockwait.pairs
+database_type: appbusiness
 description: 锁堵塞的持有者/等待者成对明细（含双方锁模式、锁对象、等待时长、双方 SQL）
 readonly: true
 sql: |

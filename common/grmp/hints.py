@@ -31,6 +31,9 @@ _HINTS: Sequence[Tuple[Tuple[str, ...], str]] = (
     # 函数级 does not exist 必须排在通用 does not exist 之前:三种原因不同,给的动作也不同
     (("function ", " does not exist"), ""),             # 占位:文案由 _function_hint 生成(需两个子串同时命中)
     (("relation ", " does not exist"), ""),             # 占位:文案由 _relation_hint 生成(不带 schema 的表先怀疑 search_path)
+    (("schema ", " does not exist"),
+     "schema 不存在:先确认这个 schema 在登录时给的那个库里 —— 已切到业务库(登录写「已直连」)时,表、索引、执行计划都在那个业务库上取,"
+     "别的库里的 schema 看不到,换库请用那个库名重新登录;没切库时取数在 postgres 上,业务库里的 schema 同样看不到"),
     (("does not exist",),
      "对象不存在:多半是版本差异(视图 / 列名不同)或脚本注册到了别的库——对照 whitelist.md 里的 SQL 与目标实例版本"),
 )

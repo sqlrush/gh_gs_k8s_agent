@@ -20,6 +20,7 @@
 # GRMP 没有列表类型，只能当 String 塞进去 —— 注册时会标 STRING_PARAM。
 # 防线在调用方：取值来自 collectors.py 里的固定常量，不来自用户输入。
 name: health.unused_index
+database_type: appbusiness
 description: 索引用量全局视图（含扫描次数、大小、是否约束背书、所属表的扫描分布）
 sql: |
   SELECT s.schemaname||'.'||s.indexrelname AS idx_name,

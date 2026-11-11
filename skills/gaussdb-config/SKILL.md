@@ -36,7 +36,7 @@ metadata:
 
 ## 工作流
 
-1. **先登录**（同其他 skill）：`python3 {baseDir}/../gaussdb-login/scripts/login.py --status`。
+1. **先登录**（同其他 skill）：本对话里登录过就直接用句柄；没登录就 `python3 {baseDir}/../gaussdb-login/scripts/login.py --alias <别名>`（或 `--ip <实例IP> --database <库名>`）一步登录，不要先 `--status`。
 2. **跑体检：**
 
    ```bash

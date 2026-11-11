@@ -12,6 +12,7 @@
 # 系统 schema 排除表照抄 scripts/registry/health/bloat.yaml 的清单，
 # 避免系统表的死元组把真正的风险表挤出 LIMIT。
 name: vacuum.dead_tuples
+database_type: appbusiness
 description: 用户表死元组清单（含存活/死元组数、表大小、autovacuum 服务历史）
 readonly: true
 sql: |

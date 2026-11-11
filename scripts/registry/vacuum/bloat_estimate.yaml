@@ -15,6 +15,7 @@
 # avg_width 从 pg_stats 按表汇总(每列一行,求和即一行的平均宽度)。
 # 某张表没有任何 pg_stats 行 = 从没 ANALYZE 过 → 这里给 NULL,判定侧据此拒绝估算。
 name: vacuum.bloat_estimate
+database_type: appbusiness
 description: 表膨胀估算的输入（页数、行数、平均行宽、真实大小）
 readonly: true
 params:

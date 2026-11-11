@@ -34,6 +34,7 @@ from common.config import MODE_API, MODE_GSQL, ConfigError, Connection  # noqa: 
 from common.credential import secret_for  # noqa: E402
 from common.db import Database  # noqa: E402
 from common.grmp import proxy as grmp_proxy  # noqa: E402
+from common.grmp import routing  # noqa: E402
 from common.version import package_version  # noqa: E402
 
 
@@ -257,6 +258,50 @@ def _check_database(conn: Connection) -> DbCheck:
     return DbCheck("unknown", note=last)
 
 
+class RouteCheck(NamedTuple):
+    ok: bool
+    note: str = ""                                   # 没切过去的原因 / 切过去后的提醒
+    pending: Tuple[str, ...] = ()                    # 我们划为业务库类、但行方白名单里还没带 dbName 的脚本
+
+
+def _try_route(conn: Connection, target: str) -> RouteCheck:
+    """中间件能不能按 dbName 切到 target(2026-11-11 行方切库方案,common/grmp/routing.py)。
+
+    用探针 login.current_db(appbusiness,SELECT current_database())带 dbName 跑一次,回来的库名等于 target 才算切过去。
+    没登记探针、探针没声明 dbName、调用报错、回来的还是 postgres,都如实说原因 —— 登录照常,只是不切库。
+    """
+    trial = replace(conn, database=target, route_db=target)
+    try:
+        runner = access.runner_for(trial)
+        client = getattr(runner, "client", None)
+        if client is None:
+            return RouteCheck(False, "直连模式不经中间件,不需要切库")
+        if not client.registered(routing.PROBE):
+            return RouteCheck(False, "行方白名单里还没有探针 %s(本版增量白名单未导入)" % routing.PROBE)
+        if not client.declares(routing.PROBE, routing.PARAM):
+            return RouteCheck(False, "行方白名单里探针 %s 没有声明 dbName(本版增量白名单未按本版导入,或中间件还不支持切库)"
+                              % routing.PROBE)
+        rows = runner.run(routing.PROBE)
+    except Exception as exc:                          # noqa: BLE001 —— 切不过去就说切不过去,不挡登录
+        first = str(exc).splitlines()[0][:120] if str(exc) else type(exc).__name__
+        return RouteCheck(False, "切库调用失败:%s(库不存在、执行账号没有该库的连接权限,或中间件不支持切库)" % first)
+    got = str((rows or [{}])[0].get("db") or "").strip()
+    if got.lower() != target.lower():
+        return RouteCheck(False, "中间件没有按 dbName 切库(带上「%s」后仍连「%s」)" % (target, got or "未知"))
+    pending = tuple(sorted(n for n in routing.BUSINESS_DB_SCRIPTS
+                           if n != routing.PROBE and client.registered(n) and not client.declares(n, routing.PARAM)))
+    return RouteCheck(True, pending=pending)
+
+
+def _direct_cell(target: str, pg: str, rc: RouteCheck) -> str:
+    cell = ("已切到业务库「%s」：表、索引、执行计划、统计信息、存储过程在「%s」上取；"
+            "SQL 执行历史、WDR 快照与实例级视图仍在「%s」上取" % (target, target, pg or "postgres"))
+    if rc.pending:
+        cell += ("。**行方白名单里还有 %d 条该切库的脚本没带 dbName**（如 %s），它们仍在「%s」上执行 —— 请白名单团队按本版增量导入"
+                 % (len(rc.pending), "、".join(rc.pending[:3]), pg or "postgres"))
+    return cell
+
+
 def _unlisted_cell(conn: Connection, chk: DbCheck) -> str:
     others = "、".join(chk.databases) if chk.databases else "（没取到）"
     return ("**实例库清单里没有「%s」**（实例上的库：%s），仍按「%s」登记；中间件按实例 IP 固定连库「%s」，"
@@ -276,6 +321,21 @@ ROUTED_NOTE = (
     "目前没有按库筛选，结果里可能有实例上其他库的会话与 SQL，引用时看清是不是「%(target)s」的。\n"
     "> - 表、索引、执行计划、存储过程这类对象属于各自的库，取数时只能看到「%(exec)s」里的：对「%(target)s」的表做膨胀分析、"
     "对「%(target)s」的 SQL 现取执行计划会找不到对象。遇到时如实说明是这个原因，不要让用户去改 search_path 或授权。\n"
+)
+
+
+DIRECT_NOTE = (
+    "\n> **已切到业务库「%(target)s」**：表、索引、执行计划、统计信息、存储过程都在「%(target)s」上取。"
+    "会话、锁等待、等待事件、慢 SQL / Top SQL、WDR 是整个实例的数据，结果里可能有实例上其他库的会话与 SQL，"
+    "引用时看清是不是「%(target)s」的。\n"
+)
+
+# 没切到业务库、也不是「要诊断的库与取数的库不同」(登录时没给业务库)时补的说明。11-11 测试环境实测:
+# 只看到「数据库 postgres」,模型会以为 Top SQL 只含 postgres 库的语句、建议「按业务库重新登录再看 Top SQL」
+INSTANCE_NOTE = (
+    "\n> **取数在实例的「%(db)s」库上**：会话、锁等待、等待事件、慢 SQL / Top SQL、WDR 是整个实例的数据，"
+    "实例上所有库的会话与 SQL 都在里面，看这些不用指定业务库。表、索引、执行计划、统计信息、存储过程属于各自的库："
+    "要看某个业务库的，登录时带 `--database <业务库>`。\n"
 )
 
 
@@ -332,7 +392,9 @@ def _describe(conn: Connection, note: str, path, role: str = "", handle: str = "
          # 取数库不是目标库时分两行写明:行方 11-08 批量登录后以为「登录成功」= 业务库连上了(实际全在 postgres 上取数)
          *([["要诊断的库", "%s（未直连）" % conn.database],
             ["实际连接", "实例 %s 的 %s 库（所有取数都在这里执行）" % (conn.data_ip, conn.exec_database)]]
-           if conn.exec_database else [["数据库", conn.database]]),
+           if conn.exec_database else
+           [["要诊断的库", "%s（已直连：中间件按 dbName 切库）" % conn.database]] if conn.route_db else
+           [["数据库", conn.database]]),
          *([["库名核对", db_note]] if db_note else []),
          ["验证", note],
          ["主备", role or "未探测"]])
@@ -351,6 +413,10 @@ def _describe(conn: Connection, note: str, path, role: str = "", handle: str = "
    
     if conn.exec_database:
         out += ROUTED_NOTE % {"target": conn.database, "exec": conn.exec_database}
+    elif conn.route_db:
+        out += DIRECT_NOTE % {"target": conn.route_db}
+    elif conn.driver == "grmp":
+        out += INSTANCE_NOTE % {"db": conn.database or routing.POSTGRES}
     if role.startswith("备机"):
         out += STANDBY_NOTE
     out += "\n会话已写入 `%s`。\n\n" % path
@@ -447,8 +513,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(_render_aliases(config.instance_aliases(), config.instance_alias_errors()))
                 return 0
             if args.alias:
-                if args.ip or args.database:
-                    print("--alias 与 --ip/--database 二选一：别名已经代表一个实例 IP 和库名。", file=sys.stderr)
+                if args.ip:
+                    print("--alias 与 --ip 二选一：别名已经代表一个实例 IP。要看这个实例上的别的库，用 "
+                          "`--alias <别名> --database <库名>`。", file=sys.stderr)
                     return 2
                 hit = _find_alias(args.alias)
                 if hit is None:
@@ -457,7 +524,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                           "不在清单里的库，请向用户要实例 IP 和库名，用 `--ip <实例IP> --database <库名>` 登录。"
                           % (args.alias, names), file=sys.stderr)
                     return 2
-                args.ip, args.database = hit.ip, hit.database
+                # 别名 + 库名:同一实例上的另一个库(中间件按 dbName 切库后才有意义,见 routing.py)
+                args.ip, args.database = hit.ip, (args.database or hit.database)
             missing = [f for f, v in (("--ip", args.ip),
                                       ("--database", args.database)) if not v]
             if missing:
@@ -522,9 +590,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                     db_note = "按实际库名「%s」登录（你给的是「%s」，只差大小写）" % (chk.actual, conn.database)
                     conn = _api_connection(conn.data_ip, chk.actual, config.api_endpoint())
                 elif chk.status == "routed":
-                    db_note = _routed_cell(chk)
-                    conn = replace(_api_connection(conn.data_ip, chk.target, config.api_endpoint()),
-                                   exec_database=chk.actual)
+                    base = _api_connection(conn.data_ip, chk.target, config.api_endpoint())
+                    rc = _try_route(base, chk.target)
+                    if rc.ok:
+                        db_note = _direct_cell(chk.target, chk.actual, rc)
+                        conn = replace(base, route_db=chk.target)
+                    else:
+                        db_note = _routed_cell(chk) + "；**没有切到业务库**：" + rc.note
+                        conn = replace(base, exec_database=chk.actual)
                 elif chk.status == "ok":
                     db_note = "与中间件实际连的库一致"
                 else:

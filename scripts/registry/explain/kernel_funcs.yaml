@@ -9,6 +9,7 @@
 # 函数不存在时对应行不出现——调用方按缺行判定,不按 detail 判定。
 # 只查 pg_proc + version(),任何版本都能跑,是这组脚本里唯一无条件安全的一条。
 name: explain.kernel_funcs
+database_type: appbusiness
 description: 探测 GaussDB 私有内核函数(gs_get_explain / gs_get_kernel_info)是否存在,并带回 version()
 readonly: true
 sql: |

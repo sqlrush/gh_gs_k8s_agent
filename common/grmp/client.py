@@ -19,7 +19,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Mapping, Optional
 
-from . import paths, proxy, userid
+from . import paths, proxy, routing, userid
 from .errors import QueryError
 from .hints import with_hint
 from .params import to_param_value
@@ -77,6 +77,7 @@ class GrmpClient:
         user_id: Optional[Any] = None,
         proxy_socket: str = "",
         path_prefix: Optional[str] = None,
+        target_db: str = "",
     ):
         # 经凭据代理时本进程里没有令牌:令牌、签名、工号都由代理加(common/grmp/proxy.py)
         if not token and not proxy_socket:
@@ -98,6 +99,9 @@ class GrmpClient:
         self._signer = signer          # common.grmp.signing.RequestSigner;None = 中间件未开签名校验
         self._user_id = user_id        # common.grmp.userid.UserIdSettings;None = 中间件不收工号
         self._ids: Optional[Dict[str, str]] = None
+        self._declared: Dict[str, set] = {}
+        # 切到业务库(common/grmp/routing.py):登录时核实过中间件真的会切,会话才带上这个库名;空 = 一律连 postgres
+        self.target_db = target_db
 
     @property
     def signer(self) -> Optional[Any]:
@@ -196,12 +200,31 @@ class GrmpClient:
 
     def _id_map(self) -> Dict[str, str]:
         if self._ids is None:
-            self._ids = {
-                d.get("cmd_name"): d.get("id")
-                for d in self.list_operations()
-                if d.get("cmd_name")
-            }
+            details = [d for d in self.list_operations() if d.get("cmd_name")]
+            self._ids = {d.get("cmd_name"): d.get("id") for d in details}
+            # 接口一给的参数定义:行方配好切库的脚本,这里会有 dbName
+            self._declared = {d.get("cmd_name"): {str(p.get("param_name")) for p in (d.get("param") or [])
+                                                  if isinstance(p, dict)} for d in details}
         return self._ids
+
+    def names(self) -> set:
+        """行方白名单(接口一)里登记的全部脚本名。"""
+        return set(self._id_map())
+
+    def registered(self, script_name: str) -> bool:
+        """行方白名单(接口一)里有没有这条脚本。"""
+        return script_name in self._id_map()
+
+    def declares(self, script_name: str, param: str) -> bool:
+        """行方登记的这条脚本是否声明了某个参数(接口一)。"""
+        self._id_map()
+        return param in self._declared.get(script_name, set())
+
+    def routes(self, script_name: str) -> bool:
+        """这次调用会不会带 dbName 切到业务库。三条同时满足才带:
+        会话里有核实过的目标库;我们把这条脚本划为业务库类(只给读按库对象的脚本,读 SQL 历史 / WDR 快照的绝不切);
+        行方接口一里这条脚本声明了 dbName(说明行方已配好,没配好时多传参数会被拒)。"""
+        return bool(self.target_db) and routing.is_business(script_name) and self.declares(script_name, routing.PARAM)
 
     def resolve_id(self, script_name: str) -> str:
         ids = self._id_map()
@@ -225,6 +248,9 @@ class GrmpClient:
             "dataIp": self.data_ip,
             "id": self.resolve_id(script_name),
         }
+        values = dict(values or {})
+        if routing.PARAM not in values and self.routes(script_name):
+            values = {routing.PARAM: self.target_db, **values}
         if values:
             payload["param"] = [
                 {"param_name": key, "param_value": to_param_value(val)}

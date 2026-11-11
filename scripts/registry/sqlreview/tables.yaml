@@ -20,6 +20,7 @@
 # has_pk 是布尔列，取回来是 't'/'f'（或 'true'/'false'，取决于中间件的
 # 布尔渲染），调用方必须用 _as_bool 判断 —— bool('f') 是 True。
 name: sqlreview.tables
+database_type: appbusiness
 description: 某模式下的表清单（主键/外键/列名）
 sql: |
   SELECT

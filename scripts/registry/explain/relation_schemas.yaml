@@ -3,6 +3,7 @@
 # 唯一匹配就用,多个候选列出来让用户选(不猜),没有就照旧报表不存在。sqltune 复用它自己的 sqltune.tables,这条是 explain 的。
 # {{names}} 是 String 型多值位:取值只来自 common/sqlqualify.py 识别出的表位置标识符,再由调用方转义单引号。
 name: explain.relation_schemas
+database_type: appbusiness
 description: 按表名查它们所在的 schema(贴文本没带 --schema 时推断 schema 用)
 sql: |
   SELECT n.nspname, c.relname

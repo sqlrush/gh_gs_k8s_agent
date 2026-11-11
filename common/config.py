@@ -50,6 +50,9 @@ class Connection:
     # 仅 driver=grmp 时使用：中间件按 dataIp 实际连的库，与 database（用户要诊断的库）不同时才有值。
     # 中间件不按库名切换（2026-11-06 行方：各实例都固定连 postgres），取数都在这个库上执行。
     exec_database: str = ""
+    # 仅 driver=grmp 时使用：登录时核实过中间件会按 dbName 切到这个库（2026-11-11 行方切库方案，common/grmp/routing.py）。
+    # 有值时读对象目录 / EXPLAIN 的脚本带 dbName 在这个库上执行，exec_database 为空；读 SQL 历史 / WDR 快照的仍在 postgres。
+    route_db: str = ""
     # 所属应用分组（新格式 db_connections 下的一级键）。旧格式为空。
     app: str = ""
     # 内联口令。密文时是 base64，AAD 用连接名，与 credentials/ 目录同一把钥匙。

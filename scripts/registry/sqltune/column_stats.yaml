@@ -6,6 +6,7 @@
 # 注意 correlation 允许为 NULL：协议把 NULL 渲染成空串（与真空串不可区分），
 # 取值代码要把空串当 None 处理，不能直接 float()。
 name: sqltune.column_stats
+database_type: appbusiness
 description: SQL 涉及的表的列统计信息（证据包 ## Column Statistics）
 sql: |
   SELECT schemaname, tablename, attname, n_distinct, null_frac, avg_width, correlation,
