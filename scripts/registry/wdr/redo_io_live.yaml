@@ -1,0 +1,10 @@
+# WDR「写入来源」的退路(2026-11-12 行方:生产环境权限与参数固定,能调的只有发出去的 SQL)。
+# 快照表 snapshot.snap_global_file_redo_iostat 里没有这个时间段的数据(快照没采到这一类、或这段时间确实没写入)时,
+# 改读实时视图 dbe_perf.file_redo_iostat:自实例启动以来的累计值,不是所选时间段 —— 报告里写明这个口径。
+# 实例级视图,在哪个库执行结果都一样,留在 postgres、不切库。
+name: wdr.redo_io_live
+description: redo 文件写入的实时累计值(自实例启动以来;快照里没有这段时间的数据时用)
+sql: |
+  SELECT COALESCE(SUM(phywrts), 0) AS writes,
+         COALESCE(SUM(phyblkwrt), 0) AS blocks
+    FROM dbe_perf.file_redo_iostat;

@@ -30,6 +30,13 @@ _HINTS: Sequence[Tuple[Tuple[str, ...], str]] = (
     (("在目标高斯实例中不存在",), ""),                 # 占位:文案由 _db_missing_hint 按库名空 / 非空生成
     (("查询不到对应高斯实例", "instance not found"),
      "中间件按 dataIp 找不到实例:登录用的 IP 必须是 GRMP 里登记的实例 IP,不是主机管理 IP"),
+    # 行方中间件执行失败只回这一句,数据库的原始报错只记在它自己的日志里(2026-11-12 回归:原先认不出、不加提示,
+    # 界面上只剩一句 HTTP 400,也没有「这一项无法查询」的兜底说法)。原因猜不准,只列常见的几种,动作不指向改库 / 授权
+    (("agent诊断脚本执行失败",),
+     "这一项无法查询,不影响其余部分的结论与报告。行方中间件只回了「执行失败」,数据库的原始报错只记在中间件日志里"
+     "(要查原因,把出错时间与这一项交给中间件团队查日志)。常见原因:① SQL 用到的表在业务库里,而本会话没有切到该库"
+     "(登录写「未直连」时取数在 postgres 上);② 执行账号没有该对象的权限(生产环境权限固定);"
+     "③ 本实例没有这个视图 / 列(内核版本或兼容模式不同)"),
     # 函数级 does not exist 必须排在通用 does not exist 之前:三种原因不同,给的动作也不同
     (("function ", " does not exist"), ""),             # 占位:文案由 _function_hint 生成(需两个子串同时命中)
     (("relation ", " does not exist"), ""),             # 占位:文案由 _relation_hint 生成(不带 schema 的表先怀疑 search_path)
@@ -37,7 +44,7 @@ _HINTS: Sequence[Tuple[Tuple[str, ...], str]] = (
      "schema 不存在:先确认这个 schema 在登录时给的那个库里 —— 已切到业务库(登录写「已直连」)时,表、索引、执行计划都在那个业务库上取,"
      "别的库里的 schema 看不到,换库请用那个库名重新登录;没切库时取数在 postgres 上,业务库里的 schema 同样看不到"),
     (("does not exist",),
-     "对象不存在:多半是版本差异(视图 / 列名不同)或脚本注册到了别的库——对照 whitelist.md 里的 SQL 与目标实例版本"),
+     "这一项无法按此方式查询:本实例没有这个视图 / 列 / 对象(内核版本或兼容模式不同),不影响其余部分的结论与报告"),
 )
 
 _RELATION_RE = re.compile(r"permission denied for (relation|table|view|function|schema|sequence)\s+([\w.\"]+)", re.I)
@@ -49,17 +56,17 @@ def _permission_hint(text: str) -> str:
     一律说「授 SELECT」会让 DBA 对 dbe_perf 白授一次——现场实测 kf_lowpriv 读 dbe_perf 报的正是 schema 级。"""
     m = _RELATION_RE.search(text or "")
     if not m:
-        return ("执行账号没有该对象的访问权限:请 DBA 按报错点名的对象授权"
-                "(系统表如 pg_user_status 默认只对高权限角色开放;也可改用有权限的视图)")
+        return ("这一项无法查询:执行账号没有报错点名对象的访问权限(生产环境权限固定),不影响其余部分的结论与报告"
+                "(要启用这一项需给执行账号该对象的权限;系统表如 pg_user_status 默认只对高权限角色开放)")
     kind, obj = m.group(1).lower(), m.group(2).strip('"')
     if kind == "schema":
-        return (f"执行账号没有 schema {obj} 的访问权限:请 DBA 给执行账号授予该 schema 的 USAGE 权限;"
-                f"dbe_perf / snapshot 这类监控 schema 实际要 MONADMIN(监控管理员)角色,GRANT 单个对象不够")
+        return (f"这一项无法查询:执行账号没有 schema {obj} 的访问权限(生产环境权限固定),不影响其余部分的结论与报告"
+                f"(要启用这一项需该 schema 的 USAGE 权限;dbe_perf / snapshot 这类监控 schema 实际要 MONADMIN 角色)")
     if kind == "function":
-        return (f"执行账号没有函数 {obj} 的执行权限:请 DBA 给执行账号授予 EXECUTE 权限"
-                f"(内核私有函数通常只对 sysadmin / monadmin 开放)")
-    return (f"执行账号没有对象 {obj} 的访问权限:请 DBA 给执行账号授予 {obj} 的 SELECT 权限"
-            f"(系统表如 pg_user_status 默认只对高权限角色开放;也可改用有权限的视图)")
+        return (f"这一项无法查询:执行账号没有函数 {obj} 的执行权限(生产环境权限固定),不影响其余部分的结论与报告"
+                f"(要启用这一项需 EXECUTE 权限;内核私有函数通常只对 sysadmin / monadmin 开放)")
+    return (f"这一项无法查询:执行账号没有对象 {obj} 的访问权限(生产环境权限固定),不影响其余部分的结论与报告"
+            f"(要启用这一项需 {obj} 的 SELECT 权限;系统表如 pg_user_status 默认只对高权限角色开放)")
 
 
 def _function_hint(text: str) -> str:
@@ -91,12 +98,11 @@ def _relation_hint(text: str) -> str:
         return ""
     name = m.group(1)
     if "." in name:
-        return (f"对象 {name} 不存在:多半是版本差异(视图 / 列名不同)或脚本注册到了别的库——"
-                f"对照 whitelist.md 里的 SQL 与目标实例版本")
+        return (f"这一项无法按此方式查询:本实例没有对象 {name}(内核版本或兼容模式不同),不影响其余部分的结论与报告")
     return (f"表 / 视图 {name} 找不到,而它没带 schema:多半不是不存在,是执行账号的 search_path 里没有它所在的 schema。"
             f"业务 SQL 的表名靠应用账号的 search_path 解析,中间件执行账号的 search_path 默认是 \"$user\", public。"
-            f"核对:请 DBA 确认执行账号当前的 search_path,以及 {name} 实际所在的 schema。"
-            f"解决:由 DBA 给执行账号在该库上把 search_path 设成包含业务 schema,或在 SQL 里写全 schema.表 后重跑")
+            f"解决:在 SQL 里把表名写全为 schema.表 后重跑(取执行计划时智能体会先自动补全);"
+            f"仍取不到时这一项无法查询,不影响其余部分的结论与报告")
 
 
 _DB_MISSING_RE = re.compile(r"数据库\[([^\]]*)\]在目标高斯实例中不存在")

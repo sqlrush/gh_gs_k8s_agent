@@ -123,23 +123,71 @@ def _order_by(vi, preferred: str) -> str:
 # --------------------------------------------------------------------------
 # L4 — SQL level
 # --------------------------------------------------------------------------
+HIST_MEM_SCRIPT = "memanalyze.sql_mem_history"
+_HIST_MARGIN = 3              # 多取几倍,留给 syssql 筛掉内核 / 诊断工具 / 平台运维账号的 SQL
+_HIST_NOTE = ("WLM 资源跟踪这一层取不到(%s),改从 SQL 执行历史(statement_history.used_memory)取:"
+              "口径是近一天已执行完的语句各自用了多少内存,不是此刻正在跑的;没有估算内存与下盘信息。")
+
+
+def _history_rows(runner, top: int):
+    """(筛过的执行历史行, 取不到的原因)。行为空时第二项写清为什么。"""
+    from common import syssql
+    from util import summarize_err
+    try:
+        rows = runner.run(HIST_MEM_SCRIPT, {"limit": int(top) * _HIST_MARGIN})
+    except access.QueryError as exc:
+        return [], "改从 SQL 执行历史取也没取到(%s)" % summarize_err(exc)
+    kept = syssql.screen(rows or [], want=int(top), sql_id=lambda r: r.get("queryid"),
+                         text=lambda r: r.get("query"), user=lambda r: r.get("user_name") or "",
+                         shown_chars=300).kept
+    return kept, ("" if kept else "SQL 执行历史里近一天也没有带内存用量的业务 SQL 记录")
+
+
+def _history_dim(kept, th: Thresholds, why: str) -> DimResult:
+    d = DimResult(dimension=DIM_SQL, available=True,
+                  headers=["query_id", "开始时间", "耗时(ms)", "内存(执行历史)", "SQL"])
+    for r in kept:
+        qid, query, used_mb = str(r.get("queryid") or ""), str(r.get("query") or ""), f(r.get("used_memory"))
+        d.rows.append([qid, str(r.get("start_time") or "")[:19], str(i64(r.get("duration_ms"))),
+                       human_mb(used_mb), trunc(query, 60)])
+        if used_mb >= th.session_hog_mb:
+            d.findings.append(Finding(
+                DIM_SQL, "MEM_SQL_HOG", Severity.WARN, "SQL 内存用量(执行历史)",
+                human_mb(used_mb), f">={human_mb(th.session_hog_mb)}",
+                f"query_id {qid} 执行时用了 {human_mb(used_mb)}(SQL 执行历史),SQL:{trunc(query, 80)}"))
+    d.headline = f"单条 SQL 内存最高:query_id {d.rows[0][0]}({d.rows[0][3]},按 SQL 执行历史)"
+    d.note = _HIST_NOTE % why.rstrip("。")
+    return d
+
+
+def _from_history(runner, th: Thresholds, top: int, why: str) -> DimResult:
+    """L4 的退路(2026-11-12 行方:生产环境权限与参数固定,能调的只有 SQL)。WLM 那一层取不到时改从 SQL 执行历史
+    按单条语句内存用量排;这里也取不到(openGauss 没有 used_memory 列、历史里没有记录)就如实写「这一项无法查询」,
+    不影响其余层的结论与报告。"""
+    why = (why or "SQL 级资源跟踪不可用").rstrip("。")
+    kept, failed = _history_rows(runner, top)
+    if kept:
+        return _history_dim(kept, th, why)
+    return degraded(DIM_SQL, "%s;%s。这一项无法查询,不影响其余结论" % (why, failed))
+
+
 def collect_sql(runner, cat: Catalog, cap: Capability, th: Thresholds, top: int,
                 historical: bool = False) -> DimResult:
     if historical and not cap.history_available:
-        return degraded(DIM_SQL, cap.reasons.get("history", "历史数据不可用"))
+        return _from_history(runner, th, top, cap.reasons.get("history", "历史数据不可用"))
     if not historical and not cap.sql_available:
-        return degraded(DIM_SQL, cap.reasons.get("L4", "SQL 级资源跟踪不可用"))
+        return _from_history(runner, th, top, cap.reasons.get("L4", "SQL 级资源跟踪不可用"))
 
     vi = cat.get("wlm_session_hist" if historical else "wlm_session")
     if not vi.available:
-        return degraded(DIM_SQL, vi.reason)
+        return _from_history(runner, th, top, vi.reason)
 
     try:
         rows = runner.run("memanalyze.wlm_sql_hist" if historical
                           else "memanalyze.wlm_sql", {"limit": int(top)})
     except access.QueryError as exc:
         from util import summarize_err
-        return degraded(DIM_SQL, summarize_err(exc))
+        return _from_history(runner, th, top, summarize_err(exc))
 
     d = DimResult(dimension=DIM_SQL, available=True,
                   headers=["query_id", "耗时(ms)", "估算内存", "峰值内存",
@@ -187,8 +235,13 @@ def collect_sql(runner, cat: Catalog, cap: Capability, th: Thresholds, top: int,
                 f"query_id {qid} 的 warning 字段：{trunc(warning, 120)}"))
 
     if not d.rows:
+        # 视图在却是空的(参数没满足 / 内核不填):同样走执行历史这条退路;也取不到时保持「可用但为空」,如实补一句
+        empty = _empty_note(cap, operator=False, historical=historical)
+        kept, failed = _history_rows(runner, top)
+        if kept:
+            return _history_dim(kept, th, "视图可用,但无 SQL 级数据")
         d.headline = "视图可用，但无 SQL 级数据"
-        d.note = _empty_note(cap, operator=False, historical=historical)
+        d.note = "%s%s。这一项无法查询,不影响其余结论" % (empty, failed)
     else:
         d.headline = f"峰值内存最高 SQL：query_id {d.rows[0][0]}（{d.rows[0][3]}）"
         if not sized:
@@ -199,23 +252,31 @@ def collect_sql(runner, cat: Catalog, cap: Capability, th: Thresholds, top: int,
 # --------------------------------------------------------------------------
 # L5 — operator level
 # --------------------------------------------------------------------------
+_L5_TAIL = "。这一项无法查询(算子级没有别的数据来源,要 resource_track_level=operator),不影响其余结论"
+
+
+def _l5_unavailable(reason: str) -> DimResult:
+    """L5 没有替代来源(2026-11-12 行方:生产参数固定):如实写这一项查不了,其余层照常出结论。"""
+    return degraded(DIM_OPERATOR, (reason or "算子级资源跟踪不可用").rstrip("。") + _L5_TAIL)
+
+
 def collect_operator(runner, cat: Catalog, cap: Capability, th: Thresholds, top: int,
                      historical: bool = False) -> DimResult:
     if historical and not cap.history_available:
-        return degraded(DIM_OPERATOR, cap.reasons.get("history", "历史数据不可用"))
+        return _l5_unavailable(cap.reasons.get("history", "历史数据不可用"))
     if not cap.operator_available:
-        return degraded(DIM_OPERATOR, cap.reasons.get("L5", "算子级资源跟踪不可用"))
+        return _l5_unavailable(cap.reasons.get("L5", "算子级资源跟踪不可用"))
 
     vi = cat.get("wlm_operator_hist" if historical else "wlm_operator")
     if not vi.available:
-        return degraded(DIM_OPERATOR, vi.reason)
+        return _l5_unavailable(vi.reason)
 
     try:
         rows = runner.run("memanalyze.wlm_operator_hist" if historical
                           else "memanalyze.wlm_operator", {"limit": int(top)})
     except access.QueryError as exc:
         from util import summarize_err
-        return degraded(DIM_OPERATOR, summarize_err(exc))
+        return _l5_unavailable(summarize_err(exc))
 
     d = DimResult(dimension=DIM_OPERATOR, available=True,
                   headers=["query_id", "node_id", "算子", "耗时(ms)", "估算行",

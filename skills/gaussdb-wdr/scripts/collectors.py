@@ -576,16 +576,53 @@ def collect_checkpoint(runner, opt: Options) -> DimResult:
 _REDO_BLOCK = 8192        # redo 块按 8KB 折算(官方 WDR「Redo size(blocks)」的块)
 
 
+LIVE_TABLE_WRITES = "health.table_writes"   # 实时 pg_stat_all_tables(已在白名单里,健康检查同一份)
+LIVE_REDO = "wdr.redo_io_live"               # 实时 dbe_perf.file_redo_iostat
+_LIVE_NOTE = ("这个时间段的快照里没有%s记录(快照没采到这一类,或这段时间确实没有写入),下面改用实时累计值:"
+              "自实例启动或统计重置以来的总量,**不是所选时间段**。")
+
+
+def _live_table_writes(runner, top: int) -> list:
+    """快照取不到时的退路(2026-11-12 行方:生产权限与参数固定,能调的只有 SQL):实时累计的表级写入,列名对齐快照那份。"""
+    try:
+        rows = runner.run(LIVE_TABLE_WRITES, {"limit": top * 4})
+    except access.QueryError:
+        return []
+    return [{"schema": r.get("schema"), "table": r.get("table"), "is_toast": r.get("is_toast"),
+             "ins": r.get("n_tup_ins"), "upd": r.get("n_tup_upd"), "del": r.get("n_tup_del")} for r in rows or []]
+
+
+def _live_redo(runner) -> list:
+    try:
+        rows = runner.run(LIVE_REDO, {})
+    except access.QueryError:
+        return []
+    return rows if rows and (_i(rows[0].get("blocks")) or _i(rows[0].get("writes"))) else []
+
+
 def collect_writes(runner, opt: Options) -> DimResult:
     b, e, top = int(opt.begin), int(opt.end), int(opt.top)
+    snap_err = ""
     try:
         rows = runner.run("wdr.table_writes", {"b": b, "e": e, "top": top * 2})
     except access.QueryError as exc:
-        return degraded(DIM_WRITES, summarize_err(exc))
+        rows, snap_err = [], summarize_err(exc)
+    live_tables = False
+    if not rows:
+        live = _live_table_writes(runner, top)
+        if live:
+            rows, live_tables = live, True
+        elif snap_err:
+            return degraded(DIM_WRITES, snap_err.rstrip("。") + "。这一项无法查询,不影响其余部分的结论与报告")
     try:
         redo = runner.run("wdr.redo_io", {"b": b, "e": e})
     except access.QueryError:
         redo = []
+    live_redo = False
+    if not redo or (_i(redo[0].get("blocks")) == 0 and _i(redo[0].get("writes")) == 0):
+        live = _live_redo(runner)
+        if live:
+            redo, live_redo = live, True
     tables: dict = {}
     for r in rows:
         k = (str(r["schema"]), str(r["table"]))
@@ -603,14 +640,21 @@ def collect_writes(runner, opt: Options) -> DimResult:
         blocks = _i(redo[0].get("blocks"))
         redo_txt = ("redo 写入 %s 块(约 %s)" % (i64(blocks), mib(blocks * _REDO_BLOCK)) if blocks >= 0
                     else "redo 写入量算不出(窗口跨了实例重启,计数器归零)")
+        if live_redo:
+            redo_txt = "快照里没有这段时间的 redo 写入记录,实时累计(自实例启动以来,不是所选时间段)" + redo_txt
     if ordered:
         (sch, tbl), t = ordered[0]
         lob = ("，其中大字段写入 %s 行" % i64(t["toast"])) if t["toast"] else ""
-        d.headline = "写入最多的表 %s.%s(插入 %s、更新 %s、删除 %s%s)" % (sch, tbl, i64(t["ins"]), i64(t["upd"]), i64(t["del"]), lob)
+        d.headline = "%s写入最多的表 %s.%s(插入 %s、更新 %s、删除 %s%s)" % (
+            "快照里没有这段时间的表级写入记录,实时累计(自统计重置以来,不是所选时间段)" if live_tables else "",
+            sch, tbl, i64(t["ins"]), i64(t["upd"]), i64(t["del"]), lob)
     else:
         d.headline = "窗口内没有表级写入"
     if redo_txt:
         d.headline += ";" + redo_txt
+    notes = [_LIVE_NOTE % w for w, used in (("表级写入", live_tables), ("redo 写入", live_redo)) if used]
+    if notes:
+        d.note = "".join(notes)
     return d
 
 

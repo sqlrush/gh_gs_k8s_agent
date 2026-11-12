@@ -5,11 +5,10 @@
 解析不到 → relation does not exist → 中间件包成 400。而 statement_history 里本来就记着 schema_name。
 
 两条路:
-  · 中间件(白名单模板):注册一条「SET search_path TO "<schema>", public; EXPLAIN …」的两语句模板
-    (<skill>.plan_text_schema 等)。中间件能不能跑一条脚本里的两条语句不确定——所以先用一条探测脚本
-    explain.multi_stmt_probe 验一次(每个 runner 只验一次),不行就退回单语句模板并把原因写进说明,
-    不让它变成新的 400。
-  · 直连原始会话:直接在会话上 SET search_path,后面的 EXPLAIN 与 hypopg 都受益。
+  · 白名单模板(中间件与直连都走这条):把 SQL 里不带 schema 的表名按 schema 补全,再用单语句模板取计划。
+    原先先发一条两语句探测、能跑就用「SET search_path …; EXPLAIN …」模板 —— 行方中间件拦截一条脚本里的两段 SQL
+    (2026-11-12 现场),探测每次对话都撞一次拦截,那 8 条两语句脚本在行方永远跑不成,v1.4.13 起不再交付。
+  · 直连原始会话:直接在会话上 SET search_path,后面的 EXPLAIN 与 hypopg 都受益(set_search_path)。
 
 schema 名同时进 SET 语句的引号里:不是合法标识符一律不用——中间件是文本替换,这里就是注入面。
 
@@ -25,11 +24,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]{0,62}$")
-PROBE_SCRIPT = "explain.multi_stmt_probe"
-SCHEMA_SUFFIX = "_schema"
-FALLBACK_SCHEMA = "public"        # 模板与会话 SET 都在末尾补的兜底段(原先的 `"<schema>", public`)
-
-_probe_cache: Dict[int, Tuple[bool, str]] = {}
+FALLBACK_SCHEMA = "public"        # 会话 SET 在末尾补的兜底段(`"<schema>", public`)
 
 
 def valid_schema(name: Any) -> bool:
@@ -128,30 +123,6 @@ def _invalid_reason(text: Any, bad: Optional[str]) -> str:
     return "search_path %r 里的 schema 名 %r 不是合法标识符(整串不切)" % (text, bad)
 
 
-def reset_probe_cache() -> None:
-    _probe_cache.clear()
-
-
-def multi_statement_ok(runner) -> Tuple[bool, str]:
-    """中间件(或直连 runner)能不能跑一条脚本里的两条语句。每个 runner 只探一次。"""
-    key = id(runner)
-    if key in _probe_cache:
-        return _probe_cache[key]
-    try:
-        rows = runner.run(PROBE_SCRIPT, {})
-    except Exception as exc:                     # noqa: BLE001 —— 探测失败只是「不支持」,原因带回
-        result = (False, str(exc).splitlines()[0][:160])
-    else:
-        first = ""
-        for row in rows or []:
-            if isinstance(row, dict) and row:
-                first = str(next(iter(row.values()), "")).strip()
-                break
-        result = (True, "") if first == "1" else (False, "探测脚本没有返回 1(返回 %r)" % first)
-    _probe_cache[key] = result
-    return result
-
-
 def _join(rows: List[Dict[str, Any]]) -> str:
     return "\n".join(str(next(iter(r.values()), "")) for r in (rows or []) if isinstance(r, dict))
 
@@ -159,9 +130,9 @@ def _join(rows: List[Dict[str, Any]]) -> str:
 def explain_plan(runner, base_script: str, sql: str, schema: str) -> Tuple[str, str, str]:
     """走注册模板取计划。返回 (计划文本, 实际切到的搜索路径, 说明)。
 
-    schema 是单个 schema 或搜索路径串(`fl, public`)。为空 → 单语句模板;各段合法且中间件能跑两条语句
-    → base_script + "_schema";不能 → 退回单语句模板,说明里写清没切换的原因。
-    切成时返回的路径是归一后的 `fl, public`(单 schema 就是它自己),报告与后续取 JSON 计划都用它。
+    schema 是单个 schema 或搜索路径串(`fl, public`)。为空 → 原 SQL 走单语句模板;各段合法 → 把不带 schema 的表名
+    补全后走单语句模板(说明里写清补了哪些名字);不合法 → 原 SQL,说明里写清原因。实际切到的路径一律返回空串
+    (模板路径不再切 search_path)。
     """
     if not schema:
         return _join(runner.run(base_script, {"sql": sql})), "", ""
@@ -170,16 +141,12 @@ def explain_plan(runner, base_script: str, sql: str, schema: str) -> Tuple[str, 
         return (_join(runner.run(base_script, {"sql": sql})), "",
                 "%s,未切换 search_path;表名不带 schema 时 EXPLAIN 可能报对象不存在" % _invalid_reason(schema, bad))
     path = ", ".join(segs)
-    ok, reason = multi_statement_ok(runner)
-    if ok:
-        rows = runner.run(base_script + SCHEMA_SUFFIX, {"sql": sql, "schema": template_value(segs)})
-        return _join(rows), path, ""
-    # 切不成(09-09 早截图:执行器跑不了两条语句):先把 SQL 里不带 schema 的表名补全再走单语句模板——
+    # 不切 search_path(行方中间件拦截两段 SQL):先把 SQL 里不带 schema 的表名补全再走单语句模板——
     # 不依赖执行器、不依赖 DBA;补全后解析到同一张表,计划与原 SQL 等价。没有可补的才原样退回。
     # 路径有多段时按第一段补(业务表绝大多数在第一段,public 垫底),说明里如实写这个前提。
     from common import sqlqualify           # 延迟导入:sqlqualify 反过来引用本模块的 valid_schema
     qualified, changed = sqlqualify.qualify_tables(sql, segs[0])
-    note = qualified_note(path, changed, reason) if changed else fallback_note(path, reason)
+    note = qualified_note(path, changed) if changed else fallback_note(path)
     try:
         rows = runner.run(base_script, {"sql": qualified if changed else sql})
     except Exception as exc:               # noqa: BLE001
@@ -192,7 +159,7 @@ def explain_plan(runner, base_script: str, sql: str, schema: str) -> Tuple[str, 
                 pass
             else:
                 return _join(rows), "", ("%s;补全表名后的 SQL 执行失败(%s),已改用原 SQL 取计划"
-                                         % (fallback_note(path, reason), str(exc).splitlines()[0][:120]))
+                                         % (fallback_note(path), str(exc).splitlines()[0][:120]))
 
         # 退回单语句模板后 EXPLAIN 又失败:这时没有报告可以放说明,把原因和 DBA 命令直接跟在报错后面——
         # 用户看到的就是这一段。
@@ -204,50 +171,26 @@ def explain_plan(runner, base_script: str, sql: str, schema: str) -> Tuple[str, 
     return _join(rows), "", note
 
 
-_MISSING_SCRIPT_MARKS = ("不存在", "未注册", "not found", "no such", "unknown", "不在白名单", "does not exist")
-
-
-def _cause(reason: str) -> str:
-    """没切成的原因分两种说:探测脚本没灌白名单(发布问题,补灌即可)/ 执行器跑不了两条语句(限制)。"""
-    low = (reason or "").lower()
-    if any(m.lower() in low for m in _MISSING_SCRIPT_MARKS):
-        return ("探测脚本 %s 未注册到白名单或调用失败(%s)——请先按交付文档 08 把本次新增的白名单脚本"
-                "(含 *_schema 模板与探测脚本)灌入 script_config" % (PROBE_SCRIPT, reason))
-    return "中间件不支持一条脚本跑两条语句(%s)" % (reason or "探测脚本 %s 未通过" % PROBE_SCRIPT)
-
-
-def qualified_note(schema: str, changed, reason: str) -> str:
-    """切不成 search_path、改为补全表名后取计划时的说明:说清没切的原因、补了哪些名字、计划等价,根治仍是 DBA 那条命令。
+def qualified_note(schema: str, changed) -> str:
+    """补全表名后取计划时的说明:补了哪些名字、计划等价。不再给 DBA 改执行账号 search_path 的命令 ——
+    生产环境权限与配置固定(2026-11-12 行方),能调的只有发出去的 SQL。
 
     schema 是搜索路径时按第一段补全:只有表确实在第一段下才与原 SQL 等价,这个前提要写出来,不笼统说「等价」。
     """
     first = primary_schema(schema)
     names = "、".join("%s.%s" % (first, n) for n in changed)
     if len(split_search_path(schema)) > 1:
-        how = ("已把 SQL 里不带 schema 的表名按搜索路径的第一个 schema %s 补全后取计划(%s);表在 %s 下时"
-               "解析到同一张表,计划与原 SQL 等价,若表其实在路径后面的 schema 里,EXPLAIN 会报对象不存在"
-               % (first, names, first))
-    else:
-        how = "已把 SQL 里不带 schema 的表名按该 schema 补全后取计划(%s),解析到同一张表,计划与原 SQL 等价" % names
-    return (
-        "search_path 未切换到 %s:%s。%s。根治办法:由 DBA 给中间件执行账号在该库上设置 search_path,执行 "
-        "ALTER ROLE <中间件执行账号> IN DATABASE <业务库名> SET search_path = %s; (新连接生效,不用重启)。"
-        % (schema, _cause(reason), how, dba_search_path(schema))
-    )
+        return ("已把 SQL 里不带 schema 的表名按搜索路径的第一个 schema %s 补全后取计划(%s);表在 %s 下时"
+                "解析到同一张表,计划与原 SQL 等价,若表其实在路径后面的 schema 里,EXPLAIN 会报对象不存在"
+                % (first, names, first))
+    return "已把 SQL 里不带 schema 的表名按 %s 补全后取计划(%s),解析到同一张表,计划与原 SQL 等价" % (first, names)
 
 
-def fallback_note(schema: str, reason: str) -> str:
-    """没切成 search_path、SQL 里又没有可补全的表名时给用户看的话:先说清是哪种原因,再给可照做的处理办法。
-
-    两种情况下 DBA 那条命令都能用,所以都给;备选是把 SQL 里的表名写全。
-    """
-    cause = _cause(reason)
-    return (
-        "未能把 search_path 切到 %s:%s。表名不带 schema 时 EXPLAIN 会报对象不存在。处理办法二选一:"
-        "① 由 DBA 给中间件执行账号在该库上设置 search_path,执行 "
-        "ALTER ROLE <中间件执行账号> IN DATABASE <业务库名> SET search_path = %s; (新连接生效,不用重启);"
-        "② 把 SQL 里的表名写全为 %s.<表> 后重跑。" % (schema, cause, dba_search_path(schema), primary_schema(schema))
-    )
+def fallback_note(schema: str) -> str:
+    """SQL 里没有可补全的表名(或补全后仍失败)时给用户看的话:能调的只剩 SQL 本身。"""
+    return ("SQL 里的表名没法按 %s 自动补全;表名不带 schema 时 EXPLAIN 可能报对象不存在。"
+            "可以把 SQL 里的表名写全为 %s.<表> 后重跑;仍取不到时这条 SQL 的计划无法获取,不影响其余部分的分析"
+            % (schema, primary_schema(schema)))
 
 
 def set_search_path(db, schema: str) -> str:
@@ -265,7 +208,6 @@ def set_search_path(db, schema: str) -> str:
     return ", ".join(segs)
 
 
-__all__ = ["IDENT_RE", "PROBE_SCRIPT", "SCHEMA_SUFFIX", "FALLBACK_SCHEMA", "valid_schema", "split_search_path",
+__all__ = ["IDENT_RE", "FALLBACK_SCHEMA", "valid_schema", "split_search_path",
            "business_path", "parse_search_path", "valid_search_path", "primary_schema", "dba_search_path", "template_value",
-           "reset_probe_cache", "multi_statement_ok", "explain_plan", "set_search_path", "fallback_note",
-           "qualified_note"]
+           "explain_plan", "set_search_path", "fallback_note", "qualified_note"]

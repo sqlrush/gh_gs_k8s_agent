@@ -1,6 +1,6 @@
 ﻿---
 name: gaussdb-wdr
-version: 2.7.1
+version: 2.8.0
 description: "通过内置脚本对 OpenGauss/GaussDB 做 WDR 窗口诊断。用户要比较两个快照、查看某个时间窗口的 WDR、分析某段时间库为什么慢、查看负载概况/Top SQL/等待/Checkpoint/缓存/文件 IO，或寻找高风险负载变化时使用，包括“看下两个快照之间的 WDR”“这段时间库为什么慢”“分析这个时间窗口的 WDR”“有没有高风险 SQL 或等待事件”等请求。触发后运行 scripts/wdr.py，输出真实 WDR 证据和发现，不要只解释 WDR 报告怎么读。"
 allowed-tools: ["exec", "read", "write"]
 compatibility: opencode
@@ -192,7 +192,9 @@ metadata:
   除了 WDR 的结论，还要提示：膨胀与回收要用 `gaussdb-vacuum` 单独看、慢 SQL 明细要用
   `gaussdb-slowsql` / `gaussdb-topsql` 看。不提示就等于让用户以为已经查全了。
 - **优先级（P0/P1/P2）与严重度（🟢🟡🟠🔴）分开标**；绝不用 🔴 当 P0 图标。
-- 某维度 `## Collection Notes` 标降级时，如实说明不可用，不臆测其结论。
+- 某维度 `## Collection Notes` 标降级时，如实说明不可用，不臆测其结论；其余维度照常出结论。
+- 写入来源一节的标题以「快照里没有这段时间的…记录，实时累计（…，不是所选时间段）」开头时，那里的数是**自实例启动或统计重置以来的累计值**，
+  不能当成所选时间段的写入量，回答里照这个口径说。
 - 绝不回显密码 / DSN。
 - 遇脚本报错查 `{baseDir}/references/setup.md`。
 - 脚本在标准错误里打的「已存入报告存档」那一行不用放进回答，回答里也不要给报告链接（报告由前端调用）。

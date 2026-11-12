@@ -1,6 +1,6 @@
 ﻿---
 name: gaussdb-memanalyze
-version: 1.1.1
+version: 1.2.0
 description: "通过内置脚本分析 OpenGauss/GaussDB 动态内存冲高问题。用户询问内存为什么满、为什么突然飙高、是谁在吃内存、哪条 SQL 或哪个算子在占内存、是否存在内存泄漏、为什么算子落盘、work_mem 和并发是否过高时使用，包括“内存怎么满了”“内存被谁吃了”“哪条 SQL 吃内存”“哪个算子吃内存”“是不是内存泄漏”等请求。触发后运行 scripts/memanalyze.py，采集真实的六层内存证据，不要只给泛化调优猜测。"
 allowed-tools: ["exec", "read"]
 compatibility: opencode
@@ -116,6 +116,9 @@ metadata:
   `enable_resource_record`、`resource_track_duration`）：有没满足的就照它报 `[需人工执行]`；**都满足仍为空**
   的（当时没有够格的作业，或内核不填 —— openGauss-lite 单机实测不填 WLM 作业视图），如实说「这一层看不到」，落盘去看 `gaussdb-wdr`
   的 `WDR_TEMP_SPILL` 与 Top SQL 溢出列，**不要说成「没有大内存 SQL」**。值显示「?（没读到）」是没取到，不是 off。
+- **L4（SQL 级）WLM 这一层取不到时**，脚本改从 SQL 执行历史（`statement_history.used_memory`）取单条语句的内存用量，
+  标题写「按 SQL 执行历史」：口径是近一天已执行完的语句各自用了多少，不是此刻在跑的，也没有估算内存与下盘信息，回答里写明这个口径。
+  两条路都取不到时脚本写「这一项无法查询」，照实转告，其余层照常出结论。L5（算子级）没有别的数据来源，同样如实说这一项查不了。
 - **L3「已用」为负的行标了「不可信」**：线程池下按行的内存计数会被减成负数。这几行的已用不能当用量，
   峰值只当下限参考，不要拿它们排序或下结论。
 - **视图是运行时探测的**：openGauss 与 GaussDB、集中式与分布式的内存视图名与列集都不同。

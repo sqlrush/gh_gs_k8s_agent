@@ -1,6 +1,6 @@
 ---
 name: gaussdb-explain
-version: 2.6.4
+version: 2.6.5
 description: "通过内置脚本查看、运行、对比 OpenGauss/GaussDB SQL 的执行计划。用户只是想看 explain、执行计划、plan、cost、节点路径，包括“给我这条 SQL 的执行计划”“给我几个 SQL 的执行计划”“跑 explain”“看 plan”等请求。触发后运行 scripts/explain.py，返回真实 plan 和通俗易懂的节点解读；如果用户要继续做慢 SQL 根因分析、索引/改写建议、收益验证或完整调优，不要停在本 skill，应优先转给 gaussdb-sqltune。"
 allowed-tools: ["exec", "read"]
 compatibility: opencode
@@ -115,9 +115,8 @@ metadata:
    SQL
    ```
 
-   脚本会先 `SET search_path` 再 EXPLAIN，「来源:」行带 `search_path=<schema>` 表示切换生效；中间件跑不了两条语句时，
-   **脚本自己把 SQL 里不带 schema 的表名按该 schema 补全后取计划**，计划下方会有「已把 SQL 里不带 schema 的表名按该 schema 补全」
-   说明——计划与原 SQL 等价，照常分析，并把说明里的根治办法（DBA 给执行账号设 search_path 的 `ALTER ROLE` 命令）转给用户。
+   **脚本自己把 SQL 里不带 schema 的表名按该 schema 补全后取计划**（不发两段 SQL，行方中间件会拦截），计划下方会有
+   「已把 SQL 里不带 schema 的表名按该 schema 补全」说明——计划与原 SQL 等价，照常分析。
    **你不要自己动手改写表名**，也不要换别的 schema 反复试；两条路都没成功时把脚本原话转给用户。
 
 3. 如果一次要看多条 SQL：

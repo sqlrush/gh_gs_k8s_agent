@@ -1,6 +1,6 @@
 ---
 name: gaussdb-login
-version: 1.4.0
+version: 1.4.1
 description: "登录并选定本次会话要连的 OpenGauss/GaussDB 数据库。**这是所有数据库操作的第一步**：其余 gaussdb-* skill 不带 -c 时都用这里选定的连接。用户说“连数据库”“登录数据库”“换一个库”“连哪个库”“看有哪些数据库可以连”“切到 app2 的库”，或在尚未登录的情况下要求做慢 SQL/健康检查/调优/WDR 等任何取数操作时使用。触发后运行 scripts/login.py：配置首行 connection_mode 是 gsql 就把可选连接列成菜单让用户挑，不要凭空假设连接名, 是 api 就一步登录：用户说的是别名就直接 --alias <别名>（要看某个业务库的表、执行计划再加 --database <库名>；Top SQL、慢 SQL、会话、WDR 是整个实例的，不用加），给的是 IP 就 --ip --database；用户没点名实例才 --list。"
 allowed-tools: ["exec", "read"]
 compatibility: opencode

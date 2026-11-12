@@ -1,22 +1,22 @@
 {
   "format": 1,
   "package": "diag",
-  "version": "diag-v1.4.12",
+  "version": "diag-v1.4.13",
   "source": {
     "repo": "gh_agent_k8s",
-    "ref": "agent-v1.4.12",
-    "commit": "b29ddfded5ecbf848d9cf363eb847df497235119",
-    "date": "2026-11-11T18:31:30+08:00"
+    "ref": "agent-v1.4.13",
+    "commit": "e0071e545536eaa9618e97e8c6c111eeb986bcc1",
+    "date": "2026-11-12T14:37:26+08:00"
   },
   "base": {
-    "version": "diag-v1.4.11",
+    "version": "diag-v1.4.12",
     "source": {
       "repo": "gh_agent_k8s",
-      "ref": "agent-v1.4.11",
-      "commit": "9f042f6b3925444a32eb6de0bb3b8d73bcf77d62",
-      "date": "2026-11-11T12:48:51+08:00"
+      "ref": "agent-v1.4.12",
+      "commit": "b29ddfded5ecbf848d9cf363eb847df497235119",
+      "date": "2026-11-11T18:31:30+08:00"
     }
   },
-  "files": 425,
-  "digest": "9b0390d3170d42a539fc2f4f2f08b74c5fba59e0c001a7bddb59b17aea7f0f45"
+  "files": 420,
+  "digest": "7994ebe8243f63926e345ec0aca9ec221c03546597cc680a145c03a83c683d30"
 }

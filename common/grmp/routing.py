@@ -36,8 +36,8 @@ API_PARAM: Dict[str, Any] = {"param_name": PARAM, "data_type": "String", "requir
 
 # 由脚本仓库生成,改了 YAML 的 database_type 要同步改这里(守卫测试会提示)
 BUSINESS_DB_SCRIPTS = frozenset({
-    "explain.kernel_funcs", "explain.plan_text", "explain.plan_text_analyze", "explain.plan_text_analyze_schema",
-    "explain.plan_text_schema", "explain.relation_schemas",
+    "explain.kernel_funcs", "explain.plan_text", "explain.plan_text_analyze",
+    "explain.relation_schemas",
     "health.invalid_index", "health.partitions", "health.stale_stats", "health.table_writes", "health.unused_index",
     "lockwait.pairs",
     "login.current_db",
@@ -45,11 +45,11 @@ BUSINESS_DB_SCRIPTS = frozenset({
     "perf.locks", "perf.table_stat",
     "procinfo.locate_schema", "procinfo.locate_search", "procinfo.proc_def", "procinfo.source_adm",
     "proctune.column_stats", "proctune.indexes", "proctune.locate_schema", "proctune.locate_search",
-    "proctune.plan_text", "proctune.plan_text_analyze", "proctune.plan_text_analyze_schema", "proctune.plan_text_schema",
+    "proctune.plan_text", "proctune.plan_text_analyze",
     "proctune.proc_def", "proctune.source_adm", "proctune.tables",
     "sqlreview.indexes", "sqlreview.tables",
-    "sqltune.column_stats", "sqltune.column_types", "sqltune.indexes", "sqltune.plan_json", "sqltune.plan_json_schema",
-    "sqltune.plan_text", "sqltune.plan_text_analyze", "sqltune.plan_text_analyze_schema", "sqltune.plan_text_schema",
+    "sqltune.column_stats", "sqltune.column_types", "sqltune.indexes", "sqltune.plan_json",
+    "sqltune.plan_text", "sqltune.plan_text_analyze",
     "sqltune.stats_freshness", "sqltune.tables",
     "topproc.top_procs",
     "vacuum.bloat_estimate", "vacuum.dead_tuples",

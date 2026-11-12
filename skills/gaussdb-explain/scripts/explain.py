@@ -53,10 +53,8 @@ RELATION_SCHEMAS_SCRIPT = "explain.relation_schemas"   # 贴文本没带 --schem
 #   explain.runtime_plan   gs_get_explain({{pid}}::bigint) —— GaussDB 私有的运行态计划(505.2.1 实测签名)
 #   explain.runtime_plan_int4  gs_get_explain({{pid}}::integer) —— 文档签名 (integer) 的老内核用
 #   explain.session_by_pid 按 pid 取该会话当前语句,内核没有 gs_get_explain 时退回 EXPLAIN 用
-# --schema 路径依赖的白名单脚本(common/search_path.py 按 base + "_schema" 拼名,交付闸按全串检索,故写全):
-#   explain.multi_stmt_probe          探测中间件能否一条脚本跑两条语句
-#   explain.plan_text_schema          SET search_path TO "{{schema}}", public; EXPLAIN … {{sql}}
-#   explain.plan_text_analyze_schema  同上,analyze 名下的那份(现场 ANALYZE 固定关闭)
+# --schema 路径:v1.4.13 起不再用两语句模板(行方中间件拦截两段 SQL),表名按 schema 补全后走单语句的
+#   explain.plan_text,见 common/search_path.py
 # --sql-id 路径依赖的白名单脚本(scripts/sqlfetch.py,与 sqltune 的同体):
 #   explain.from_history / explain.from_statement
 # 贴文本没带 --schema 时按表名查目录推断 schema(common/schema_infer.py):

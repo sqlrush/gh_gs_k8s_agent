@@ -15,6 +15,10 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
+import re
+import secrets
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Mapping, Optional
@@ -23,8 +27,49 @@ from . import paths, proxy, routing, userid
 from .errors import QueryError
 from .hints import with_hint
 from .params import to_param_value
+from ..config import state_dir
+from ..reports import redact
 
 _ERROR_BODY_MAX = 4000   # 4xx/5xx 响应体最多读这么多字节:够装一条 JDBC 报错,不够装一个页面
+
+# 给用户看的报错不带中间件地址、接口路径前缀与实例 ID(红线第 5 条;2026-11-12 行方要求界面上不出现报错原文)。
+# 原文照旧有用 —— 09-14 现场「中间件换地址后老会话打旧地址」排查第一眼要看地址 —— 所以原文写进本机诊断日志,
+# 报错末尾带「详情编号」,按编号在日志里查。
+ERROR_LOG = os.path.join("logs", "grmp-errors.log")
+_ERROR_LOG_MAX = 1 << 20
+_INSTANCE_ID = re.compile(r"[,，]?\s*instanceId\s*[:：=]\s*[\w-]+", re.I)
+
+
+def _log_raw(raw: str) -> str:
+    """原文进本机诊断日志,返回详情编号;写不了(只读盘、权限)就返回空串,不影响取数主流程。
+    设了状态目录(GSDB_HOME / GDAA_HOME,容器里都设)时写;没设时看默认状态目录(技能目录下的 common/)在不在 ——
+    行方技能包不设 GSDB_HOME,状态就在那里(2026-11-12 回归:原先这时不写,详情编号与原文都没了);
+    开发机与单测上默认目录不存在,不往别处落文件。"""
+    if not (os.environ.get("GSDB_HOME") or os.environ.get("GDAA_HOME") or state_dir().is_dir()):
+        return ""
+    eid = "E-" + secrets.token_hex(3).upper()
+    try:
+        path = state_dir() / ERROR_LOG
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size > _ERROR_LOG_MAX:
+            path.replace(path.with_name(path.name + ".1"))
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("%s %s %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S"), eid, raw.replace("\n", " | ")))
+        os.chmod(path, 0o600)
+    except OSError:
+        return ""
+    return eid
+
+
+def user_error(shown: str, raw: Optional[str] = None) -> str:
+    """给用户看的报错:按原文配人话提示(提示认的是原文),再隐去地址 / 接口路径 / 实例 ID,原文进日志带编号。
+
+    shown 是给用户看的那句(不含地址与路径);raw 是完整原文(默认同 shown)。"""
+    raw = shown if raw is None else raw
+    hinted = with_hint(shown)
+    text = _INSTANCE_ID.sub("", redact(hinted))
+    eid = _log_raw(raw)
+    return text + ("(详情编号 %s,完整原文见本机日志 %s)" % (eid, state_dir() / ERROR_LOG) if eid else "")
 
 DEFAULT_TIMEOUT = 120
 LIST_PAGE_SIZE = 1000  # 协议上限；脚本数不多，一次拉完
@@ -143,14 +188,17 @@ class GrmpClient:
             # HTTPError 是 URLError 的子类,必须先接:4xx/5xx 的响应体里才有中间件说的失败原因。
             # 现场 SQL 在备机上执行失败被包成 HTTP 400,只 catch URLError 时用户看到的是
             # 「HTTP Error 400: 」后面一片空白,排查被带到参数名方向去了两天。
-            raise GrmpError(with_hint(
-                "请求 %s 失败：HTTP %s %s%s（中间件 %s）"
-                % (path, exc.code, exc.reason, _error_body(exc), self.base_url)
+            detail = _error_body(exc)
+            raise GrmpError(user_error(
+                "调用中间件失败：HTTP %s %s%s" % (exc.code, exc.reason, detail),
+                "请求 %s 失败：HTTP %s %s%s（中间件 %s）" % (path, exc.code, exc.reason, detail, self.base_url),
             )) from exc
         except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
-            # 连不上、被对端断开、超时、DNS 解析失败——都在这里变成带地址的一句话。
-            # 地址必须写出来:中间件换地址后老会话打旧地址(09-14 现场),排查第一眼要看的就是它。
-            raise GrmpError("请求 %s 失败：%s（中间件 %s）" % (path, exc, self.base_url)) from exc
+            # 连不上、被对端断开、超时、DNS 解析失败。地址照旧要能查到(中间件换地址后老会话打旧地址,
+            # 09-14 现场),但只进本机诊断日志,给用户看的那句不带(见 user_error)。
+            raise GrmpError(user_error(
+                "调用中间件失败：%s" % exc, "请求 %s 失败：%s（中间件 %s）" % (path, exc, self.base_url),
+            )) from exc
         return self._parse(body)
 
     @staticmethod
@@ -169,12 +217,17 @@ class GrmpClient:
         try:
             status, reason, raw = proxy.post(self._proxy, path, data, self._headers(path), self._timeout)
         except (OSError, http.client.HTTPException) as exc:
-            raise GrmpError("请求 %s 失败：凭据代理不可用（%s：%s）。容器刚启动时稍等几秒重试；一直这样请联系管理员"
-                            % (path, self._proxy, exc)) from exc
+            raise GrmpError(user_error(
+                "调用中间件失败：凭据代理不可用（%s）。容器刚启动时稍等几秒重试；一直这样请联系管理员" % exc,
+                "请求 %s 失败：凭据代理不可用（%s：%s）" % (path, self._proxy, exc),
+            )) from exc
         body = raw.decode("utf-8", errors="replace")
         if status >= 400:
-            raise GrmpError(with_hint("请求 %s 失败：HTTP %s %s%s（经凭据代理）"
-                                      % (path, status, reason, _error_detail(body[:_ERROR_BODY_MAX]))))
+            detail = _error_detail(body[:_ERROR_BODY_MAX])
+            raise GrmpError(user_error(
+                "调用中间件失败（经凭据代理）：HTTP %s %s%s" % (status, reason, detail),
+                "请求 %s 失败：HTTP %s %s%s（经凭据代理）" % (path, status, reason, detail),
+            ))
         return self._parse(body)
 
     # -- 接口一 -----------------------------------------------------------
@@ -190,9 +243,7 @@ class GrmpClient:
             )
             # 接口一判成功只能看 code —— 业务错误也是 HTTP 200
             if body.get("code") != "0":
-                raise GrmpError(
-                    "查询命令清单失败：%s" % body.get("msg", body)
-                )
+                raise GrmpError(user_error("查询命令清单失败：%s" % body.get("msg", body)))
             result = body.get("result") or {}
             details.extend(result.get("list") or [])
             if not result.get("hasNextPage"):
@@ -292,7 +343,7 @@ class GrmpClient:
         # 「查询结果为空」——「慢 SQL 返回 0 条」被读成「当前没有慢 SQL」。
         status = body.get("status")
         if status != "finished" or "result" not in body:
-            raise GrmpError(with_hint(
+            raise GrmpError(user_error(
                 "执行 %s 失败（status=%r，task_id=%s）：%s"
                 % (script_name, status, body.get("task_id"), body.get("msg", ""))
             ))
