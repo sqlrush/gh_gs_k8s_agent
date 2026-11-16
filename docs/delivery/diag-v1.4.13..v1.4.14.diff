@@ -1,0 +1,1905 @@
+diff --git a/.delivery.json b/.delivery.json
+index 1d668f1..9c6a690 100644
+--- a/.delivery.json
++++ b/.delivery.json
+@@ -1,22 +1,22 @@
+ {
+   "format": 1,
+   "package": "diag",
+-  "version": "diag-v1.4.13",
++  "version": "diag-v1.4.14",
+   "source": {
+     "repo": "gh_agent_k8s",
+-    "ref": "agent-v1.4.13",
+-    "commit": "e0071e545536eaa9618e97e8c6c111eeb986bcc1",
+-    "date": "2026-11-12T14:37:26+08:00"
++    "ref": "agent-v1.4.14",
++    "commit": "ce6da96ffae03710f13e6031b72a08b91a5b3fe1",
++    "date": "2026-11-16T00:36:00-08:00"
+   },
+   "base": {
+-    "version": "diag-v1.4.12",
++    "version": "diag-v1.4.13",
+     "source": {
+       "repo": "gh_agent_k8s",
+-      "ref": "agent-v1.4.12",
+-      "commit": "b29ddfded5ecbf848d9cf363eb847df497235119",
+-      "date": "2026-11-11T18:31:30+08:00"
++      "ref": "agent-v1.4.13",
++      "commit": "e0071e545536eaa9618e97e8c6c111eeb986bcc1",
++      "date": "2026-11-12T14:37:26+08:00"
+     }
+   },
+-  "files": 420,
+-  "digest": "7994ebe8243f63926e345ec0aca9ec221c03546597cc680a145c03a83c683d30"
++  "files": 430,
++  "digest": "2856c06f3ed8701f1c72f4ecc4344af53014f3c8f4a5e9251a4fd7e35bd7ee1e"
+ }
+diff --git a/common/VERSION b/common/VERSION
+index 4d5d870..1afe4aa 100644
+--- a/common/VERSION
++++ b/common/VERSION
+@@ -1 +1 @@
+-agent-v1.4.13
++agent-v1.4.14
+diff --git a/common/grmp/client.py b/common/grmp/client.py
+index b7d82c5..e5d140b 100644
+--- a/common/grmp/client.py
++++ b/common/grmp/client.py
+@@ -23,7 +23,7 @@ import urllib.error
+ import urllib.request
+ from typing import Any, Dict, List, Mapping, Optional
+ 
+-from . import paths, proxy, routing, userid
++from . import paths, proxy, routing, timing, userid
+ from .errors import QueryError
+ from .hints import with_hint
+ from .params import to_param_value
+@@ -237,10 +237,10 @@ class GrmpClient:
+         details: List[Dict[str, Any]] = []
+         page = 1
+         while True:
+-            body = self._post(
++            body = timing.call(lambda: self._post(          # 耗时进 logs/grmp-timing.log(交互耗时报告用)
+                 self.list_path,
+                 {"dataIp": self.data_ip, "offset": page, "limit": LIST_PAGE_SIZE},
+-            )
++            ), timing.LIST, "接口一 · 取命令清单")
+             # 接口一判成功只能看 code —— 业务错误也是 HTTP 200
+             if body.get("code") != "0":
+                 raise GrmpError(user_error("查询命令清单失败：%s" % body.get("msg", body)))
+@@ -337,7 +337,8 @@ class GrmpClient:
+                 for key, val in values.items()
+             ]
+ 
+-        body = self._post(self.invoke_path, payload)
++        body = timing.call(lambda: self._post(self.invoke_path, payload),   # 耗时进 logs/grmp-timing.log
++                           timing.INVOKE, script_name, values.get(routing.PARAM))
+ 
+         # 两者缺一即按失败处理。只取 result.data 会把执行失败读成
+         # 「查询结果为空」——「慢 SQL 返回 0 条」被读成「当前没有慢 SQL」。
+diff --git a/common/grmp/timing.py b/common/grmp/timing.py
+new file mode 100644
+index 0000000..4b28a20
+--- /dev/null
++++ b/common/grmp/timing.py
+@@ -0,0 +1,88 @@
++"""GRMP 每次调用的耗时记录(v1.4.14):给「交互耗时报告」用,拆出一次工具调用里 GRMP 与数据库占了多少。
++
++只记:开始时间、用时、接口(取命令清单 / 执行脚本)、脚本名、执行库、成败、返回行数与字节数、调用它的技能脚本。
++**不记**参数值、结果内容、中间件地址、令牌 —— 这份日志可以原样交给我方分析。
++
++写在本机诊断日志目录,规则与 grmp-errors.log 相同(见 client._log_raw):设了 GSDB_HOME / GDAA_HOME,或默认状态目录
++(技能目录下的 common/)存在时才写;写不了(只读盘、权限)就算了 —— 计时只是旁路,绝不影响取数。
++一行一条 JSON;超过 2 MB 滚动成 .1(只留一份,约两万次调用)。
++"""
++from __future__ import annotations
++
++import json
++import os
++import sys
++import time
++from typing import Any, Callable, Dict, Optional
++
++from ..config import state_dir
++
++TIMING_LOG = os.path.join("logs", "grmp-timing.log")
++_MAX = 2 << 20
++
++LIST = "list"        # 接口一:取命令清单
++INVOKE = "invoke"    # 接口二:执行登记脚本
++
++
++def log_path():
++    return state_dir() / TIMING_LOG
++
++
++def _enabled() -> bool:
++    return bool(os.environ.get("GSDB_HOME") or os.environ.get("GDAA_HOME") or state_dir().is_dir())
++
++
++def _caller() -> str:
++    """调用方:技能名/脚本名(如 gaussdb-wdr/wdr.py),报告据此把这次调用对到会话里的那次工具调用。"""
++    argv0 = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
++    parts = argv0.split(os.sep)
++    if len(parts) >= 3 and parts[-2] == "scripts":
++        return "%s/%s" % (parts[-3], parts[-1])
++    return os.path.basename(argv0)
++
++
++def _summary(kind: str, body: Any) -> Dict[str, Any]:
++    """从响应里只取成败、行数、字节数。"""
++    if not isinstance(body, dict):
++        return {"ok": False}
++    result = body.get("result") if isinstance(body.get("result"), dict) else {}
++    if kind == LIST:
++        items = result.get("list")
++        return {"ok": body.get("code") == "0", "rows": len(items) if isinstance(items, list) else None}
++    data = result.get("data")
++    out: Dict[str, Any] = {"ok": body.get("status") == "finished" and "result" in body,
++                           "status": str(body.get("status") or "")}
++    if isinstance(data, list):
++        out["rows"] = len(data)
++        out["bytes"] = len(json.dumps(data, ensure_ascii=False).encode("utf-8"))
++    return out
++
++
++def _write(wall: float, mono: float, kind: str, script: str, db: str, info: Dict[str, Any]) -> None:
++    try:
++        if not _enabled():
++            return
++        rec = {"ts": round(wall, 3), "ms": int((time.monotonic() - mono) * 1000), "kind": kind, "script": script,
++               "db": db, "pid": os.getpid(), "caller": _caller()}
++        rec.update(info)
++        path = log_path()
++        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
++        if path.exists() and path.stat().st_size > _MAX:
++            path.replace(path.with_name(path.name + ".1"))
++        with open(path, "a", encoding="utf-8") as fh:
++            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
++        os.chmod(path, 0o600)
++    except Exception:  # noqa: BLE001  计时是旁路:任何问题(盘满、权限、编码)都不能影响取数
++        pass
++
++
++def call(fn: Callable[[], Any], kind: str, script: str, db: Optional[str] = "") -> Any:
++    """执行一次 HTTP 调用并记下用时;成功失败都记,异常原样抛出。"""
++    wall, mono = time.time(), time.monotonic()
++    try:
++        body = fn()
++    except Exception as exc:
++        _write(wall, mono, kind, script, db or "", {"ok": False, "error": type(exc).__name__})
++        raise
++    _write(wall, mono, kind, script, db or "", _summary(kind, body))
++    return body
+diff --git a/common/timing/__init__.py b/common/timing/__init__.py
+new file mode 100644
+index 0000000..ebb3c57
+--- /dev/null
++++ b/common/timing/__init__.py
+@@ -0,0 +1,5 @@
++"""交互耗时报告(v1.4.14):读 opencode 会话库与 GRMP 计时日志,按提问 → 轮 → 段统计用时并写出慢在哪。
++
++纯脚本统计,不调模型、不联网、不改任何数据;不是技能(没有 SKILL.md),模型看不到也调不到。
++用法见 cli.py 文件头:python3 $GSDB_SKILLS_DIR/common/timing/cli.py --last 3 --html /tmp/耗时报告.html
++"""
+diff --git a/common/timing/analysis.py b/common/timing/analysis.py
+new file mode 100644
+index 0000000..b306291
+--- /dev/null
++++ b/common/timing/analysis.py
+@@ -0,0 +1,363 @@
++"""把会话切成「一次提问」→「若干轮」→「各段」,算出每段用时并写出慢在哪。纯计算,不调模型、不联网。
++
++一轮 = 一条助手消息(模型调用一次,可能接着调工具)。各段:
++  等首字  这一轮开始 → 模型第一个字(思考或正文;没有时取第一个工具片段出现的时刻)
++  思考与输出  第一个字 → 第一个工具开始执行(最后一轮是写完回答)
++  工具    工具开始 → 结束;其中 GRMP 调用(取自 grmp-timing.log)单列,其余算「脚本本地」
++  空档    上一轮结束 → 这一轮开始(运行时自己落库、拼上下文)
++"""
++from __future__ import annotations
++
++import collections
++import datetime
++import re
++import statistics
++from typing import Dict, List, Optional
++
++from . import grmplog
++from .mask import Masker
++
++CAP_THINK, CAP_TEXT, CAP_CMD, CAP_OUT = 12000, 8000, 6000, 8000    # 详细版每段原文上限(字)
++TTFT_SLOW = 2.0       # 平均每轮等首字超过这么多秒才在结论里提示
++SPEED_SLOW = 20.0     # 生成速度低于这么多 token/秒,算模型服务偏慢
++INLINE_BIG = 800      # 命令里现写的脚本 / 数据超过这么多字就点出来
++OUTPUT_BIG = 5000     # 工具输出超过这么多字就点出来(会撑大之后每一轮的上下文)
++QUESTION_SHORT = 40   # 摘要版只留问题前这么多字
++
++CAT_NAMES = {"script": "调技能脚本", "read": "读技能文件", "adhoc": "临时命令", "load": "加载技能",
++             "builtin": "内置工具", "answer": "写回答", "compact": "上下文压缩"}
++KIND_NAMES = {"ttft": "模型·等首字", "gen": "模型·思考与输出", "grmp": "工具·GRMP 与数据库",
++              "local": "工具·脚本本地", "idle": "运行时空档"}
++_SHELL = {"for", "do", "done", "if", "then", "fi", "while", "in", "echo", "true"}
++_SCRIPT = re.compile(r"python3\s+\S*/skills/([\w-]+)/scripts/([\w.-]+\.py)((?:\s+\S+)*)")
++_READ = re.compile(r"^\s*(cat|sed|head|tail|grep|ls)\b[^\n]*?/skills/([\w-]+)/([^\s'\")|;]+)")
++_PROG = re.compile(r"(?:^|[;&|(])\s*([a-z][\w.-]*)(?![\w.-]|=)")
++_INLINE = re.compile(r"<<\s*'?EOF|python3\s+-\s|python3\s+-c\s")
++
++
++def classify(tool: str, inp: dict) -> tuple:
++    """(类别, 标签)。标签只放技能名、脚本名、子命令或程序名,不放参数。"""
++    if tool == "skill":
++        return "load", "加载技能 " + str(inp.get("name", ""))
++    if tool != "bash":
++        return "builtin", "内置工具 " + tool
++    cmd = inp.get("command") or ""
++    m = _READ.match(cmd)
++    if m:
++        return "read", "读 %s/%s" % (m.group(2), "/".join(m.group(3).rstrip("/").split("/")[-2:]))
++    m = _SCRIPT.search(cmd)
++    if m:
++        rest = re.split(r"[;|&]", m.group(3), 1)[0].split()
++        sub = rest[0] if rest and re.fullmatch(r"[a-z][a-z_-]*", rest[0]) else ""
++        return "script", "%s · %s%s" % (m.group(1), m.group(2), (" " + sub) if sub else "")
++    if re.match(r"\s*python3\s+-", cmd):
++        return "adhoc", "python3 内联脚本"
++    progs = [p for p in _PROG.findall(re.sub(r"\b(do|then|else)\b", ";", cmd)) if p not in _SHELL]
++    return "adhoc", ("for 循环 · " if cmd.lstrip().startswith("for ") else "") + (progs[0] if progs else "shell")
++
++
++def fmt(s: float) -> str:
++    if s >= 120:
++        return "%d 分 %.0f 秒" % (s // 60, s % 60)
++    return ("%.2f 秒" if s < 1 else "%.1f 秒") % s
++
++
++def _union(spans) -> float:
++    total, cur_s, cur_e = 0.0, None, None
++    for s, e in sorted(spans):
++        if cur_e is None or s > cur_e:
++            total += (cur_e - cur_s) if cur_e is not None else 0
++            cur_s, cur_e = s, e
++        else:
++            cur_e = max(cur_e, e)
++    return total + ((cur_e - cur_s) if cur_e is not None else 0)
++
++
++class Builder:
++    def __init__(self, detail: bool, grmp: List[dict], tz: datetime.tzinfo):
++        self.detail, self.grmp, self.tz, self.mask = detail, grmp, tz, Masker()
++
++    # ---- 一轮 ----------------------------------------------------------------------------------
++    def tool(self, p: dict, tc: int, rel) -> dict:
++        st = p["state"]
++        inp = st.get("input") or {}
++        cat, label = classify(p["tool"], inp)
++        cmd = inp.get("command") or ""
++        out = str(st.get("output") or "")
++        meta = st.get("metadata") or {}
++        s, e = int(st["time"]["start"]), int(st["time"]["end"])
++        t = {"tool": p["tool"], "cat": cat, "catn": CAT_NAMES[cat], "label": label, "s": rel(s), "e": rel(e),
++             "secs": (e - s) / 1000, "cmd_chars": len(cmd), "inline": bool(_INLINE.search(cmd)),
++             "status": st.get("status", ""), "exit": meta.get("exit"), "truncated": bool(meta.get("truncated")),
++             "out_chars": len(out), "out_lines": out.count("\n") + (1 if out else 0),
++             "abs_s": s, "abs_e": e, "cmd_raw": cmd}
++        if self.detail:
++            t.update(cmd=self.mask(cmd or str(inp), CAP_CMD), out=self.mask(out, CAP_OUT),
++                     desc=self.mask(str(inp.get("description") or ""), 300))
++        return t
++
++    def grmp_rows(self, t: dict, rel) -> List[dict]:
++        rows = []
++        for r in t.pop("grmp_raw", []):
++            s, e = max(r["start"], t["abs_s"]), min(r["end"], t["abs_e"])
++            db = str(r.get("db") or "")
++            rows.append({"name": r.get("script", ""), "kind": r.get("kind", ""), "s": rel(s), "e": rel(max(s, e)),
++                         "ms": int(r.get("ms") or 0), "rows": r.get("rows"), "bytes": r.get("bytes"),
++                         "ok": bool(r.get("ok")), "status": r.get("status") or r.get("error") or "",
++                         "db": "—" if r.get("kind") == "list" else
++                               (db or "postgres") if self.detail else ("postgres" if db in ("", "postgres") else "业务库")})
++        return rows
++
++    def round(self, i: int, m: dict, ps: list, t0: int) -> dict:
++        T = int(m["time"]["created"])
++        done = int(m["time"].get("completed") or max([tu for _, tu, _ in ps] + [T]))
++        rel = lambda x: round((x - t0) / 1000, 3)       # noqa: E731
++        reasons = [p for _, _, p in ps if p.get("type") == "reasoning" and (p.get("time") or {}).get("start")]
++        texts = [p for _, _, p in ps if p.get("type") == "text" and (p.get("text") or "").strip()]
++        traw = [(tc, p) for tc, _, p in ps if p.get("type") == "tool" and ((p.get("state") or {}).get("time") or {}).get("end")]
++        first = min([int(p["time"]["start"]) for p in reasons + texts if (p.get("time") or {}).get("start")]
++                    + [tc for tc, _ in traw] + [done])
++        first = max(first, T)
++        tools = [self.tool(p, tc, rel) for tc, p in traw]
++        grmplog.assign(self.grmp, tools)
++        segs = [{"k": "ttft", "s": rel(T), "e": rel(first)}]
++        if tools:
++            ts, te = min(t["abs_s"] for t in tools), max(t["abs_e"] for t in tools)
++            gen_end, busy_end = max(ts, first), te
++            segs.append({"k": "gen", "s": rel(first), "e": rel(gen_end)})
++            spans = []
++            for t in tools:
++                t["grmp"] = self.grmp_rows(t, rel)
++                cur = t["s"]
++                for g in t["grmp"]:
++                    if g["s"] > cur:
++                        segs.append({"k": "local", "s": cur, "e": g["s"]})
++                    segs.append({"k": "grmp", "s": g["s"], "e": g["e"]})
++                    spans.append((g["s"], g["e"]))
++                    cur = max(cur, g["e"])
++                segs.append({"k": "local", "s": cur, "e": t["e"]})
++            span = (te - ts) / 1000
++            grmp = min(_union(spans), span)
++        else:
++            gen_end = busy_end = done
++            segs.append({"k": "gen", "s": rel(first), "e": rel(done)})
++            span = grmp = 0.0
++        for t in tools:
++            for k in ("abs_s", "abs_e", "cmd_raw"):
++                t.pop(k, None)
++        tk = m.get("tokens") or {}
++        cache = tk.get("cache") or {}
++        think_secs = sum((int(p["time"].get("end") or p["time"]["start"]) - int(p["time"]["start"])) / 1000 for p in reasons)
++        gen = (gen_end - first) / 1000
++        rsn, out = int(tk.get("reasoning") or 0), int(tk.get("output") or 0)
++        out_secs = max(0.0, gen - think_secs)
++        compact = bool(m.get("summary")) or m.get("mode") == "compaction"
++        main = ({"cat": "compact", "label": "上下文压缩"} if compact else tools[0] if tools
++                else {"cat": "answer", "label": "写回答"})
++        return {
++            "i": i, "t": rel(T), "end": rel(busy_end), "done": rel(done), "segs": [s for s in segs if s["e"] > s["s"]],
++            "tools": tools, "ttft": (first - T) / 1000, "gen": gen, "grmp": grmp, "local": span - grmp,
++            "ctx_in": int(tk.get("input") or 0), "ctx_read": int(cache.get("read") or 0),
++            "ctx_write": int(cache.get("write") or 0), "out": out, "rsn": rsn, "cat": main["cat"], "act": main["label"],
++            "model": m.get("modelID", ""), "finish": m.get("finish", "") or (m.get("error") or {}).get("name", ""),
++            "think": {"secs": think_secs, "speed": rsn / think_secs if think_secs > 0.2 else None,
++                      "parts": [{"secs": (int(p["time"].get("end") or p["time"]["start"]) - int(p["time"]["start"])) / 1000,
++                                 "chars": len(p.get("text") or ""),
++                                 "text": self.mask(p.get("text") or "", CAP_THINK) if self.detail else ""} for p in reasons]},
++            "outp": {"secs": out_secs, "speed": out / out_secs if out_secs > 0.2 else None,
++                     "texts": [{"chars": len(p["text"]), "text": self.mask(p["text"], CAP_TEXT) if self.detail else ""}
++                               for p in texts]},
++        }
++
++    # ---- 一次提问 ------------------------------------------------------------------------------
++    def question(self, idx: int, sid: str, umsg: dict, text: str, raw_rounds: list) -> dict:
++        t0 = int(umsg["time"]["created"])
++        rounds, prev_end = [], 0.0
++        for i, (m, ps) in enumerate(raw_rounds, 1):
++            r = self.round(i, m, ps, t0)
++            r["idle"] = max(0.0, r["t"] - prev_end)
++            if r["idle"] > 0:
++                r["segs"].insert(0, {"k": "idle", "s": round(prev_end, 3), "e": r["t"]})
++            prev_end = r["end"]
++            rounds.append(r)
++        last = rounds[-1]
++        totals = {k: sum(r[k] for r in rounds) for k in ("ttft", "gen", "grmp", "local", "idle")}
++        totals["idle"] += max(0.0, last["done"] - last["end"])
++        short = self.mask(text[:QUESTION_SHORT]) + ("…" if len(text) > QUESTION_SHORT else "")
++        q = {"idx": idx, "session": sid, "start": datetime.datetime.fromtimestamp(t0 / 1000, self.tz).strftime("%Y-%m-%d %H:%M:%S"),
++             "text": short, "full": self.mask(text, 2000) if self.detail else short, "total": last["done"], "rounds": rounds,
++             "totals": totals}
++        explain(q)
++        summarize(q)
++        q["diag"] = diagnose(q)
++        return q
++
++
++def explain(q: dict) -> None:
++    """给每一轮写「为什么慢」:只陈述数据,并和本问的其他轮比。"""
++    rounds = q["rounds"]
++    for r in rounds:
++        r["ctx"] = r["ctx_in"] + r["ctx_read"] + r["ctx_write"]
++        r["speed"] = (r["rsn"] + r["out"]) / r["gen"] if r["gen"] > 0.5 else None
++    speeds = [r["speed"] for r in rounds if r["speed"]]
++    med = statistics.median(speeds) if speeds else 0
++    q["speed_median"] = med
++    rank = {r["i"]: k for k, r in enumerate(sorted(rounds, key=lambda r: -r["rsn"]), 1)}
++    for n, r in enumerate(rounds):
++        nxt = rounds[n + 1]["ctx"] if n + 1 < len(rounds) else None
++        r["ctx_next_delta"] = (nxt - r["ctx"]) if nxt is not None else None
++        why = []
++        if r["ttft"] >= 3:
++            why.append("等首字 %.1f 秒" % r["ttft"])
++        if r["rsn"] >= 800 and rank[r["i"]] <= 3:
++            why.append("思考 %d token（本问第 %d 多）" % (r["rsn"], rank[r["i"]]))
++        sp = r["speed"]
++        if sp and med and r["gen"] >= 2 and sp < 0.5 * med:
++            why.append("生成速度 %.0f token/秒，只有本问中位数的 %.0f%%：模型服务可能在这一轮变慢" % (sp, sp / med * 100))
++        for t in r["tools"]:
++            g = sum(x["e"] - x["s"] for x in t["grmp"])
++            if t["inline"] and t["cmd_chars"] >= INLINE_BIG:
++                why.append("在命令里现写了 %d 字的脚本 / 数据（输出 %d token）" % (t["cmd_chars"], r["out"]))
++            if t["secs"] >= 5:
++                why.append("工具「%s」执行 %.1f 秒%s" % (t["label"], t["secs"], "（其中 GRMP %.1f 秒）" % g if g else ""))
++            if t["exit"] not in (None, 0):
++                why.append("工具「%s」退出码 %s" % (t["label"], t["exit"]))
++            bad = [x["name"] for x in t["grmp"] if not x["ok"]]
++            if bad:
++                why.append("GRMP 调用失败 %d 次（%s）" % (len(bad), "、".join(sorted(set(bad)))))
++        big = [t["out_chars"] for t in r["tools"] if t["out_chars"] >= OUTPUT_BIG]
++        if big:                                         # 一轮几个工具的输出合起来撑大下一轮上下文:合成一句,不重复算
++            grow = r["ctx_next_delta"]
++            why.append("工具输出%s %d 字%s" % ("共" if len(big) > 1 else "", sum(big),
++                                          "（%d 个工具）" % len(big) if len(big) > 1 else "")
++                       + ("，下一轮上下文 +%.1fK token" % (grow / 1000) if grow and grow > 0 else ""))
++        if r["cat"] == "compact":
++            why.append("运行时在压缩上下文（上下文太长时自动触发）")
++        elif not r["tools"]:
++            why.append("写回答 %d 字" % sum(x["chars"] for x in r["outp"]["texts"]))
++        if not why:
++            parts = {"等首字": r["ttft"], "思考与输出": r["gen"], "工具": r["grmp"] + r["local"], "轮前空档": r["idle"]}
++            k = max(parts, key=parts.get)
++            why.append("主要花在%s %s，各项都在本问的正常范围" % (k, fmt(parts[k])))
++        r["why"] = why
++
++
++def summarize(q: dict) -> None:
++    rounds, total = q["rounds"], q["total"]
++    cats: Dict[str, dict] = collections.OrderedDict()
++    for r in rounds:
++        c = cats.setdefault(r["cat"], {"cat": r["cat"], "name": CAT_NAMES[r["cat"]], "n": 0, "secs": 0.0})
++        c["n"] += 1
++        c["secs"] += r["end"] - r["t"]
++    slow = []
++    for r in rounds:
++        slow.append({"k": "ttft", "round": r["i"], "what": "等模型第一个字", "secs": r["ttft"]})
++        slow.append({"k": "gen", "round": r["i"], "what": "模型思考与输出", "secs": r["gen"]})
++        if r["idle"] > 0:
++            slow.append({"k": "idle", "round": r["i"], "what": "轮前空档", "secs": r["idle"]})
++        for t in r["tools"]:
++            g = sum(x["e"] - x["s"] for x in t["grmp"])
++            slow.append({"k": "grmp" if g > (t["secs"] - g) else "local", "round": r["i"], "what": t["label"],
++                         "secs": t["secs"], "grmp": g, "cat": t["catn"]})
++    slow = sorted(slow, key=lambda x: -x["secs"])[:10]
++    for s in slow:
++        s["share"] = s["secs"] / total if total else 0
++    gcalls = [g for r in rounds for t in r["tools"] for g in t["grmp"]]
++    gsum: Dict[str, dict] = {}
++    for g in gcalls:
++        x = gsum.setdefault(g["name"], {"name": g["name"], "n": 0, "secs": 0.0, "fail": 0, "rows": 0})
++        x["n"] += 1
++        x["secs"] += g["e"] - g["s"]
++        x["fail"] += 0 if g["ok"] else 1
++        x["rows"] += g["rows"] or 0
++    q.update({
++        "rounds_n": len(rounds), "tools_n": sum(len(r["tools"]) for r in rounds),
++        "grmp_n": len(gcalls), "grmp_fail": sum(1 for g in gcalls if not g["ok"]),
++        "grmp_scripts": sorted(gsum.values(), key=lambda x: -x["secs"]),
++        "ctx_first": rounds[0]["ctx"], "ctx_peak": max(r["ctx"] for r in rounds),
++        "tok": {"in": sum(r["ctx_in"] for r in rounds), "read": sum(r["ctx_read"] for r in rounds),
++                "write": sum(r["ctx_write"] for r in rounds), "out": sum(r["out"] for r in rounds),
++                "rsn": sum(r["rsn"] for r in rounds)},
++        "cats": sorted(cats.values(), key=lambda c: -c["secs"]), "slow": slow,
++        "model": collections.Counter(r["model"] for r in rounds).most_common(1)[0][0],
++    })
++
++
++def diagnose(q: dict) -> List[dict]:
++    """按规则给出「慢在哪」。只陈述数据,不猜原因;推测的部分写成「可能」。"""
++    T, tot, out = q["totals"], q["total"] or 1, []
++    model, tool = T["ttft"] + T["gen"], T["grmp"] + T["local"]
++    top = max((s for s in q["slow"] if s["k"] in ("grmp", "local")), key=lambda s: s["secs"], default=None)
++    if tool / tot >= 0.5 and top:
++        out.append({"lvl": "serious", "title": "慢在一次工具调用", "round": top["round"],
++                    "detail": "第 %d 轮的「%s」（%s）用了 %s，占这次提问的 %.0f%%%s。"
++                              % (top["round"], top["what"], top["cat"], fmt(top["secs"]), top["secs"] / tot * 100,
++                                 "，其中 GRMP 与数据库 %s" % fmt(top["grmp"]) if top.get("grmp") else "")})
++    if T["grmp"] / tot >= 0.3 and q["grmp_scripts"]:
++        g = q["grmp_scripts"][0]
++        out.append({"lvl": "serious", "title": "慢在 GRMP 与数据库",
++                    "detail": "GRMP 调用 %d 次共 %s，占 %.0f%%；最耗时的是 %s（%d 次共 %s）。"
++                              % (q["grmp_n"], fmt(T["grmp"]), T["grmp"] / tot * 100, g["name"], g["n"], fmt(g["secs"]))})
++    if q["grmp_fail"]:
++        out.append({"lvl": "warning", "title": "有 GRMP 调用失败",
++                    "detail": "失败 %d 次：%s。失败的那几项在回答里会写「无法查询」。"
++                              % (q["grmp_fail"], "、".join("%s ×%d" % (g["name"], g["fail"]) for g in q["grmp_scripts"] if g["fail"]))})
++    if model / tot >= 0.6 and q["rounds_n"] >= 15:
++        out.append({"lvl": "serious", "title": "慢在轮数",
++                    "detail": "模型来回 %d 轮，平均每轮 %s，模型时间占 %.0f%%。单轮不慢，是轮数把总时长堆上去的。"
++                              % (q["rounds_n"], fmt(model / q["rounds_n"]), model / tot * 100)})
++    heavy = sorted(q["rounds"], key=lambda r: -r["gen"])[:2]
++    if heavy and heavy[0]["gen"] >= 8:
++        out.append({"lvl": "warning", "title": "有几轮思考与输出特别久", "round": heavy[0]["i"],
++                    "detail": "；".join("第 %d 轮 %s（思考 %d token、输出 %d token）" % (r["i"], fmt(r["gen"]), r["rsn"], r["out"])
++                                       for r in heavy) + "。"})
++    side = {c["cat"]: c for c in q["cats"]}
++    detour = sum(side[k]["n"] for k in ("adhoc", "read") if k in side)
++    if detour and detour / q["rounds_n"] >= 0.3:
++        out.append({"lvl": "warning", "title": ("多数" if detour / q["rounds_n"] > 0.5 else "不少") + "轮次不是在调技能脚本",
++                    "detail": "%d 轮里：调技能脚本 %d 轮；临时命令 %d 轮、读技能文件 %d 轮，合计 %s。"
++                              % (q["rounds_n"], side.get("script", {}).get("n", 0), side.get("adhoc", {}).get("n", 0),
++                                 side.get("read", {}).get("n", 0), fmt(sum(side[k]["secs"] for k in ("adhoc", "read") if k in side)))})
++    if model and T["ttft"] / model >= 0.4 and T["ttft"] / q["rounds_n"] >= TTFT_SLOW:
++        out.append({"lvl": "warning", "title": "等首字占模型时间的大头",
++                    "detail": "模型时间里 %.0f%% 在等第一个字（平均每轮 %s）。可能是模型服务排队，或每轮发送的上下文太长。"
++                              % (T["ttft"] / model * 100, fmt(T["ttft"] / q["rounds_n"]))})
++    if q["speed_median"] and q["speed_median"] < SPEED_SLOW:
++        out.append({"lvl": "warning", "title": "模型生成速度偏慢",
++                    "detail": "生成速度中位数只有每秒 %.0f token。可能是模型服务侧限速或负载高。" % q["speed_median"]})
++    if q["ctx_first"] and q["ctx_peak"] / q["ctx_first"] >= 2:
++        all_in = q["tok"]["in"] + q["tok"]["read"] + q["tok"]["write"]
++        out.append({"lvl": "info", "title": "上下文越滚越大",
++                    "detail": "每轮发给模型的上下文从 %.1fK 涨到 %.1fK token（每轮都要整段重发）；缓存命中 %.0f%%。"
++                              % (q["ctx_first"] / 1000, q["ctx_peak"] / 1000, q["tok"]["read"] / max(1, all_in) * 100)})
++    return out or [{"lvl": "good", "title": "没有明显的慢点", "detail": "各段用时分布均匀。"}]
++
++
++def questions(sessions, detail: bool, grmp: List[dict], tz: datetime.tzinfo,
++              session: Optional[str] = None, since: Optional[int] = None, until: Optional[int] = None,
++              last: int = 1) -> tuple:
++    """挑出要报告的提问(按时间,取最近 last 次;给了时间段就取段内全部)。返回 (提问列表, 遮蔽统计)。"""
++    b = Builder(detail, grmp, tz)
++    picked = []
++    for s in sessions:
++        if session and not s.id.startswith(session):
++            continue
++        if not session and s.parent:
++            continue                                   # 子会话(子任务)算在父会话那次工具调用里
++        cur = None
++        for mid, m, ps in s.messages:
++            if m.get("role") == "user":
++                text = " ".join(p.get("text", "") for _, _, p in ps if p.get("type") == "text" and not p.get("synthetic")).strip()
++                cur = (s.id, m, text, [])
++                picked.append(cur)
++            elif cur is not None and m.get("role") == "assistant" and ps:
++                cur[3].append((m, ps))
++    picked = [p for p in picked if p[3]]
++    if since is not None or until is not None:
++        picked = [p for p in picked if (since is None or p[1]["time"]["created"] >= since)
++                  and (until is None or p[1]["time"]["created"] <= until)]
++    else:
++        picked = sorted(picked, key=lambda p: p[1]["time"]["created"])[-max(1, last):]
++    picked = sorted(picked, key=lambda p: p[1]["time"]["created"])
++    out = [b.question(i, sid, m, text, rr) for i, (sid, m, text, rr) in enumerate(picked, 1)]
++    return out, dict(b.mask.count)
+diff --git a/common/timing/cli.py b/common/timing/cli.py
+new file mode 100644
+index 0000000..d993117
+--- /dev/null
++++ b/common/timing/cli.py
+@@ -0,0 +1,105 @@
++#!/usr/bin/env python3
++"""交互耗时报告:一次提问里每一步花了多长时间、慢在哪(v1.4.14)。纯脚本统计,不调模型、不联网、不改任何数据。
++
++在智能体所在的机器 / 容器里运行(读本机 opencode 会话库与 GRMP 计时日志):
++
++    python3 $GSDB_SKILLS_DIR/common/timing/cli.py                       # 最近 1 次提问,文本摘要打到终端
++    python3 $GSDB_SKILLS_DIR/common/timing/cli.py --last 3 --html /tmp/耗时报告.html
++    python3 $GSDB_SKILLS_DIR/common/timing/cli.py --since "2026-11-16 14:00" --until "2026-11-16 15:00" --html r.html
++    python3 $GSDB_SKILLS_DIR/common/timing/cli.py --list                # 列出最近的提问,挑时间段用
++    加 --detail 出详细版:带思考原文、命令参数与工具输出(令牌、会话句柄、IP 自动遮掉),只在内部查看,不要外传。
++
++会话数据:默认找 $XDG_DATA_HOME/opencode 或 ~/.local/share/opencode(新版 opencode.db、旧版 storage/ 都认),或 --db 指定。
++GRMP 计时:默认读技能状态目录下的 logs/grmp-timing.log(v1.4.14 起技能自动写),或 --grmp-log 指定;没有时工具时间不拆分。
++"""
++from __future__ import annotations
++
++import argparse
++import datetime
++import pathlib
++import sys
++
++sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))     # 技能目录:让 common 可导入
++
++from common.timing import analysis, grmplog, render, store  # noqa: E402
++
++
++def _tz(offset: float) -> datetime.timezone:
++    return datetime.timezone(datetime.timedelta(hours=offset))
++
++
++def _when(text: str, tz: datetime.tzinfo) -> int:
++    for f in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
++        try:
++            return int(datetime.datetime.strptime(text, f).replace(tzinfo=tz).timestamp() * 1000)
++        except ValueError:
++            continue
++    raise SystemExit("时间格式不对:%r(写成 2026-11-16 14:00 或 2026-11-16 14:00:00)" % text)
++
++
++def _list(sessions, tz) -> str:
++    rows = []
++    for s in sessions:
++        if s.parent:
++            continue
++        for _, m, ps in s.messages:
++            if m.get("role") == "user":
++                txt = " ".join(p.get("text", "") for _, _, p in ps if p.get("type") == "text").strip().replace("\n", " ")
++                when = datetime.datetime.fromtimestamp(m["time"]["created"] / 1000, tz).strftime("%Y-%m-%d %H:%M:%S")
++                rows.append((m["time"]["created"], "%s  会话 %s  %s" % (when, s.id[:16], txt[:40])))
++    return "\n".join(r for _, r in sorted(rows)[-30:]) or "(没有提问记录)"
++
++
++def main(argv=None) -> int:
++    ap = argparse.ArgumentParser(description="交互耗时报告(纯脚本统计,不调模型)")
++    ap.add_argument("--db", help="opencode.db 或 opencode 数据目录(默认自动找)")
++    ap.add_argument("--grmp-log", help="GRMP 计时日志(默认技能状态目录下 logs/grmp-timing.log)")
++    ap.add_argument("--last", type=int, default=1, help="最近几次提问(默认 1)")
++    ap.add_argument("--since", help="起始时间,如 2026-11-16 14:00(给了时间段就忽略 --last)")
++    ap.add_argument("--until", help="截止时间")
++    ap.add_argument("--session", help="只看这个会话(会话 id 或前缀)")
++    ap.add_argument("--html", help="HTML 报告写到这个文件")
++    ap.add_argument("--text", help="文本报告写到这个文件(不给 --html 也不给 --text 时打到终端)")
++    ap.add_argument("--detail", action="store_true", help="详细版:带思考原文、命令参数与工具输出(只在内部查看)")
++    ap.add_argument("--list", action="store_true", help="列出最近 30 次提问")
++    ap.add_argument("--utc-offset", type=float, default=8, help="显示用的时区(相对 UTC 的小时数,默认 8 = 北京时间)")
++    a = ap.parse_args(argv)
++    tz = _tz(a.utc_offset)
++    try:
++        src = store.locate(a.db)
++        sessions = store.load(src)
++    except store.StoreError as exc:
++        print(exc, file=sys.stderr)
++        return 2
++    if a.list:
++        print(_list(sessions, tz))
++        return 0
++    gpath = pathlib.Path(a.grmp_log).expanduser() if a.grmp_log else grmplog.default_path()
++    grmp = grmplog.load(str(gpath))
++    qs, masked = analysis.questions(sessions, a.detail, grmp, tz, a.session,
++                                    _when(a.since, tz) if a.since else None, _when(a.until, tz) if a.until else None, a.last)
++    if not qs:
++        print("没有符合条件的提问(会话数据:%s)。用 --list 看看有哪些。" % src, file=sys.stderr)
++        return 1
++    meta = {"detail": a.detail, "generated": datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M"),
++            "source": "%s(%s)" % (src, "SQLite" if src.is_file() else "JSON 存储"),
++            "grmp_source": "%s,%d 条" % (gpath, len(grmp)) if grmp else "没有记录(%s 不存在或为空)" % gpath,
++            "has_grmp": bool(grmp), "masked": masked,
++            "masked_text": "、".join("%s %d 处" % kv for kv in masked.items()), "utc_offset": a.utc_offset}
++    txt = render.text(meta, qs)
++    if a.html:
++        pathlib.Path(a.html).write_text(render.html(meta, qs, txt), encoding="utf-8")
++        print("HTML 报告:%s(%d 次提问)" % (a.html, len(qs)))
++    if a.text:
++        pathlib.Path(a.text).write_text(txt + "\n", encoding="utf-8")
++        print("文本报告:%s" % a.text)
++    if not a.html and not a.text:
++        print(txt)
++    else:
++        for q in qs:
++            print("第 %d 问 %s 总 %s · %s" % (q["idx"], q["start"], analysis.fmt(q["total"]), q["diag"][0]["title"]))
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/common/timing/grmplog.py b/common/timing/grmplog.py
+new file mode 100644
+index 0000000..c8febc9
+--- /dev/null
++++ b/common/timing/grmplog.py
+@@ -0,0 +1,58 @@
++"""读 GRMP 计时日志(common/grmp/timing.py 写的 logs/grmp-timing.log 与滚动出的 .1),并把每条对到会话里的工具调用。"""
++from __future__ import annotations
++
++import json
++import pathlib
++from typing import List, Optional
++
++from ..grmp import timing
++
++SLACK_MS = 300      # 记录与工具调用起止的容差:两边各取各的时间,差几毫秒到几十毫秒是常态
++
++
++def default_path() -> pathlib.Path:
++    return timing.log_path()
++
++
++def load(path: Optional[str]) -> List[dict]:
++    """按时间排好的记录;每条加上 start / end(毫秒)。文件不在就返回空表(v1.4.14 之前没有这份日志)。"""
++    base = pathlib.Path(path).expanduser() if path else default_path()
++    out = []
++    for f in (base.with_name(base.name + ".1"), base):
++        try:
++            lines = f.read_text(encoding="utf-8").splitlines()
++        except OSError:
++            continue
++        for line in lines:
++            try:
++                rec = json.loads(line)
++                start = int(float(rec["ts"]) * 1000)
++                rec.update(start=start, end=start + int(rec.get("ms") or 0))
++            except (ValueError, KeyError, TypeError):
++                continue
++            out.append(rec)
++    return sorted(out, key=lambda r: r["start"])
++
++
++def _belongs(rec: dict, cmd: str) -> bool:
++    """调用方是技能脚本时,工具命令里要出现这个脚本名(并行的几个工具调用据此分开);调用方不是技能脚本就只看时间。"""
++    caller = str(rec.get("caller") or "")
++    if "/" not in caller:
++        return True
++    return caller.rsplit("/", 1)[1] in cmd
++
++
++def assign(records: List[dict], tools: List[dict]) -> None:
++    """把记录分给时间窗口能套住它的工具调用(tool:abs_s / abs_e 毫秒、cmd 命令原文);每条记录只分一次。
++    结果写进 tool["grmp_raw"]。"""
++    taken = set()
++    for t in sorted(tools, key=lambda t: t["abs_s"]):
++        t["grmp_raw"] = []
++        for k, rec in enumerate(records):
++            if k in taken or rec["start"] < t["abs_s"] - SLACK_MS:
++                continue
++            if rec["start"] > t["abs_e"] + SLACK_MS:
++                break
++            if rec["end"] <= t["abs_e"] + SLACK_MS and _belongs(rec, t["cmd_raw"]):
++                t["grmp_raw"].append(rec)
++                taken.add(k)
+diff --git a/common/timing/mask.py b/common/timing/mask.py
+new file mode 100644
+index 0000000..1e9de53
+--- /dev/null
++++ b/common/timing/mask.py
+@@ -0,0 +1,29 @@
++"""详细版里的遮蔽:令牌、口令、会话句柄、IP 一律遮掉;SQL 与表名保留(否则看不出模型在做什么)。"""
++from __future__ import annotations
++
++import collections
++import re
++
++_RULES = [
++    (re.compile(r"(--session[ =])([A-Za-z0-9]{6,})"), r"\1«会话句柄»", "会话句柄"),
++    (re.compile(r"(?<![\d.])(?:\d{1,3}[.-]){3}\d{1,3}(?!\d)"), "«IP»", "IP"),
++    (re.compile(r"\b([A-Z][A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD))=(\S+)"), r"\1=«已遮»", "令牌 / 口令"),
++    (re.compile(r"(?i)\b(token|api[_-]?key|appkey|password|passwd|secret)(\s*[:=]\s*)([^\s,'\"]{6,})"), r"\1\2«已遮»",
++     "令牌 / 口令"),
++    (re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9+/=._-]{12,}"), r"\1 «已遮»", "令牌 / 口令"),
++]
++
++
++class Masker:
++    def __init__(self) -> None:
++        self.count = collections.Counter()
++
++    def __call__(self, text: str, cap: int = 0) -> str:
++        text = text or ""
++        for rx, rep, label in _RULES:
++            text, n = rx.subn(rep, text)
++            if n:
++                self.count[label] += n
++        if cap and len(text) > cap:
++            text = text[:cap] + "\n…(后面还有 %d 字,报告只保留前 %d 字)" % (len(text) - cap, cap)
++        return text
+diff --git a/common/timing/render.py b/common/timing/render.py
+new file mode 100644
+index 0000000..b0cf092
+--- /dev/null
++++ b/common/timing/render.py
+@@ -0,0 +1,64 @@
++"""出报告:文本版(终端里看)与 HTML(浏览器里看,单文件、不联网、不引外部资源)。"""
++from __future__ import annotations
++
++import json
++import pathlib
++
++from .analysis import KIND_NAMES, fmt
++
++TEMPLATE = pathlib.Path(__file__).with_name("report.html")
++_LV = {"serious": "严重", "warning": "注意", "info": "提示", "good": "正常"}
++
++
++def text(meta: dict, qs: list) -> str:
++    L = ["智能体交互耗时报告（%s）" % ("详细版" if meta["detail"] else "摘要版"),
++         "生成于 %s · 会话数据 %s · GRMP 计时 %s" % (meta["generated"], meta["source"], meta["grmp_source"]), ""]
++    if meta["detail"]:
++        L.insert(2, "注:含思考原文、命令参数与工具输出,只在内部查看;已遮掉 %s。" % (meta["masked_text"] or "无"))
++    for q in qs:
++        T = q["totals"]
++        L.append("=" * 78)
++        L.append("第 %d 问  %s  「%s」" % (q["idx"], q["start"], q["text"]))
++        L.append("总时长 %s | 模型 %d 轮 | 工具 %d 次 | GRMP %d 次%s | 上下文 %.1fK → %.1fK token | 模型 %s"
++                 % (fmt(q["total"]), q["rounds_n"], q["tools_n"], q["grmp_n"],
++                    "(失败 %d)" % q["grmp_fail"] if q["grmp_fail"] else "", q["ctx_first"] / 1000, q["ctx_peak"] / 1000, q["model"]))
++        for k in ("ttft", "gen", "grmp", "local", "idle"):
++            share = T[k] / q["total"] * 100 if q["total"] else 0
++            L.append("  %-16s %10s  %5.1f%%  %s" % (KIND_NAMES[k], fmt(T[k]), share, "#" * int(round(share / 2.5))))
++        L.append("结论:")
++        L += ["  [%s] %s:%s" % (_LV[d["lvl"]], d["title"], d["detail"]) for d in q["diag"]]
++        if q["grmp_scripts"]:
++            L.append("GRMP 调用(按总用时):")
++            L += ["  %-34s %3d 次  %10s%s" % (g["name"], g["n"], fmt(g["secs"]), "  失败 %d" % g["fail"] if g["fail"] else "")
++                  for g in q["grmp_scripts"][:10]]
++        L.append("最慢 10 段:")
++        L += ["  %2d. 第 %2d 轮  %-30s %10s  %4.1f%%" % (n, s["round"], s["what"][:30], fmt(s["secs"]), s["share"] * 100)
++              for n, s in enumerate(q["slow"], 1)]
++        L.append("最慢 3 轮:")
++        for r in sorted(q["rounds"], key=lambda r: -(r["end"] - r["t"]))[:3]:
++            L.append("  ── 第 %d 轮  %s  等首字 %.2f | 思考 %.1f 秒 %d token | 输出 %d token | 工具 %.2f(GRMP %.2f)"
++                     % (r["i"], fmt(r["end"] - r["t"]), r["ttft"], r["think"]["secs"], r["rsn"], r["out"],
++                        r["grmp"] + r["local"], r["grmp"]))
++            L += ["     为什么:" + w for w in r["why"]]
++            if meta["detail"]:
++                for p in r["think"]["parts"][:1]:
++                    L.append("     思考:" + p["text"][:240].replace("\n", " ") + ("…" if p["chars"] > 240 else ""))
++            for t in r["tools"]:
++                if meta["detail"]:
++                    L.append("     命令:" + t["cmd"][:240].replace("\n", " ⏎ ") + ("…" if t["cmd_chars"] > 240 else ""))
++                L.append("     %s:退出码 %s,输出 %d 字 / %d 行%s" % (t["label"], "—" if t["exit"] is None else t["exit"], t["out_chars"], t["out_lines"],
++                                                             ",被截断" if t["truncated"] else ""))
++                L += ["       GRMP %-28s %-8s %8.2f 秒  %s 行%s" % (g["name"], g["db"], g["e"] - g["s"], g["rows"],
++                                                               "" if g["ok"] else "  失败 " + g["status"]) for g in t["grmp"]]
++        L.append("每轮明细:  轮   开始    等首字  思考输出   工具   其中GRMP   空档   上下文  动作")
++        L += ["          %3d %7.1f %7.2f %8.2f %7.2f %8.2f %7.2f %7.1fK  %s"
++              % (r["i"], r["t"], r["ttft"], r["gen"], r["grmp"] + r["local"], r["grmp"], r["idle"], r["ctx"] / 1000, r["act"])
++              for r in q["rounds"]]
++        L.append("")
++    return "\n".join(L)
++
++
++def html(meta: dict, qs: list, text_version: str) -> str:
++    data = {"meta": meta, "questions": qs, "text": text_version}
++    blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
++    return TEMPLATE.read_text(encoding="utf-8").replace("__DATA__", blob)
+diff --git a/common/timing/report.html b/common/timing/report.html
+new file mode 100644
+index 0000000..14a5979
+--- /dev/null
++++ b/common/timing/report.html
+@@ -0,0 +1,635 @@
++<!doctype html>
++<html lang="zh-CN">
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1">
++<title>智能体交互耗时报告</title>
++<style>
++.viz-root {
++  color-scheme: light;
++  --page: #f9f9f7; --surface-1: #fcfcfb; --ink-1: #0b0b0b; --ink-2: #52514e; --ink-3: #898781;
++  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
++  --k1: #2a78d6; --k2: #eb6834; --k3: #1baf7a; --k4: #eda100; --k0: #c3c2b7;
++  --neutral: #52514e;
++  --serious: #ec835a; --warning: #fab219; --good: #0ca30c; --info: #898781;
++  --sim: rgba(237,161,0,0.10); --codebg: #f3f2ee;
++}
++@media (prefers-color-scheme: dark) {
++  :root:where(:not([data-theme="light"])) .viz-root {
++    color-scheme: dark;
++    --page: #0d0d0d; --surface-1: #1a1a19; --ink-1: #f0efec; --ink-2: #c3c2b7; --ink-3: #898781;
++    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
++    --k1: #3987e5; --k2: #d95926; --k3: #199e70; --k4: #c98500; --k0: #5a5955;
++    --neutral: #c3c2b7; --sim: rgba(201,133,0,0.14); --codebg: #111110;
++  }
++}
++* { box-sizing: border-box; }
++body { margin: 0; }
++.viz-root { background: var(--page); color: var(--ink-1); min-height: 100vh;
++  font: 14px/1.55 system-ui, -apple-system, "PingFang SC", "Segoe UI", sans-serif; padding: 28px 0 60px; }
++.wrap { max-width: 1240px; margin: 0 auto; padding: 0 28px; }
++h1 { font-size: 22px; margin: 0 0 4px; font-weight: 600; }
++h2 { font-size: 16px; margin: 0 0 4px; font-weight: 600; }
++h3 { font-size: 13px; margin: 0; font-weight: 600; }
++.sub { color: var(--ink-2); font-size: 13px; }
++.muted { color: var(--ink-3); }
++.card { background: var(--surface-1); border: 1px solid var(--ring); border-radius: 10px; padding: 18px 20px; margin-top: 16px; }
++.card .hint { color: var(--ink-3); font-size: 12px; margin-bottom: 12px; }
++.banner { margin-top: 10px; padding: 9px 14px; border-radius: 8px; background: var(--sim); color: var(--ink-2); font-size: 13px; border: 1px solid var(--ring); }
++.banner b { color: var(--ink-1); }
++.banner.lock { background: color-mix(in srgb, var(--serious) 12%, transparent); }
++table { border-collapse: collapse; width: 100%; font-size: 13px; }
++th { text-align: left; font-weight: 500; color: var(--ink-3); border-bottom: 1px solid var(--axis); padding: 6px 8px; white-space: nowrap; }
++td { border-bottom: 1px solid var(--grid); padding: 6px 8px; vertical-align: top; }
++td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
++tr.pick { cursor: pointer; }
++tr.pick:hover td { background: var(--grid); }
++tr.pick.on td { background: color-mix(in srgb, var(--k1) 9%, transparent); }
++.thin { display: flex; gap: 2px; height: 8px; width: 220px; }
++.thin span { display: block; height: 8px; border-radius: 4px; min-width: 2px; }
++.tabs { display: flex; gap: 6px; margin-top: 22px; flex-wrap: wrap; align-items: center; }
++.tabs button { font: inherit; font-size: 13px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--axis);
++  background: var(--surface-1); color: var(--ink-2); cursor: pointer; }
++.tabs button.on { background: var(--ink-1); color: var(--surface-1); border-color: var(--ink-1); }
++.tabs .sep { width: 1px; height: 20px; background: var(--axis); margin: 0 6px; }
++.hero { display: flex; gap: 28px; align-items: flex-end; flex-wrap: wrap; }
++.hero .big { font-size: 52px; font-weight: 600; line-height: 1; }
++.hero .big small { font-size: 18px; font-weight: 500; color: var(--ink-2); margin-left: 6px; }
++.tiles { display: flex; gap: 26px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--grid); }
++.tile { min-width: 120px; }
++.tile .l { color: var(--ink-3); font-size: 12px; }
++.tile .v { font-size: 22px; font-weight: 600; }
++.tile .v.s { font-size: 17px; }
++.tile .v small { font-size: 12px; color: var(--ink-3); font-weight: 400; margin-left: 4px; }
++.qfull { margin: 2px 0 14px; padding: 8px 12px; border-left: 3px solid var(--axis); color: var(--ink-1); background: var(--page); border-radius: 0 6px 6px 0; }
++.diag { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 10px; }
++.diag .d { border: 1px solid var(--ring); border-radius: 8px; padding: 10px 12px; display: flex; gap: 10px; }
++.diag .ic { flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 13px; color: #0b0b0b; }
++.diag .t { font-weight: 600; }
++.diag .lv { font-size: 12px; color: var(--ink-3); margin-left: 6px; font-weight: 400; }
++.diag .x { color: var(--ink-2); font-size: 13px; }
++a.go { color: var(--k1); cursor: pointer; text-decoration: none; font-size: 13px; white-space: nowrap; }
++a.go:hover { text-decoration: underline; }
++.tall { display: flex; gap: 2px; height: 28px; margin: 6px 0 10px; }
++.tall div { height: 28px; border-radius: 4px; color: #fff; font-size: 12px; line-height: 28px; padding-left: 8px; white-space: nowrap; overflow: visible; min-width: 2px; }
++.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--ink-2); }
++.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
++.legend .v { color: var(--ink-1); font-variant-numeric: tabular-nums; margin-left: 4px; }
++.legend .s { color: var(--ink-3); margin-left: 3px; }
++.tag-sim { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 4px; background: var(--sim); color: var(--ink-2); border: 1px solid var(--ring); margin-left: 6px; font-weight: 400; }
++svg text { fill: var(--ink-3); font-size: 11px; font-family: inherit; }
++svg .gl { stroke: var(--grid); stroke-width: 1; }
++svg .ax { stroke: var(--axis); stroke-width: 1; }
++svg .hit { fill: transparent; cursor: pointer; }
++svg rect.m.hl, svg path.m.hl { filter: brightness(1.15); }
++.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
++@media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
++.bars .b { display: grid; grid-template-columns: 110px 1fr 150px; align-items: center; gap: 10px; margin: 6px 0; font-size: 13px; }
++.bars .track { height: 14px; }
++.bars .fill { height: 14px; border-radius: 0 4px 4px 0; background: var(--neutral); }
++.bars .val { color: var(--ink-2); font-variant-numeric: tabular-nums; }
++.sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: 0; }
++details > summary { cursor: pointer; }
++pre.text { font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre; overflow-x: auto; margin: 0; color: var(--ink-1); }
++/* 逐轮详情 */
++.rd { border-top: 1px solid var(--grid); }
++.rd > summary { display: grid; grid-template-columns: 64px 260px 74px minmax(0, 1fr); gap: 14px; align-items: center; padding: 9px 6px; list-style: none; }
++.rd > summary::-webkit-details-marker { display: none; }
++.rd > summary:hover { background: var(--grid); }
++.rd[open] > summary { background: color-mix(in srgb, var(--k1) 7%, transparent); }
++.rd .no { font-weight: 600; white-space: nowrap; }
++.rd .no::before { content: "▸ "; color: var(--ink-3); }
++.rd[open] .no::before { content: "▾ "; }
++.rd .tm { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
++.rd .act { min-width: 0; }
++.rd .act .a { font-size: 13px; }
++.chips { margin-top: 2px; }
++.chips span { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--page); border: 1px solid var(--ring); color: var(--ink-2); margin: 2px 6px 2px 0; display: inline-block; }
++.mbar { display: flex; gap: 2px; height: 10px; }
++.mbar span { height: 10px; border-radius: 3px; min-width: 2px; }
++.rbody { padding: 10px 6px 20px 84px; display: grid; gap: 12px; }
++.kv { display: flex; flex-wrap: wrap; gap: 4px 22px; font-size: 13px; color: var(--ink-2); }
++.kv b { color: var(--ink-1); font-weight: 600; font-variant-numeric: tabular-nums; }
++.blk { border: 1px solid var(--ring); border-radius: 8px; padding: 10px 12px; background: var(--surface-1); }
++.blk .hd { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 6px; }
++.blk .hd .meta { color: var(--ink-3); font-size: 12px; }
++.blk .lab { color: var(--ink-3); font-size: 12px; margin-top: 8px; }
++pre.code { font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; background: var(--codebg); border: 1px solid var(--grid); border-radius: 6px;
++  padding: 8px 10px; max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 4px 0 0; color: var(--ink-1); }
++pre.code.tall2 { max-height: 520px; }
++.more { font-size: 12px; color: var(--k1); cursor: pointer; margin-top: 4px; display: inline-block; }
++.gtab td, .gtab th { padding: 4px 8px; font-size: 12.5px; }
++.flash > summary { animation: flash 1.6s ease-out; }
++@keyframes flash { from { background: color-mix(in srgb, var(--k1) 28%, transparent); } to { background: transparent; } }
++#tip { position: fixed; pointer-events: none; background: var(--surface-1); color: var(--ink-1); border: 1px solid var(--ring);
++  box-shadow: 0 4px 16px rgba(0,0,0,0.12); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; min-width: 180px; max-width: 420px; display: none; z-index: 9; }
++#tip .tv { font-weight: 600; font-size: 14px; }
++#tip .tr { display: flex; align-items: center; gap: 8px; margin-top: 2px; color: var(--ink-2); }
++#tip .tr .lk { width: 12px; height: 3px; border-radius: 2px; flex: 0 0 auto; }
++#tip .tr .vv { color: var(--ink-1); font-variant-numeric: tabular-nums; margin-left: auto; padding-left: 12px; white-space: nowrap; }
++#tip .hint2 { color: var(--ink-3); margin-top: 6px; font-size: 12px; }
++.foot { margin-top: 22px; color: var(--ink-3); font-size: 12px; }
++.foot li { margin: 2px 0; }
++</style>
++</head>
++<body>
++<div class="viz-root">
++<div class="wrap" id="app"></div>
++<div id="tip"></div>
++</div>
++<script type="application/json" id="data">__DATA__</script>
++<script>
++(() => {
++  const D = JSON.parse(document.getElementById('data').textContent);
++  const M = D.meta, Q = D.questions;
++  const SPLIT = !M.has_grmp;          // 没有 GRMP 计时日志:工具时间没拆分,两段标「未拆分」
++  const KINDS = [
++    { k: 'ttft', n: '模型·等首字', c: 'var(--k1)' },
++    { k: 'gen', n: '模型·思考与输出', c: 'var(--k2)' },
++    { k: 'grmp', n: '工具·GRMP 与数据库', c: 'var(--k3)', sim: SPLIT },
++    { k: 'local', n: '工具·脚本本地', c: 'var(--k4)', sim: SPLIT },
++    { k: 'idle', n: '运行时空档', c: 'var(--k0)' },
++  ];
++  const KMAP = Object.fromEntries(KINDS.map(k => [k.k, k]));
++  const INK_ON = { ttft: '#fff', gen: '#fff', grmp: '#fff', local: '#0b0b0b', idle: '#0b0b0b' };
++  const SVGNS = 'http://www.w3.org/2000/svg';
++  const app = document.getElementById('app');
++  const tip = document.getElementById('tip');
++
++  // ---------- 小工具(所有数据文字一律 textContent) ----------
++  function el(tag, attrs, ...kids) {
++    const e = document.createElement(tag);
++    for (const [a, v] of Object.entries(attrs || {})) {
++      if (v == null) continue;
++      if (a === 'class') e.className = v; else if (a === 'style') e.style.cssText = v;
++      else if (a.startsWith('on')) e.addEventListener(a.slice(2), v); else e.setAttribute(a, v);
++    }
++    for (const k of kids.flat()) if (k != null && k !== false) e.append(k instanceof Node ? k : document.createTextNode(String(k)));
++    return e;
++  }
++  function sv(tag, attrs, ...kids) {
++    const e = document.createElementNS(SVGNS, tag);
++    for (const [a, v] of Object.entries(attrs || {})) e.setAttribute(a, v);
++    for (const k of kids) if (k != null) e.append(k instanceof Node ? k : document.createTextNode(String(k)));
++    return e;
++  }
++  const fmt = s => s >= 120 ? `${Math.floor(s / 60)} 分 ${Math.round(s % 60)} 秒` : (s < 1 ? `${s.toFixed(2)} 秒` : `${s.toFixed(1)} 秒`);
++  const pct = (a, b) => b ? `${(a / b * 100).toFixed(a / b < 0.1 ? 1 : 0)}%` : '0%';
++  const kTok = n => n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
++  const num = n => Number(n).toLocaleString('zh-CN');
++  const spd = v => v ? `${Math.round(v)} token/秒` : '—';
++  function niceStep(max, n) {
++    const raw = max / n, p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p;
++    return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
++  }
++  function showTip(ev, title, value, rows, hint) {
++    tip.replaceChildren(el('div', { class: 'muted' }, title), el('div', { class: 'tv' }, value),
++      ...(rows || []).map(r => el('div', { class: 'tr' }, el('span', { class: 'lk', style: `background:${r.c || 'var(--ink-3)'}` }), r.n, el('span', { class: 'vv' }, r.v))),
++      hint ? el('div', { class: 'hint2' }, hint) : null);
++    tip.style.display = 'block';
++    const x = Math.min(ev.clientX + 14, innerWidth - tip.offsetWidth - 8), y = Math.min(ev.clientY + 14, innerHeight - tip.offsetHeight - 8);
++    tip.style.left = x + 'px'; tip.style.top = y + 'px';
++  }
++  const hideTip = () => { tip.style.display = 'none'; };
++  function hover(node, fn) {
++    node.addEventListener('pointermove', e => fn(e));
++    node.addEventListener('pointerleave', hideTip);
++    node.setAttribute('tabindex', '0');
++    node.addEventListener('focus', () => { const r = node.getBoundingClientRect(); fn({ clientX: r.right, clientY: r.top }); });
++    node.addEventListener('blur', hideTip);
++  }
++  // 一轮里各段时长(按类型合计)
++  function roundKinds(r) {
++    const o = { idle: r.idle, ttft: r.ttft, gen: r.gen, grmp: r.grmp, local: r.local };
++    return KINDS.map(k => ({ ...k, v: o[k.k] || 0 }));
++  }
++  const roundOwn = r => r.end - r.t + r.idle;
++
++  // ---------- 页头 ----------
++  const maskTxt = M.masked_text || '无';
++  const tzTxt = M.utc_offset === 8 ? '北京时间' : `UTC${M.utc_offset >= 0 ? '+' : ''}${M.utc_offset}`;
++  app.append(
++    el('h1', {}, '智能体交互耗时报告', el('span', { class: 'muted', style: 'font-size:15px;font-weight:400;margin-left:10px' }, M.detail ? '详细版' : '摘要版')),
++    el('div', { class: 'sub' }, `${Q.length} 次提问 · 生成于 ${M.generated}（${tzTxt}）· 纯脚本统计，不调模型`),
++    el('div', { class: 'sub' }, `会话数据：${M.source} · GRMP 计时：${M.grmp_source}`),
++    M.detail
++      ? el('div', { class: 'banner lock' }, el('b', {}, '详细版含思考原文、命令参数与工具输出，只在内部查看，不要外传。'),
++          `已自动遮掉：${maskTxt}。SQL 与表名保留，否则看不出在做什么。不加 --detail 出的是摘要版，不含这些内容。`)
++      : el('div', { class: 'banner' }, el('b', {}, '摘要版：'), '只有时间、技能与脚本名、token 数、GRMP 调用统计，不含思考原文、命令参数与工具输出。需要看每一步具体在做什么时，加 --detail 生成详细版（只在内部查看）。'),
++    ...(SPLIT ? [el('div', { class: 'banner' }, el('b', {}, '没有 GRMP 计时记录：'), '工具时间没有拆成「GRMP 与数据库 / 脚本本地」（标「未拆分」）。v1.4.14 起技能每次调用 GRMP 都会自动记录，之后的提问就有拆分。')] : []),
++  );
++
++  // ---------- 全部提问 ----------
++  const listCard = el('div', { class: 'card' }, el('h2', {}, '全部提问'),
++    el('div', { class: 'hint' }, '点一行看这次提问的明细。时间构成条：蓝 等首字 · 橙 思考与输出 · 绿 GRMP 与数据库 · 黄 脚本本地 · 灰 空档'));
++  const tb = el('tbody');
++  listCard.append(el('table', {}, el('thead', {}, el('tr', {},
++    el('th', {}, '#'), el('th', {}, '提问时间'), el('th', {}, '问题（前 40 字）'), el('th', { class: 'num' }, '总时长'),
++    el('th', { class: 'num' }, '模型轮数'), el('th', { class: 'num' }, '工具次数'), el('th', {}, '时间构成'), el('th', {}, '主要慢在'))), tb));
++  app.append(listCard);
++  const rows = Q.map((q, i) => {
++    const thin = el('div', { class: 'thin' }, KINDS.filter(k => q.totals[k.k] > 0).map(k =>
++      el('span', { style: `flex:${q.totals[k.k]};background:${k.c}` })));
++    const tr = el('tr', { class: 'pick', onclick: () => select(i) },
++      el('td', {}, q.idx), el('td', { class: 'num', style: 'text-align:left' }, q.start), el('td', {}, q.text),
++      el('td', { class: 'num' }, fmt(q.total)), el('td', { class: 'num' }, q.rounds_n), el('td', { class: 'num' }, q.tools_n),
++      el('td', {}, thin), el('td', {}, q.diag[0].title));
++    hover(thin, e => showTip(e, `第 ${q.idx} 问 · 时间构成`, fmt(q.total),
++      KINDS.map(k => ({ c: k.c, n: k.n + (k.sim ? '（未拆分）' : ''), v: `${fmt(q.totals[k.k])} · ${pct(q.totals[k.k], q.total)}` }))));
++    tb.append(tr);
++    return tr;
++  });
++
++  const tabs = el('div', { class: 'tabs' });
++  const detail = el('div');
++  app.append(tabs, detail);
++  const tabBtns = Q.map((q, i) => el('button', { onclick: () => select(i) }, `第 ${q.idx} 问`));
++  const txtBtn = el('button', { onclick: () => select(-1) }, '文本版');
++  tabs.append(...tabBtns, el('span', { class: 'sep' }), txtBtn);
++
++  let current = null;
++  function select(i, roundNo) {
++    hideTip();
++    rows.forEach((r, j) => r.classList.toggle('on', j === i));
++    tabBtns.forEach((b, j) => b.classList.toggle('on', j === i));
++    txtBtn.classList.toggle('on', i === -1);
++    current = i;
++    detail.replaceChildren(...(i === -1 ? [textView()] : renderQuestion(Q[i])));
++    if (i >= 0) {
++      const q = Q[i];
++      const target = roundNo || q.rounds.reduce((a, r) => roundOwn(r) > roundOwn(a) ? r : a, q.rounds[0]).i;
++      openRound(target, !!roundNo);
++    }
++  }
++  function openRound(no, scroll = true) {
++    const d = document.getElementById(`r${no}`);
++    if (!d) return;
++    d.open = true;
++    if (scroll) {
++      d.scrollIntoView({ behavior: 'smooth', block: 'start' });
++      d.classList.remove('flash'); void d.offsetWidth; d.classList.add('flash');
++    }
++  }
++  const goRound = no => el('a', { class: 'go', onclick: e => { e.stopPropagation(); openRound(no); } }, `看第 ${no} 轮 →`);
++
++  function textView() {
++    return el('div', { class: 'card' }, el('h2', {}, '文本版'),
++      el('div', { class: 'hint' }, '与 HTML 同一份数据，运维在终端里直接看（--text 输出的就是这一段；加 --detail 才带思考与命令）。'),
++      el('pre', { class: 'text' }, D.text));
++  }
++
++  // ---------- 单次提问 ----------
++  function renderQuestion(q) {
++    const T = q.totals, model = T.ttft + T.gen, tk = q.tok;
++    const ctxAll = tk.in + tk.read + tk.write;
++    const out = [];
++    const lv = { serious: ['!', 'var(--serious)', '严重'], warning: ['!', 'var(--warning)', '注意'], info: ['i', 'var(--info)', '提示'], good: ['✓', 'var(--good)', '正常'] };
++    out.push(el('div', { class: 'card' },
++      el('div', { class: 'sub', style: 'margin-bottom:4px' }, `第 ${q.idx} 问 · ${q.start} · 模型 ${q.model}`),
++      el('div', { class: 'qfull' }, q.full),
++      el('div', { class: 'hero' },
++        el('div', {}, el('div', { class: 'tile' }, el('div', { class: 'l' }, '总时长')),
++          el('div', { class: 'big' }, fmt(q.total), q.total >= 120 ? el('small', {}, `${q.total.toFixed(1)} 秒`) : null)),
++        el('div', { class: 'tile' }, el('div', { class: 'l' }, '模型轮数'), el('div', { class: 'v' }, q.rounds_n, el('small', {}, `平均每轮 ${fmt(model / q.rounds_n)}`))),
++        el('div', { class: 'tile' }, el('div', { class: 'l' }, '工具调用'), el('div', { class: 'v' }, q.tools_n, el('small', {}, `共 ${fmt(T.grmp + T.local)}`))),
++        el('div', { class: 'tile' }, el('div', { class: 'l' }, 'GRMP 调用'), el('div', { class: 'v' }, q.grmp_n, el('small', {}, SPLIT ? '无计时记录' : `共 ${fmt(T.grmp)}${q.grmp_fail ? ` · 失败 ${q.grmp_fail}` : ''}`))),
++        el('div', { class: 'tile' }, el('div', { class: 'l' }, '每轮上下文（token）'), el('div', { class: 'v' }, `${kTok(q.ctx_first)} → ${kTok(q.ctx_peak)}`))),
++      el('div', { class: 'tiles' },
++        el('div', { class: 'tile' }, el('div', { class: 'l' }, '发给模型的 token 合计'), el('div', { class: 'v s' }, num(ctxAll))),
++        el('div', { class: 'tile' }, el('div', { class: 'l' }, '其中缓存命中'), el('div', { class: 'v s' }, num(tk.read), el('small', {}, pct(tk.read, ctxAll)))),
++        el('div', { class: 'tile' }, el('div', { class: 'l' }, '未命中（新输入）'), el('div', { class: 'v s' }, num(tk.in + tk.write))),
++        el('div', { class: 'tile' }, el('div', { class: 'l' }, '模型思考 token'), el('div', { class: 'v s' }, num(tk.rsn))),
++        el('div', { class: 'tile' }, el('div', { class: 'l' }, '模型输出 token'), el('div', { class: 'v s' }, num(tk.out))),
++        el('div', { class: 'tile' }, el('div', { class: 'l' }, '生成速度（中位）'), el('div', { class: 'v s' }, spd(q.speed_median)))),
++      el('h2', { style: 'margin-top:20px' }, '慢在哪'),
++      el('div', { class: 'diag', style: 'margin-top:8px' }, q.diag.map(d => el('div', { class: 'd' },
++        el('div', { class: 'ic', style: `background:${lv[d.lvl][1]}` }, lv[d.lvl][0]),
++        el('div', {}, el('div', { class: 't' }, d.title, el('span', { class: 'lv' }, lv[d.lvl][2])),
++          el('div', { class: 'x' }, d.detail), d.round ? goRound(d.round) : null)))),
++    ));
++
++    // 时间构成
++    const tall = el('div', { class: 'tall', role: 'img', 'aria-label': '时间构成：' + KINDS.map(k => `${k.n} ${fmt(T[k.k])}`).join('，') });
++    KINDS.filter(k => T[k.k] > 0).forEach(k => {
++      const share = T[k.k] / q.total;
++      const blk = el('div', { style: `flex:${T[k.k]};background:${k.c};color:${INK_ON[k.k]}` }, share >= 0.07 ? pct(T[k.k], q.total) : '');
++      hover(blk, e => showTip(e, k.n + (k.sim ? '（未拆分）' : ''), fmt(T[k.k]), [{ c: k.c, n: '占这次提问', v: pct(T[k.k], q.total) }]));
++      tall.append(blk);
++    });
++    out.push(el('div', { class: 'card' }, el('h2', {}, '时间构成'),
++      el('div', { class: 'hint' }, '一次提问 = 若干轮「模型想 → 调工具」。模型两段、工具两段、加上运行时空档，合起来就是总时长。'),
++      tall,
++      el('div', { class: 'legend' }, KINDS.map(k => el('span', {}, el('i', { style: `background:${k.c}` }), k.n,
++        k.sim ? el('span', { class: 'tag-sim' }, '未拆分') : null, el('span', { class: 'v' }, fmt(T[k.k])), el('span', { class: 's' }, pct(T[k.k], q.total)))))));
++
++    out.push(el('div', { class: 'card' }, el('h2', {}, '时间轴'),
++      el('div', { class: 'hint' }, '每一行是一轮，横轴是从提问开始经过的秒数。悬停看这一轮的分段；点一下展开这一轮的详情（在下面「逐轮详情」里）。'),
++      el('div', { class: 'legend', style: 'margin-bottom:6px' }, KINDS.map(k => el('span', {}, el('i', { style: `background:${k.c}` }), k.n))),
++      gantt(q)));
++
++    out.push(el('div', { class: 'two' },
++      el('div', { class: 'card' }, el('h2', {}, '每轮模型用时'),
++        el('div', { class: 'hint' }, '等首字 + 思考与输出，单位秒；点柱子看那一轮'),
++        el('div', { class: 'legend', style: 'margin-bottom:4px' }, [KMAP.ttft, KMAP.gen].map(k => el('span', {}, el('i', { style: `background:${k.c}` }), k.n))),
++        perRoundColumns(q)),
++      el('div', { class: 'card' }, el('h2', {}, '每轮发给模型的上下文'),
++        el('div', { class: 'hint' }, '输入 + 缓存命中，单位 token；每轮都要整段重发'),
++        ctxLine(q))));
++
++    const maxC = Math.max(...q.cats.map(c => c.secs));
++    out.push(el('div', { class: 'two' },
++      el('div', { class: 'card' }, el('h2', {}, '生成量与用时'),
++        el('div', { class: 'hint' }, `每个点是一轮：横轴 = 思考 + 输出 token，纵轴 = 思考与输出用时。斜线是本问的中位速度（${spd(q.speed_median)}）。贴着斜线 = 速度正常、慢是因为写得多；远高于斜线 = 这一轮模型服务变慢。`),
++        scatter(q)),
++      el('div', { class: 'card' }, el('h2', {}, '这些轮都在干什么'),
++        el('div', { class: 'hint' }, '按每轮调用的工具归类；条长是这些轮自身用时（模型 + 工具）'),
++        el('div', { class: 'bars' }, q.cats.map(c => {
++          const b = el('div', { class: 'b' }, el('div', {}, c.name), el('div', { class: 'track' }, el('div', { class: 'fill', style: `width:${Math.max(1, c.secs / maxC * 100)}%` })),
++            el('div', { class: 'val' }, `${c.n} 轮 · ${fmt(c.secs)}`));
++          hover(b, e => showTip(e, c.name, fmt(c.secs), [{ n: '轮数', v: c.n }, { n: '占这次提问', v: pct(c.secs, q.total) }]));
++          return b;
++        })))));
++
++    out.push(el('div', { class: 'card' }, el('h2', {}, '最慢的 10 段'),
++      el('div', { class: 'hint' }, '点一行展开那一轮的详情'),
++      el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, '轮'), el('th', {}, '这一段'), el('th', { class: 'num' }, '用时'), el('th', { class: 'num' }, '占比'), el('th', {}, '这一轮为什么慢'))),
++        el('tbody', {}, q.slow.map(s => {
++          const r = q.rounds[s.round - 1];
++          return el('tr', { class: 'pick', onclick: () => openRound(s.round) },
++            el('td', { class: 'num', style: 'text-align:left' }, s.round),
++            el('td', {}, el('span', { class: 'sw', style: `background:${KMAP[s.k].c}` }), s.what,
++              s.cat ? el('span', { class: 'muted' }, ` · ${s.cat}`) : el('span', { class: 'muted' }, ` → ${r.act}`)),
++            el('td', { class: 'num' }, fmt(s.secs)), el('td', { class: 'num' }, pct(s.secs, q.total)),
++            el('td', { class: 'muted' }, r.why.join('；')));
++        })))));
++
++    if (q.grmp_scripts.length) {
++      const maxG = Math.max(...q.grmp_scripts.map(g => g.secs)) || 1;
++      out.push(el('div', { class: 'card' }, el('h2', {}, 'GRMP 调用（按总用时）'),
++        el('div', { class: 'hint' }, `共 ${q.grmp_n} 次、${fmt(T.grmp)}；含中间件验签与数据库执行。同一条登记脚本调了几次就合在一行。`),
++        el('div', { class: 'bars' }, q.grmp_scripts.slice(0, 15).map(g => {
++          const b = el('div', { class: 'b', style: 'grid-template-columns: 220px 1fr 200px' }, el('div', {}, g.name),
++            el('div', { class: 'track' }, el('div', { class: 'fill', style: `width:${Math.max(1, g.secs / maxG * 100)}%;background:var(--k3)` })),
++            el('div', { class: 'val' }, `${g.n} 次 · ${fmt(g.secs)}${g.fail ? ` · 失败 ${g.fail}` : ''}`));
++          hover(b, e => showTip(e, g.name, fmt(g.secs), [{ n: '次数', v: g.n }, { n: '平均', v: fmt(g.secs / g.n) }, { n: '返回行数合计', v: num(g.rows) }, { n: '失败', v: g.fail }]));
++          return b;
++        }))));
++    }
++    out.push(roundList(q));
++
++    out.push(el('div', { class: 'card' }, el('details', {},
++      el('summary', { class: 'sub' }, `每轮明细（${q.rounds_n} 行，表格；点一行跳到详情）`),
++      el('table', { style: 'margin-top:10px' }, el('thead', {}, el('tr', {},
++        ...['轮', '开始（秒）', '等首字', '思考', '输出', '工具', '其中 GRMP', '空档', '上下文', '思考 token', '输出 token', '速度', '动作'].map((h, i) => el('th', { class: i && i < 12 ? 'num' : '' }, h)))),
++        el('tbody', {}, q.rounds.map(r => el('tr', { class: 'pick', onclick: () => openRound(r.i) },
++          el('td', {}, r.i), el('td', { class: 'num' }, r.t.toFixed(1)), el('td', { class: 'num' }, r.ttft.toFixed(2)),
++          el('td', { class: 'num' }, r.think.secs.toFixed(2)), el('td', { class: 'num' }, r.outp.secs.toFixed(2)),
++          el('td', { class: 'num' }, (r.grmp + r.local).toFixed(2)), el('td', { class: 'num' }, r.grmp.toFixed(2)), el('td', { class: 'num' }, r.idle.toFixed(2)),
++          el('td', { class: 'num' }, kTok(r.ctx)), el('td', { class: 'num' }, num(r.rsn)), el('td', { class: 'num' }, num(r.out)),
++          el('td', { class: 'num' }, r.speed ? Math.round(r.speed) : '—'), el('td', {}, r.act))))))));
++
++    out.push(el('ul', { class: 'foot' },
++      el('li', {}, '等首字：这一轮开始（运行时发出模型请求），到模型返回第一个字（思考或正文）；含运行时拼上下文、网络与模型服务排队。'),
++      el('li', {}, '思考：模型思考片段的起止时间；输出：思考结束到把这一轮的工具参数写完（最后一轮是写完回答）。速度 =（思考 + 输出 token）÷ 思考与输出用时。'),
++      el('li', {}, '工具：技能脚本或命令从启动到退出（会话库）。GRMP 与数据库：技能每次调 GRMP 的往返用时（logs/grmp-timing.log，含中间件验签与数据库执行），一次一条；工具里其余时间算脚本本地。'),
++      el('li', {}, '空档：上一轮结束到下一轮开始，运行时自己的开销（落库、拼上下文）。'),
++      el('li', {}, '原文上限（详细版）：思考 12000 字、正文 8000 字、命令 6000 字、输出 8000 字，超出部分注明省略了多少。'),
++      el('li', {}, '本报告由脚本按固定规则统计生成，不调用模型；同一份数据重复生成结果完全一致。')));
++    return out;
++  }
++
++  // ---------- 逐轮详情 ----------
++  function roundList(q) {
++    const maxOwn = Math.max(...q.rounds.map(roundOwn));
++    const card = el('div', { class: 'card' }, el('h2', {}, '逐轮详情'),
++      el('div', { class: 'hint' }, '每一轮：时间拆分 → 模型想了什么（思考原文）、说了什么（正文）→ 执行了什么（完整命令与参数）、结果如何（退出码、输出）→ 每一次 GRMP 调用。默认展开最慢的一轮。'));
++    q.rounds.forEach(r => {
++      const kinds = roundKinds(r);
++      const bar = el('div', { class: 'mbar', style: `width:${Math.max(4, roundOwn(r) / maxOwn * 100)}%` },
++        kinds.filter(k => k.v > 0.001).map(k => el('span', { style: `flex:${k.v};background:${k.c}` })));
++      hover(bar, e => showTip(e, `第 ${r.i} 轮`, fmt(roundOwn(r)), kinds.map(k => ({ c: k.c, n: k.n, v: fmt(k.v) }))));
++      const d = el('details', { class: 'rd', id: `r${r.i}` },
++        el('summary', {},
++          el('div', { class: 'no' }, `第 ${r.i} 轮`), bar, el('div', { class: 'tm' }, fmt(roundOwn(r))),
++          el('div', { class: 'act' }, el('div', { class: 'a' }, r.act, el('span', { class: 'muted' }, `  · 从 ${r.t.toFixed(1)}s 开始`)),
++            el('div', { class: 'chips' }, r.why.map(w => el('span', {}, w))))));
++      let built = false;
++      d.addEventListener('toggle', () => { if (d.open && !built) { built = true; d.append(roundBody(q, r)); } });
++      card.append(d);
++    });
++    return card;
++  }
++
++  function codeBlock(text, tallAllowed) {
++    const pre = el('pre', { class: 'code' }, text);
++    if (!tallAllowed || text.split('\n').length < 16) return pre;
++    const more = el('span', { class: 'more' }, '展开全部');
++    more.addEventListener('click', () => { pre.classList.toggle('tall2'); more.textContent = pre.classList.contains('tall2') ? '收起' : '展开全部'; });
++    return el('div', {}, pre, more);
++  }
++
++  function roundBody(q, r) {
++    const body = el('div', { class: 'rbody' });
++    const kinds = roundKinds(r);
++    body.append(el('div', { class: 'kv' }, kinds.map(k => el('span', {}, el('span', { class: 'sw', style: `background:${k.c}` }), k.n.replace('模型·', '').replace('工具·', '工具 '), ' ', el('b', {}, fmt(k.v)), k.sim ? el('span', { class: 'tag-sim' }, '未拆分') : null))));
++
++    // 模型
++    const mb = el('div', { class: 'blk' },
++      el('div', { class: 'hd' }, el('h3', {}, '模型'), el('span', { class: 'meta' }, `${r.model} · 结束原因 ${r.finish || '—'}`)),
++      el('div', { class: 'kv' },
++        el('span', {}, '上下文 ', el('b', {}, num(r.ctx)), ' token（新输入 ', el('b', {}, num(r.ctx_in + r.ctx_write)), ' · 缓存命中 ', el('b', {}, num(r.ctx_read)), '）'),
++        el('span', {}, '等首字 ', el('b', {}, fmt(r.ttft))),
++        el('span', {}, '思考 ', el('b', {}, fmt(r.think.secs)), ' · ', el('b', {}, num(r.rsn)), ' token · ', el('b', {}, spd(r.think.speed))),
++        el('span', {}, '输出 ', el('b', {}, fmt(r.outp.secs)), ' · ', el('b', {}, num(r.out)), ' token · ', el('b', {}, spd(r.outp.speed))),
++        el('span', {}, '本轮速度 ', el('b', {}, spd(r.speed)), el('span', { class: 'muted' }, `（本问中位 ${spd(q.speed_median)}）`)),
++        r.ctx_next_delta != null ? el('span', {}, '下一轮上下文 ', el('b', {}, `${r.ctx_next_delta >= 0 ? '+' : ''}${num(r.ctx_next_delta)}`), ' token') : null));
++    r.think.parts.forEach((p, n) => mb.append(
++      el('div', { class: 'lab' }, `思考原文${r.think.parts.length > 1 ? ` ${n + 1}` : ''} · ${fmt(p.secs)} · ${num(p.chars)} 字${M.detail ? '' : '（摘要版不含原文）'}`),
++      M.detail ? codeBlock(p.text, true) : null));
++    if (!r.think.parts.length) mb.append(el('div', { class: 'lab' }, '这一轮没有思考原文（模型没返回，或这一轮直接输出）。'));
++    r.outp.texts.forEach(t => mb.append(el('div', { class: 'lab' }, `输出正文 · ${num(t.chars)} 字${M.detail ? '' : '（摘要版不含原文）'}`), M.detail ? codeBlock(t.text, true) : null));
++    body.append(mb);
++
++    // 工具
++    r.tools.forEach((t, n) => {
++      const exitTxt = t.exit == null ? '—' : (t.exit === 0 ? '0（成功）' : `${t.exit}（失败）`);
++      const tb = el('div', { class: 'blk' },
++        el('div', { class: 'hd' }, el('h3', {}, `工具 ${r.tools.length > 1 ? n + 1 + ' ' : ''}· ${t.label}`),
++          el('span', { class: 'meta' }, `${t.catn} · ${t.tool} · 第 ${t.s.toFixed(1)}–${t.e.toFixed(1)} 秒`)),
++        el('div', { class: 'kv' },
++          el('span', {}, '用时 ', el('b', {}, fmt(t.secs))),
++          el('span', {}, '退出码 ', el('b', {}, exitTxt)),
++          el('span', {}, '命令 ', el('b', {}, num(t.cmd_chars)), ' 字', t.inline ? el('span', { class: 'muted' }, '（模型现写的脚本 / 数据）') : null),
++          el('span', {}, '输出 ', el('b', {}, num(t.out_chars)), ' 字 / ', el('b', {}, num(t.out_lines)), ' 行', t.truncated ? el('span', { class: 'muted' }, '（运行时已截断）') : null),
++          t.desc ? el('span', {}, '模型给的说明：', el('b', {}, t.desc)) : null),
++        M.detail ? el('div', { class: 'lab' }, '完整命令与参数') : null, M.detail ? codeBlock(t.cmd, true) : null);
++      if (t.grmp.length) {
++        const gsum = t.grmp.reduce((a, g) => a + g.e - g.s, 0);
++        tb.append(el('div', { class: 'lab' }, `GRMP 调用 ${t.grmp.length} 次 · 共 ${fmt(gsum)} · 脚本本地 ${fmt(Math.max(0, t.secs - gsum))}`),
++          toolStrip(t),
++          el('table', { class: 'gtab' }, el('thead', {}, el('tr', {}, ...['#', '登记脚本', '执行库', '开始', '用时', '返回行数', '字节', '结果'].map((h, i) => el('th', { class: i >= 3 && i < 7 ? 'num' : '' }, h)))),
++            el('tbody', {}, t.grmp.map((g, k) => el('tr', {},
++              el('td', {}, k + 1), el('td', {}, g.name), el('td', {}, g.db), el('td', { class: 'num' }, `${g.s.toFixed(2)}s`),
++              el('td', { class: 'num' }, fmt(g.e - g.s)), el('td', { class: 'num' }, g.rows == null ? '—' : num(g.rows)),
++              el('td', { class: 'num' }, g.bytes == null ? '—' : num(g.bytes)), el('td', {}, g.ok ? '成功' : `失败 ${g.status || ''}`))))));
++      }
++      if (M.detail) tb.append(el('div', { class: 'lab' }, '工具输出'), codeBlock(t.out || '（无输出）', true));
++      body.append(tb);
++    });
++    return body;
++  }
++
++  // 一次工具调用内部的细条:脚本本地(黄)与每次 GRMP(绿)
++  function toolStrip(t) {
++    const W = 900, H = 18, sx = x => (x - t.s) / Math.max(1e-6, t.e - t.s) * W;
++    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', style: 'max-width:900px;display:block;margin:4px 0 6px' });
++    svg.append(sv('rect', { x: 0, y: 4, width: W, height: 10, rx: 3, fill: KMAP.local.c }));
++    t.grmp.forEach(g => {
++      const r = sv('rect', { class: 'm', x: sx(g.s) + 1, y: 4, width: Math.max(1, sx(g.e) - sx(g.s) - 2), height: 10, rx: 2, fill: KMAP.grmp.c });
++      hover(r, e => showTip(e, g.name, fmt(g.e - g.s), [{ n: '执行库', v: g.db }, { n: '返回行数', v: g.rows == null ? '—' : num(g.rows) }, { n: '结果', v: g.ok ? '成功' : '失败' }]));
++      svg.append(r);
++    });
++    return svg;
++  }
++
++  // ---------- 时间轴 ----------
++  function gantt(q) {
++    const W = 1180, L = 64, R = 16, rowH = 18, barH = 10, top = 8, axisH = 26;
++    const H = top + q.rounds.length * rowH + axisH;
++    const xmax = q.total, sx = t => L + t / xmax * (W - L - R);
++    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': `时间轴，共 ${q.rounds_n} 轮` });
++    const step = niceStep(xmax, 8);
++    for (let t = 0; t <= xmax + 1e-9; t += step) {
++      svg.append(sv('line', { class: 'gl', x1: sx(t), x2: sx(t), y1: top - 4, y2: H - axisH + 2 }),
++        sv('text', { x: sx(t), y: H - 8, 'text-anchor': 'middle' }, `${+t.toFixed(1)}s`));
++    }
++    svg.append(sv('line', { class: 'ax', x1: L, x2: W - R, y1: H - axisH + 2, y2: H - axisH + 2 }));
++    q.rounds.forEach((r, i) => {
++      const y = top + i * rowH;
++      svg.append(sv('text', { x: L - 10, y: y + rowH / 2 + 4, 'text-anchor': 'end' }, `第 ${r.i} 轮`));
++      const g = sv('g', {});
++      r.segs.forEach(s => {
++        const x = sx(s.s), w = Math.max(1, sx(s.e) - sx(s.s));
++        g.append(sv('rect', { class: 'm', x, y: y + (rowH - barH) / 2, width: w, height: barH, rx: w > 6 ? 3 : 0, fill: KMAP[s.k].c }));
++      });
++      const hit = sv('rect', { class: 'hit', x: L, y, width: W - L - R, height: rowH });
++      hover(hit, e => {
++        const lines = [{ c: KMAP.ttft.c, n: '等首字', v: fmt(r.ttft) }, { c: KMAP.gen.c, n: `思考与输出（${num(r.rsn)} + ${num(r.out)} token）`, v: fmt(r.gen) }];
++        r.tools.forEach(t => lines.push({ c: KMAP.local.c, n: t.label, v: fmt(t.secs) + (t.grmp.length ? ` · GRMP ${t.grmp.length} 次` : '') }));
++        if (r.idle > 0.005) lines.push({ c: KMAP.idle.c, n: '轮前空档', v: fmt(r.idle) });
++        showTip(e, `第 ${r.i} 轮 · 从 ${r.t.toFixed(1)}s 开始`, fmt(roundOwn(r)), lines, r.why.join('；') + '  ·  点击看详情');
++        g.querySelectorAll('rect').forEach(x => x.classList.add('hl'));
++      });
++      hit.addEventListener('pointerleave', () => g.querySelectorAll('rect').forEach(x => x.classList.remove('hl')));
++      hit.addEventListener('click', () => { hideTip(); openRound(r.i); });
++      svg.append(g, hit);
++    });
++    return svg;
++  }
++
++  // ---------- 每轮模型用时(堆叠柱) ----------
++  function perRoundColumns(q) {
++    const W = 560, H = 220, L = 40, R = 8, top = 10, bottom = 26;
++    const vals = q.rounds.map(r => r.ttft + r.gen), ymax = Math.max(...vals) * 1.08 || 1;
++    const step = niceStep(ymax, 4), n = q.rounds.length;
++    const band = (W - L - R) / n, bw = Math.min(24, band - 2);
++    const sy = v => H - bottom - v / ymax * (H - top - bottom);
++    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': '每轮模型用时' });
++    for (let v = 0; v <= ymax; v += step) svg.append(sv('line', { class: 'gl', x1: L, x2: W - R, y1: sy(v), y2: sy(v) }), sv('text', { x: L - 6, y: sy(v) + 4, 'text-anchor': 'end' }, `${+v.toFixed(1)}`));
++    q.rounds.forEach((r, i) => {
++      const x = L + i * band + (band - bw) / 2;
++      const y1 = sy(r.ttft), y2 = sy(r.ttft + r.gen);
++      const g = sv('g', {});
++      g.append(sv('rect', { class: 'm', x, y: y1, width: bw, height: Math.max(0, sy(0) - y1), fill: KMAP.ttft.c }));
++      if (r.gen > 0) g.append(sv('path', { class: 'm', fill: KMAP.gen.c, d: roundTop(x, y2, bw, Math.max(0, y1 - y2 - 2), 3) }));
++      const hit = sv('rect', { class: 'hit', x: L + i * band, y: top, width: band, height: H - top - bottom });
++      hover(hit, e => showTip(e, `第 ${r.i} 轮 · ${r.act}`, fmt(r.ttft + r.gen), [{ c: KMAP.ttft.c, n: '等首字', v: fmt(r.ttft) }, { c: KMAP.gen.c, n: '思考与输出', v: fmt(r.gen) }, { n: '思考 / 输出 token', v: `${num(r.rsn)} / ${num(r.out)}` }], '点击看详情'));
++      hit.addEventListener('click', () => { hideTip(); openRound(r.i); });
++      svg.append(g, hit);
++      if (n <= 20 || (i + 1) % 5 === 0 || i === 0) svg.append(sv('text', { x: x + bw / 2, y: H - 8, 'text-anchor': 'middle' }, r.i));
++    });
++    svg.append(sv('line', { class: 'ax', x1: L, x2: W - R, y1: sy(0), y2: sy(0) }));
++    return svg;
++  }
++  function roundTop(x, y, w, h, r) {
++    if (h <= 0) return '';
++    r = Math.min(r, h, w / 2);
++    return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
++  }
++
++  // ---------- 生成量与用时(散点) ----------
++  function scatter(q) {
++    const W = 560, H = 240, L = 44, R = 14, top = 12, bottom = 30;
++    const pts = q.rounds.filter(r => r.gen > 0.05).map(r => ({ r, x: r.rsn + r.out, y: r.gen }));
++    const xmax = Math.max(...pts.map(p => p.x)) * 1.08 || 1, ymax = Math.max(...pts.map(p => p.y)) * 1.12 || 1;
++    const sx = v => L + v / xmax * (W - L - R), sy = v => H - bottom - v / ymax * (H - top - bottom);
++    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': '生成量与用时' });
++    const ys = niceStep(ymax, 4), xs = niceStep(xmax, 5);
++    for (let v = 0; v <= ymax; v += ys) svg.append(sv('line', { class: 'gl', x1: L, x2: W - R, y1: sy(v), y2: sy(v) }), sv('text', { x: L - 6, y: sy(v) + 4, 'text-anchor': 'end' }, `${+v.toFixed(1)}s`));
++    for (let v = 0; v <= xmax; v += xs) svg.append(sv('text', { x: sx(v), y: H - 12, 'text-anchor': 'middle' }, v >= 1000 ? `${+(v / 1000).toFixed(1)}K` : v));
++    svg.append(sv('text', { x: W - R, y: H - 1, 'text-anchor': 'end' }, '思考 + 输出 token'));
++    svg.append(sv('line', { class: 'ax', x1: L, x2: W - R, y1: sy(0), y2: sy(0) }));
++    if (q.speed_median) {      // 中位速度参考线:用时 = token ÷ 中位速度
++      const x2 = Math.min(xmax, ymax * q.speed_median);
++      svg.append(sv('line', { x1: sx(0), y1: sy(0), x2: sx(x2), y2: sy(x2 / q.speed_median), stroke: 'var(--axis)', 'stroke-width': 1.5 }),
++        sv('text', { x: sx(x2 * 0.62) + 10, y: sy(x2 * 0.62 / q.speed_median) + 16, 'text-anchor': 'start' }, `中位速度 ${Math.round(q.speed_median)} token/秒`));
++    }
++    const top2 = [...pts].sort((a, b) => b.y - a.y).slice(0, 2).map(p => p.r.i);
++    pts.forEach(p => {
++      const slow = q.speed_median && p.r.speed && p.r.gen >= 2 && p.r.speed < 0.5 * q.speed_median;
++      const c = slow ? 'var(--serious)' : 'var(--neutral)';
++      const dot = sv('circle', { cx: sx(p.x), cy: sy(p.y), r: 4.5, fill: c, stroke: 'var(--surface-1)', 'stroke-width': 2 });
++      const hit = sv('circle', { class: 'hit', cx: sx(p.x), cy: sy(p.y), r: 12 });
++      hover(hit, e => showTip(e, `第 ${p.r.i} 轮 · ${p.r.act}`, fmt(p.y), [{ n: '思考 token', v: num(p.r.rsn) }, { n: '输出 token', v: num(p.r.out) }, { n: '速度', v: spd(p.r.speed) }], (slow ? '速度明显偏低 · ' : '') + '点击看详情'));
++      hit.addEventListener('click', () => { hideTip(); openRound(p.r.i); });
++      svg.append(dot, hit);
++      if (top2.includes(p.r.i)) svg.append(sv('text', { x: sx(p.x) - 8, y: sy(p.y) + 4, 'text-anchor': 'end', style: 'fill:var(--ink-2)' }, `第 ${p.r.i} 轮`));
++    });
++    return svg;
++  }
++
++  // ---------- 每轮上下文(折线 + 十字线) ----------
++  function ctxLine(q) {
++    const W = 560, H = 220, L = 48, R = 40, top = 10, bottom = 26;
++    const vals = q.rounds.map(r => r.ctx), ymax = Math.max(...vals) * 1.1 || 1, n = vals.length;
++    const sx = i => L + (n === 1 ? 0 : i / (n - 1) * (W - L - R)), sy = v => H - bottom - v / ymax * (H - top - bottom);
++    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': '每轮上下文 token' });
++    const step = niceStep(ymax, 4);
++    for (let v = 0; v <= ymax; v += step) svg.append(sv('line', { class: 'gl', x1: L, x2: W - R, y1: sy(v), y2: sy(v) }), sv('text', { x: L - 6, y: sy(v) + 4, 'text-anchor': 'end' }, v >= 1000 ? `${Math.round(v / 1000)}K` : v));
++    svg.append(sv('path', { d: `M${L},${sy(0)}` + vals.map((v, i) => `L${sx(i)},${sy(v)}`).join('') + `L${sx(n - 1)},${sy(0)}Z`, fill: 'var(--neutral)', opacity: 0.10 }));
++    svg.append(sv('path', { d: vals.map((v, i) => `${i ? 'L' : 'M'}${sx(i)},${sy(v)}`).join(''), fill: 'none', stroke: 'var(--neutral)', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
++    svg.append(sv('circle', { cx: sx(n - 1), cy: sy(vals[n - 1]), r: 4, fill: 'var(--neutral)', stroke: 'var(--surface-1)', 'stroke-width': 2 }));
++    svg.append(sv('text', { x: sx(n - 1) + 6, y: sy(vals[n - 1]) + 4, style: 'fill:var(--ink-2)' }, kTok(vals[n - 1])));
++    for (let i = 0; i < n; i++) if (n <= 20 || (i + 1) % 5 === 0 || i === 0) svg.append(sv('text', { x: sx(i), y: H - 8, 'text-anchor': 'middle' }, q.rounds[i].i));
++    svg.append(sv('line', { class: 'ax', x1: L, x2: W - R, y1: sy(0), y2: sy(0) }));
++    const cross = sv('line', { x1: 0, x2: 0, y1: top, y2: H - bottom, stroke: 'var(--axis)', 'stroke-width': 1, visibility: 'hidden' });
++    const dot = sv('circle', { r: 4, fill: 'var(--neutral)', stroke: 'var(--surface-1)', 'stroke-width': 2, visibility: 'hidden' });
++    const hit = sv('rect', { class: 'hit', x: L - 6, y: top, width: W - L - R + 12, height: H - top - bottom });
++    svg.append(cross, dot, hit);
++    const idxAt = e => {
++      const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
++      const p = pt.matrixTransform(svg.getScreenCTM().inverse());
++      return Math.max(0, Math.min(n - 1, Math.round((p.x - L) / ((W - L - R) / Math.max(1, n - 1)))));
++    };
++    hit.addEventListener('pointermove', e => {
++      const i = idxAt(e);
++      cross.setAttribute('x1', sx(i)); cross.setAttribute('x2', sx(i)); cross.setAttribute('visibility', 'visible');
++      dot.setAttribute('cx', sx(i)); dot.setAttribute('cy', sy(vals[i])); dot.setAttribute('visibility', 'visible');
++      const r = q.rounds[i];
++      showTip(e, `第 ${r.i} 轮`, `${num(vals[i])} token`, [{ n: '新输入', v: num(r.ctx_in + r.ctx_write) }, { n: '缓存命中', v: num(r.ctx_read) }, { c: 'var(--neutral)', n: '这一轮模型用时', v: fmt(r.ttft + r.gen) }], '点击看详情');
++    });
++    hit.addEventListener('click', e => { hideTip(); openRound(q.rounds[idxAt(e)].i); });
++    hit.addEventListener('pointerleave', () => { hideTip(); cross.setAttribute('visibility', 'hidden'); dot.setAttribute('visibility', 'hidden'); });
++    return svg;
++  }
++
++  // #q2 / #q2-r38 / #text 直接打开;默认打开最慢的一次
++  let worst = 0; Q.forEach((q, i) => { if (q.total > Q[worst].total) worst = i; });
++  const h = location.hash.match(/^#(?:q(\d+)(?:-r(\d+))?|(text))$/);
++  if (h && h[3]) select(-1);
++  else if (h) select(Math.min(Q.length, Math.max(1, +h[1])) - 1, h[2] ? +h[2] : undefined);
++  else select(worst);
++})();
++</script>
++</body>
++</html>
+diff --git a/common/timing/store.py b/common/timing/store.py
+new file mode 100644
+index 0000000..0f6b8df
+--- /dev/null
++++ b/common/timing/store.py
+@@ -0,0 +1,118 @@
++"""读 opencode 的会话数据:新版是 SQLite(opencode.db),旧版是 JSON 文件(storage/message、storage/part)。
++
++只读:SQLite 用 backup 接口拷一份到内存再读(opencode 正在写也不会读到半截,也不会锁住它);JSON 逐个文件读。
++统一成 [Session],每个会话按时间排好的 [(消息 id, 消息, [(片段开始毫秒, 片段更新毫秒, 片段)])]。
++"""
++from __future__ import annotations
++
++import json
++import os
++import pathlib
++import sqlite3
++from dataclasses import dataclass, field
++from typing import Dict, List, Optional, Tuple
++
++Part = Tuple[int, int, dict]
++
++
++@dataclass
++class Session:
++    id: str
++    title: str = ""
++    parent: str = ""
++    messages: List[Tuple[str, dict, List[Part]]] = field(default_factory=list)
++
++
++class StoreError(Exception):
++    pass
++
++
++def default_data_dirs() -> List[pathlib.Path]:
++    """opencode 数据目录的候选:$XDG_DATA_HOME/opencode、~/.local/share/opencode。"""
++    out = []
++    if os.environ.get("XDG_DATA_HOME"):
++        out.append(pathlib.Path(os.environ["XDG_DATA_HOME"]) / "opencode")
++    out.append(pathlib.Path.home() / ".local" / "share" / "opencode")
++    return out
++
++
++def locate(path: Optional[str]) -> pathlib.Path:
++    """给了路径(opencode.db 或数据目录)就用它;没给就按候选找。返回 opencode.db 或数据目录。"""
++    cands = [pathlib.Path(path).expanduser()] if path else default_data_dirs()
++    for p in cands:
++        if p.is_file():
++            return p
++        if (p / "opencode.db").is_file():
++            return p / "opencode.db"
++        if (p / "storage" / "message").is_dir():
++            return p
++    raise StoreError("没找到 opencode 的会话数据(找过:%s)。用 --db 指定 opencode.db 或 opencode 数据目录"
++                     % "、".join(str(p) for p in cands))
++
++
++def load(path: pathlib.Path) -> List[Session]:
++    return _load_sqlite(path) if path.is_file() else _load_json(path)
++
++
++def _part_times(p: dict, fallback: int) -> Tuple[int, int]:
++    t = p.get("time") or (p.get("state") or {}).get("time") or {}
++    start = t.get("start") or fallback
++    return int(start), int(t.get("end") or start)
++
++
++def _load_sqlite(db: pathlib.Path) -> List[Session]:
++    try:
++        src = sqlite3.connect("file:%s?mode=ro" % db, uri=True)
++        mem = sqlite3.connect(":memory:")
++        src.backup(mem)
++        src.close()
++    except sqlite3.Error as exc:
++        raise StoreError("读不了会话库 %s:%s" % (db, exc)) from exc
++    cols = {r[1] for r in mem.execute("pragma table_info(session)")}
++    sessions: Dict[str, Session] = {}
++    if cols:
++        sel = "id, %s, %s" % ("title" if "title" in cols else "''", "parent_id" if "parent_id" in cols else "''")
++        for sid, title, parent in mem.execute("select %s from session" % sel):
++            sessions[sid] = Session(sid, title or "", parent or "")
++    parts: Dict[str, List[Part]] = {}
++    for mid, tc, tu, d in mem.execute("select message_id, time_created, time_updated, data from part order by id"):
++        p = json.loads(d)
++        start, _ = _part_times(p, tc)
++        parts.setdefault(mid, []).append((int(start if p.get("type") in ("reasoning", "text") else tc), int(tu), p))
++    for mid, sid, d in mem.execute("select id, session_id, data from message order by time_created, id"):
++        sessions.setdefault(sid, Session(sid)).messages.append((mid, json.loads(d), parts.get(mid, [])))
++    mem.close()
++    return list(sessions.values())
++
++
++def _read(path: pathlib.Path) -> Optional[dict]:
++    try:
++        return json.loads(path.read_text(encoding="utf-8"))
++    except (OSError, ValueError):
++        return None
++
++
++def _load_json(root: pathlib.Path) -> List[Session]:
++    storage = root / "storage"
++    sessions: Dict[str, Session] = {}
++    for f in sorted((storage / "session").glob("*/*.json")):
++        info = _read(f) or {}
++        if info.get("id"):
++            sessions[info["id"]] = Session(info["id"], info.get("title") or "", info.get("parentID") or "")
++    for sdir in sorted((storage / "message").iterdir()) if (storage / "message").is_dir() else []:
++        msgs = []
++        for f in sdir.glob("*.json"):
++            m = _read(f)
++            if not m or not m.get("id"):
++                continue
++            created = int((m.get("time") or {}).get("created") or 0)
++            ps = []
++            for pf in sorted((storage / "part" / m["id"]).glob("*.json")):
++                p = _read(pf)
++                if p:
++                    start, end = _part_times(p, created)
++                    ps.append((start, end, p))
++            msgs.append((created, m["id"], m, sorted(ps, key=lambda x: (x[2].get("id") or ""))))
++        sess = sessions.setdefault(sdir.name, Session(sdir.name))
++        sess.messages = [(mid, m, ps) for _, mid, m, ps in sorted(msgs, key=lambda x: (x[0], x[1]))]
++    return list(sessions.values())
+diff --git a/scripts/registry/lockwait/pairs.yaml b/scripts/registry/lockwait/pairs.yaml
+index b6f9134..30224a3 100644
+--- a/scripts/registry/lockwait/pairs.yaml
++++ b/scripts/registry/lockwait/pairs.yaml
+@@ -19,6 +19,12 @@
+ # 不上就是 NULL——真实等待时长「未知，且可能极大」。把它填成 0 会让这一行
+ # 在 ORDER BY waiter_wait_s DESC LIMIT 之下排到最后、掉出返回页，而这恰恰
+ # 是这个 skill 最该报出来的那一行。别把 COALESCE(...,0) 加回这两列。
++#
++# 时间差一律 date_part('epoch', clock_timestamp() - 列)(v1.4.14):本脚本切到业务库执行,业务库可能是 M 兼容模式
++# (dbcompatibility='M')—— 那里 now() 返回 datetime,与 timestamptz 列相减后 EXTRACT(EPOCH …) 的结果
++# 类型 GaussDB JDBC 驱动不认识,整条报 un support type(2026-11-16 现场反馈与实测)。clock_timestamp() 两种
++# 兼容模式下都返回 timestamptz,date_part 返回 double precision,A 兼容(postgres 库、og5)下结果与原写法一致。
++# 守卫测试 test_registry_m_compat_units.py:业务库脚本不许再出现 now()。
+ name: lockwait.pairs
+ database_type: appbusiness
+ description: 锁堵塞的持有者/等待者成对明细（含双方锁模式、锁对象、等待时长、双方 SQL）
+@@ -33,14 +39,14 @@ sql: |
+          w.locktype                    AS locktype,
+          COALESCE(n.nspname || '.' || c.relname, '')  AS lock_object,
+          COALESCE(w.locktag, '')       AS locktag,
+-         round(EXTRACT(EPOCH FROM (now() - wa.query_start))::numeric, 1) AS waiter_wait_s,
++         round(date_part('epoch', clock_timestamp() - wa.query_start)::numeric, 1) AS waiter_wait_s,
+          COALESCE(wa.usename, '')      AS waiter_user,
+          COALESCE(wa.application_name, '') AS waiter_app,
+          COALESCE(substr(wa.query, 1, 300), '')       AS waiter_query,
+          COALESCE(ha.state, '')        AS holder_state,
+          COALESCE(ha.usename, '')      AS holder_user,
+          COALESCE(ha.application_name, '') AS holder_app,
+-         round(EXTRACT(EPOCH FROM (now() - ha.xact_start))::numeric, 1) AS holder_xact_age_s,
++         round(date_part('epoch', clock_timestamp() - ha.xact_start)::numeric, 1) AS holder_xact_age_s,
+          COALESCE(substr(ha.query, 1, 300), '')       AS holder_query
+     FROM pg_locks w
+     JOIN pg_locks h
+diff --git a/scripts/registry/vacuum/dead_tuples.yaml b/scripts/registry/vacuum/dead_tuples.yaml
+index 2229b0f..c14af4b 100644
+--- a/scripts/registry/vacuum/dead_tuples.yaml
++++ b/scripts/registry/vacuum/dead_tuples.yaml
+@@ -11,6 +11,12 @@
+ #
+ # 系统 schema 排除表照抄 scripts/registry/health/bloat.yaml 的清单，
+ # 避免系统表的死元组把真正的风险表挤出 LIMIT。
++#
++# 时间差一律 date_part('epoch', clock_timestamp() - 列)(v1.4.14):本脚本切到业务库执行,业务库可能是 M 兼容模式
++# (dbcompatibility='M')—— 那里 now() 返回 datetime,与 timestamptz 列相减后 EXTRACT(EPOCH …) 的结果
++# 类型 GaussDB JDBC 驱动不认识,整条报 un support type(2026-11-16 现场反馈与实测)。clock_timestamp() 两种
++# 兼容模式下都返回 timestamptz,date_part 返回 double precision,A 兼容(postgres 库、og5)下结果与原写法一致。
++# 守卫测试 test_registry_m_compat_units.py:业务库脚本不许再出现 now()。
+ name: vacuum.dead_tuples
+ database_type: appbusiness
+ description: 用户表死元组清单（含存活/死元组数、表大小、autovacuum 服务历史）
+@@ -22,8 +28,8 @@ sql: |
+          t.n_dead_tup AS n_dead_tup,
+          c.reltuples AS reltuples,
+          pg_total_relation_size(c.oid) AS table_bytes,
+-         EXTRACT(EPOCH FROM (now()-t.last_autovacuum)) AS last_autovacuum_age_s,
+-         EXTRACT(EPOCH FROM (now()-t.last_vacuum)) AS last_vacuum_age_s,
++         date_part('epoch', clock_timestamp() - t.last_autovacuum) AS last_autovacuum_age_s,
++         date_part('epoch', clock_timestamp() - t.last_vacuum) AS last_vacuum_age_s,
+          t.vacuum_count AS vacuum_count,
+          t.autovacuum_count AS autovacuum_count,
+          t.n_tup_upd AS n_tup_upd,
+diff --git a/whitelist/scripts-delta-20261116.sql b/whitelist/scripts-delta-20261116.sql
+new file mode 100644
+index 0000000..8049d26
+--- /dev/null
++++ b/whitelist/scripts-delta-20261116.sql
+@@ -0,0 +1,114 @@
++-- =====================================================================
++-- GRMP 诊断脚本白名单 · 增量导入（2026-11-16）
++-- =====================================================================
++--
++-- 适用前提：已导入过上一版的 132 条脚本。本文件只含相对那一版的**增量**，
++-- 不要整份重导（整份见同目录 scripts.sql，共 132 条）。
++--
++--   新增   0 条 INSERT
++--   更新   2 条 UPDATE
++--
++-- 全部脚本均为**只读查询**，只访问系统视图与系统表，不读业务数据、
++-- 不含 DML/DDL、不修改任何对象。
++--
++-- 执行库（database_type）：appbusiness 的脚本 parameter_config 最前面带
++--   {"key":"dbName","value":"","type":"String","autoAcquire":false}，
++-- 中间件按调用时传入的 dbName 切到该业务库执行；postgres 的脚本不带 dbName，在 postgres 库执行。
++-- 本文件里的 UPDATE 会同时写 database_type 与 parameter_config，以本文件为准覆盖手工改过的记录。
++--
++-- 导入前请确认两处与现有规范的对齐：
++--   1. `create_user` / `last_modify_user` 当前填 '999999999'，与上一版保持一致；
++--      若要求填真实工号，请统一替换。
++--   2. id 用 `grmp.script_config_seq.nextval`，不硬编码，避免与现有记录冲突。
++--
++-- =====================================================================
++-- 一、新增 0 条
++-- =====================================================================
++
++-- =====================================================================
++-- 二、更新 2 条已有脚本（SQL 正文 / 参数定义 / 执行库）
++-- =====================================================================
++
++-- [lockwait.pairs]
++--   **时间差改用 date_part('epoch', clock_timestamp() - 列)**(waiter_wait_s、holder_xact_age_s 两列),原因同 vacuum.dead_tuples: 本脚本也在业务库执行,原写法在 M 兼容业务库上同样会报「un support type」。列名、筛选、排序不变。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT w.pid                         AS waiter_pid,
++       COALESCE(w.sessionid, 0)      AS waiter_sessionid,
++       w.mode                        AS waiter_mode,
++       h.pid                         AS holder_pid,
++       COALESCE(h.sessionid, 0)      AS holder_sessionid,
++       h.mode                        AS holder_mode,
++       w.locktype                    AS locktype,
++       COALESCE(n.nspname || ''.'' || c.relname, '''')  AS lock_object,
++       COALESCE(w.locktag, '''')       AS locktag,
++       round(date_part(''epoch'', clock_timestamp() - wa.query_start)::numeric, 1) AS waiter_wait_s,
++       COALESCE(wa.usename, '''')      AS waiter_user,
++       COALESCE(wa.application_name, '''') AS waiter_app,
++       COALESCE(substr(wa.query, 1, 300), '''')       AS waiter_query,
++       COALESCE(ha.state, '''')        AS holder_state,
++       COALESCE(ha.usename, '''')      AS holder_user,
++       COALESCE(ha.application_name, '''') AS holder_app,
++       round(date_part(''epoch'', clock_timestamp() - ha.xact_start)::numeric, 1) AS holder_xact_age_s,
++       COALESCE(substr(ha.query, 1, 300), '''')       AS holder_query
++  FROM pg_locks w
++  JOIN pg_locks h
++    ON h.locktag = w.locktag AND h.granted AND h.pid <> w.pid
++  LEFT JOIN pg_class c     ON c.oid = w.relation
++  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
++  LEFT JOIN pg_stat_activity wa ON wa.pid = w.pid
++  LEFT JOIN pg_stat_activity ha ON ha.pid = h.pid
++ WHERE w.granted = false
++ ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
++ LIMIT {{limit}};
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'lockwait.pairs';
++
++-- [vacuum.dead_tuples]
++--   **多取三列**：这张表的更新、HOT 更新、删除次数（pg_stat_user_tables 的 n_tup_upd / n_tup_hot_upd / n_tup_del）， 报告据此说明死元组来自哪类业务操作。筛选、排序不变。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname AS schema,
++       t.relname AS "table",
++       t.n_live_tup AS n_live_tup,
++       t.n_dead_tup AS n_dead_tup,
++       c.reltuples AS reltuples,
++       pg_total_relation_size(c.oid) AS table_bytes,
++       date_part(''epoch'', clock_timestamp() - t.last_autovacuum) AS last_autovacuum_age_s,
++       date_part(''epoch'', clock_timestamp() - t.last_vacuum) AS last_vacuum_age_s,
++       t.vacuum_count AS vacuum_count,
++       t.autovacuum_count AS autovacuum_count,
++       t.n_tup_upd AS n_tup_upd,
++       t.n_tup_hot_upd AS n_tup_hot_upd,
++       t.n_tup_del AS n_tup_del,
++       CASE WHEN ''autovacuum_enabled=false'' = ANY(c.reloptions) THEN false ELSE true END AS autovac_enabled,
++       COALESCE(array_to_string(c.reloptions, '',''), '''') AS reloptions
++  FROM pg_stat_user_tables t
++  JOIN pg_class c ON c.oid = t.relid
++  JOIN pg_namespace n ON n.oid = c.relnamespace
++ WHERE n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'')
++ ORDER BY t.n_dead_tup DESC
++ LIMIT {{limit}};
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'vacuum.dead_tuples';
++
++-- =====================================================================
++-- 三、导入后自检
++-- =====================================================================
++-- 应为 132：
++--   SELECT count(*) FROM grmp.script_config WHERE scene = 'AGENT';
++-- 本次没有新增脚本。
++-- 更新应已生效（应返回 0 行；库编码为 UTF8 时 md5 与这里一致）：
++--   SELECT c.script_name FROM grmp.script_config c
++--     JOIN (VALUES
++--     ('lockwait.pairs', 'b21c94bd2fcc30a62a9eba91e7621522'),
++--     ('vacuum.dead_tuples', 'fd79553b7fafacb360b2bbd8a40f0f84')) AS v(name, sum) ON c.script_name = v.name
++--    WHERE md5(c.script_content) <> v.sum;
++-- 参数定义也一起更新了的（应列出这些脚本、且 parameter_config 与 scripts.sql 里一致）：
++--   SELECT script_name, parameter_config FROM grmp.script_config WHERE script_name IN ('-');
++-- 执行库应与本版一致（appbusiness 应为 39 条，且都以 dbName 开头）：
++--   SELECT count(*) FROM grmp.script_config WHERE scene = 'AGENT' AND database_type = 'appbusiness';
++--   SELECT script_name FROM grmp.script_config WHERE scene = 'AGENT' AND database_type = 'appbusiness'
++--      AND parameter_config NOT LIKE '[{"key":"dbName",%';     -- 应返回 0 行
+diff --git a/whitelist/scripts.sql b/whitelist/scripts.sql
+index 4950be8..debdb5c 100644
+--- a/whitelist/scripts.sql
++++ b/whitelist/scripts.sql
+@@ -371,35 +371,6 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
+    AND w.block_sessionid <> 0
+    AND w.block_sessionid <> w.sessionid;
+ ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'lockwait.pairs', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT w.pid                         AS waiter_pid,
+-       COALESCE(w.sessionid, 0)      AS waiter_sessionid,
+-       w.mode                        AS waiter_mode,
+-       h.pid                         AS holder_pid,
+-       COALESCE(h.sessionid, 0)      AS holder_sessionid,
+-       h.mode                        AS holder_mode,
+-       w.locktype                    AS locktype,
+-       COALESCE(n.nspname || ''.'' || c.relname, '''')  AS lock_object,
+-       COALESCE(w.locktag, '''')       AS locktag,
+-       round(EXTRACT(EPOCH FROM (now() - wa.query_start))::numeric, 1) AS waiter_wait_s,
+-       COALESCE(wa.usename, '''')      AS waiter_user,
+-       COALESCE(wa.application_name, '''') AS waiter_app,
+-       COALESCE(substr(wa.query, 1, 300), '''')       AS waiter_query,
+-       COALESCE(ha.state, '''')        AS holder_state,
+-       COALESCE(ha.usename, '''')      AS holder_user,
+-       COALESCE(ha.application_name, '''') AS holder_app,
+-       round(EXTRACT(EPOCH FROM (now() - ha.xact_start))::numeric, 1) AS holder_xact_age_s,
+-       COALESCE(substr(ha.query, 1, 300), '''')       AS holder_query
+-  FROM pg_locks w
+-  JOIN pg_locks h
+-    ON h.locktag = w.locktag AND h.granted AND h.pid <> w.pid
+-  LEFT JOIN pg_class c     ON c.oid = w.relation
+-  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+-  LEFT JOIN pg_stat_activity wa ON wa.pid = w.pid
+-  LEFT JOIN pg_stat_activity ha ON ha.pid = h.pid
+- WHERE w.granted = false
+- ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
+- LIMIT {{limit}};
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'vacuum.autovac_settings', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT name, setting
+   FROM pg_settings
+  WHERE name LIKE ''autovacuum%'' OR name LIKE ''vacuum_cost%''
+@@ -1121,28 +1092,6 @@ WHERE lower(name) = lower(''{{name}}'')
+ ORDER BY owner, type, line
+ LIMIT 20001;
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'vacuum.dead_tuples', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname AS schema,
+-       t.relname AS "table",
+-       t.n_live_tup AS n_live_tup,
+-       t.n_dead_tup AS n_dead_tup,
+-       c.reltuples AS reltuples,
+-       pg_total_relation_size(c.oid) AS table_bytes,
+-       EXTRACT(EPOCH FROM (now()-t.last_autovacuum)) AS last_autovacuum_age_s,
+-       EXTRACT(EPOCH FROM (now()-t.last_vacuum)) AS last_vacuum_age_s,
+-       t.vacuum_count AS vacuum_count,
+-       t.autovacuum_count AS autovacuum_count,
+-       t.n_tup_upd AS n_tup_upd,
+-       t.n_tup_hot_upd AS n_tup_hot_upd,
+-       t.n_tup_del AS n_tup_del,
+-       CASE WHEN ''autovacuum_enabled=false'' = ANY(c.reloptions) THEN false ELSE true END AS autovac_enabled,
+-       COALESCE(array_to_string(c.reloptions, '',''), '''') AS reloptions
+-  FROM pg_stat_user_tables t
+-  JOIN pg_class c ON c.oid = t.relid
+-  JOIN pg_namespace n ON n.oid = c.relnamespace
+- WHERE n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'')
+- ORDER BY t.n_dead_tup DESC
+- LIMIT {{limit}};
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'vacuum.xmin_holder', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT r.pid::text AS xact_id,
+        r.xmin::text AS xmin,
+        (r.xmin::text = gs_txid_oldestxmin()::text) AS is_oldest,
+@@ -1352,3 +1301,54 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
+        COALESCE(SUM(phyblkwrt), 0) AS blocks
+   FROM dbe_perf.file_redo_iostat;
+ ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'vacuum.dead_tuples', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname AS schema,
++       t.relname AS "table",
++       t.n_live_tup AS n_live_tup,
++       t.n_dead_tup AS n_dead_tup,
++       c.reltuples AS reltuples,
++       pg_total_relation_size(c.oid) AS table_bytes,
++       date_part(''epoch'', clock_timestamp() - t.last_autovacuum) AS last_autovacuum_age_s,
++       date_part(''epoch'', clock_timestamp() - t.last_vacuum) AS last_vacuum_age_s,
++       t.vacuum_count AS vacuum_count,
++       t.autovacuum_count AS autovacuum_count,
++       t.n_tup_upd AS n_tup_upd,
++       t.n_tup_hot_upd AS n_tup_hot_upd,
++       t.n_tup_del AS n_tup_del,
++       CASE WHEN ''autovacuum_enabled=false'' = ANY(c.reloptions) THEN false ELSE true END AS autovac_enabled,
++       COALESCE(array_to_string(c.reloptions, '',''), '''') AS reloptions
++  FROM pg_stat_user_tables t
++  JOIN pg_class c ON c.oid = t.relid
++  JOIN pg_namespace n ON n.oid = c.relnamespace
++ WHERE n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'')
++ ORDER BY t.n_dead_tup DESC
++ LIMIT {{limit}};
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'lockwait.pairs', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT w.pid                         AS waiter_pid,
++       COALESCE(w.sessionid, 0)      AS waiter_sessionid,
++       w.mode                        AS waiter_mode,
++       h.pid                         AS holder_pid,
++       COALESCE(h.sessionid, 0)      AS holder_sessionid,
++       h.mode                        AS holder_mode,
++       w.locktype                    AS locktype,
++       COALESCE(n.nspname || ''.'' || c.relname, '''')  AS lock_object,
++       COALESCE(w.locktag, '''')       AS locktag,
++       round(date_part(''epoch'', clock_timestamp() - wa.query_start)::numeric, 1) AS waiter_wait_s,
++       COALESCE(wa.usename, '''')      AS waiter_user,
++       COALESCE(wa.application_name, '''') AS waiter_app,
++       COALESCE(substr(wa.query, 1, 300), '''')       AS waiter_query,
++       COALESCE(ha.state, '''')        AS holder_state,
++       COALESCE(ha.usename, '''')      AS holder_user,
++       COALESCE(ha.application_name, '''') AS holder_app,
++       round(date_part(''epoch'', clock_timestamp() - ha.xact_start)::numeric, 1) AS holder_xact_age_s,
++       COALESCE(substr(ha.query, 1, 300), '''')       AS holder_query
++  FROM pg_locks w
++  JOIN pg_locks h
++    ON h.locktag = w.locktag AND h.granted AND h.pid <> w.pid
++  LEFT JOIN pg_class c     ON c.oid = w.relation
++  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
++  LEFT JOIN pg_stat_activity wa ON wa.pid = w.pid
++  LEFT JOIN pg_stat_activity ha ON ha.pid = h.pid
++ WHERE w.granted = false
++ ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
++ LIMIT {{limit}};
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
