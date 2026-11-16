@@ -23,7 +23,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Mapping, Optional
 
-from . import paths, proxy, routing, userid
+from . import paths, proxy, routing, timing, userid
 from .errors import QueryError
 from .hints import with_hint
 from .params import to_param_value
@@ -237,10 +237,10 @@ class GrmpClient:
         details: List[Dict[str, Any]] = []
         page = 1
         while True:
-            body = self._post(
+            body = timing.call(lambda: self._post(          # 耗时进 logs/grmp-timing.log(交互耗时报告用)
                 self.list_path,
                 {"dataIp": self.data_ip, "offset": page, "limit": LIST_PAGE_SIZE},
-            )
+            ), timing.LIST, "接口一 · 取命令清单")
             # 接口一判成功只能看 code —— 业务错误也是 HTTP 200
             if body.get("code") != "0":
                 raise GrmpError(user_error("查询命令清单失败：%s" % body.get("msg", body)))
@@ -337,7 +337,8 @@ class GrmpClient:
                 for key, val in values.items()
             ]
 
-        body = self._post(self.invoke_path, payload)
+        body = timing.call(lambda: self._post(self.invoke_path, payload),   # 耗时进 logs/grmp-timing.log
+                           timing.INVOKE, script_name, values.get(routing.PARAM))
 
         # 两者缺一即按失败处理。只取 result.data 会把执行失败读成
         # 「查询结果为空」——「慢 SQL 返回 0 条」被读成「当前没有慢 SQL」。

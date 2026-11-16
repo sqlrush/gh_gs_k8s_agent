@@ -371,35 +371,6 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
    AND w.block_sessionid <> 0
    AND w.block_sessionid <> w.sessionid;
 ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'lockwait.pairs', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT w.pid                         AS waiter_pid,
-       COALESCE(w.sessionid, 0)      AS waiter_sessionid,
-       w.mode                        AS waiter_mode,
-       h.pid                         AS holder_pid,
-       COALESCE(h.sessionid, 0)      AS holder_sessionid,
-       h.mode                        AS holder_mode,
-       w.locktype                    AS locktype,
-       COALESCE(n.nspname || ''.'' || c.relname, '''')  AS lock_object,
-       COALESCE(w.locktag, '''')       AS locktag,
-       round(EXTRACT(EPOCH FROM (now() - wa.query_start))::numeric, 1) AS waiter_wait_s,
-       COALESCE(wa.usename, '''')      AS waiter_user,
-       COALESCE(wa.application_name, '''') AS waiter_app,
-       COALESCE(substr(wa.query, 1, 300), '''')       AS waiter_query,
-       COALESCE(ha.state, '''')        AS holder_state,
-       COALESCE(ha.usename, '''')      AS holder_user,
-       COALESCE(ha.application_name, '''') AS holder_app,
-       round(EXTRACT(EPOCH FROM (now() - ha.xact_start))::numeric, 1) AS holder_xact_age_s,
-       COALESCE(substr(ha.query, 1, 300), '''')       AS holder_query
-  FROM pg_locks w
-  JOIN pg_locks h
-    ON h.locktag = w.locktag AND h.granted AND h.pid <> w.pid
-  LEFT JOIN pg_class c     ON c.oid = w.relation
-  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
-  LEFT JOIN pg_stat_activity wa ON wa.pid = w.pid
-  LEFT JOIN pg_stat_activity ha ON ha.pid = h.pid
- WHERE w.granted = false
- ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
- LIMIT {{limit}};
-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
 INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'vacuum.autovac_settings', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT name, setting
   FROM pg_settings
  WHERE name LIKE ''autovacuum%'' OR name LIKE ''vacuum_cost%''
@@ -1121,28 +1092,6 @@ WHERE lower(name) = lower(''{{name}}'')
 ORDER BY owner, type, line
 LIMIT 20001;
 ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'vacuum.dead_tuples', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname AS schema,
-       t.relname AS "table",
-       t.n_live_tup AS n_live_tup,
-       t.n_dead_tup AS n_dead_tup,
-       c.reltuples AS reltuples,
-       pg_total_relation_size(c.oid) AS table_bytes,
-       EXTRACT(EPOCH FROM (now()-t.last_autovacuum)) AS last_autovacuum_age_s,
-       EXTRACT(EPOCH FROM (now()-t.last_vacuum)) AS last_vacuum_age_s,
-       t.vacuum_count AS vacuum_count,
-       t.autovacuum_count AS autovacuum_count,
-       t.n_tup_upd AS n_tup_upd,
-       t.n_tup_hot_upd AS n_tup_hot_upd,
-       t.n_tup_del AS n_tup_del,
-       CASE WHEN ''autovacuum_enabled=false'' = ANY(c.reloptions) THEN false ELSE true END AS autovac_enabled,
-       COALESCE(array_to_string(c.reloptions, '',''), '''') AS reloptions
-  FROM pg_stat_user_tables t
-  JOIN pg_class c ON c.oid = t.relid
-  JOIN pg_namespace n ON n.oid = c.relnamespace
- WHERE n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'')
- ORDER BY t.n_dead_tup DESC
- LIMIT {{limit}};
-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
 INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'vacuum.xmin_holder', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT r.pid::text AS xact_id,
        r.xmin::text AS xmin,
        (r.xmin::text = gs_txid_oldestxmin()::text) AS is_oldest,
@@ -1352,3 +1301,54 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
        COALESCE(SUM(phyblkwrt), 0) AS blocks
   FROM dbe_perf.file_redo_iostat;
 ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'vacuum.dead_tuples', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname AS schema,
+       t.relname AS "table",
+       t.n_live_tup AS n_live_tup,
+       t.n_dead_tup AS n_dead_tup,
+       c.reltuples AS reltuples,
+       pg_total_relation_size(c.oid) AS table_bytes,
+       date_part(''epoch'', clock_timestamp() - t.last_autovacuum) AS last_autovacuum_age_s,
+       date_part(''epoch'', clock_timestamp() - t.last_vacuum) AS last_vacuum_age_s,
+       t.vacuum_count AS vacuum_count,
+       t.autovacuum_count AS autovacuum_count,
+       t.n_tup_upd AS n_tup_upd,
+       t.n_tup_hot_upd AS n_tup_hot_upd,
+       t.n_tup_del AS n_tup_del,
+       CASE WHEN ''autovacuum_enabled=false'' = ANY(c.reloptions) THEN false ELSE true END AS autovac_enabled,
+       COALESCE(array_to_string(c.reloptions, '',''), '''') AS reloptions
+  FROM pg_stat_user_tables t
+  JOIN pg_class c ON c.oid = t.relid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'')
+ ORDER BY t.n_dead_tup DESC
+ LIMIT {{limit}};
+', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'lockwait.pairs', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT w.pid                         AS waiter_pid,
+       COALESCE(w.sessionid, 0)      AS waiter_sessionid,
+       w.mode                        AS waiter_mode,
+       h.pid                         AS holder_pid,
+       COALESCE(h.sessionid, 0)      AS holder_sessionid,
+       h.mode                        AS holder_mode,
+       w.locktype                    AS locktype,
+       COALESCE(n.nspname || ''.'' || c.relname, '''')  AS lock_object,
+       COALESCE(w.locktag, '''')       AS locktag,
+       round(date_part(''epoch'', clock_timestamp() - wa.query_start)::numeric, 1) AS waiter_wait_s,
+       COALESCE(wa.usename, '''')      AS waiter_user,
+       COALESCE(wa.application_name, '''') AS waiter_app,
+       COALESCE(substr(wa.query, 1, 300), '''')       AS waiter_query,
+       COALESCE(ha.state, '''')        AS holder_state,
+       COALESCE(ha.usename, '''')      AS holder_user,
+       COALESCE(ha.application_name, '''') AS holder_app,
+       round(date_part(''epoch'', clock_timestamp() - ha.xact_start)::numeric, 1) AS holder_xact_age_s,
+       COALESCE(substr(ha.query, 1, 300), '''')       AS holder_query
+  FROM pg_locks w
+  JOIN pg_locks h
+    ON h.locktag = w.locktag AND h.granted AND h.pid <> w.pid
+  LEFT JOIN pg_class c     ON c.oid = w.relation
+  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+  LEFT JOIN pg_stat_activity wa ON wa.pid = w.pid
+  LEFT JOIN pg_stat_activity ha ON ha.pid = h.pid
+ WHERE w.granted = false
+ ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
+ LIMIT {{limit}};
+', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
