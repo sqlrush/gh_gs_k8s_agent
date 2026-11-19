@@ -1,0 +1,534 @@
+diff --git a/.delivery.json b/.delivery.json
+index 9c6a690..4647422 100644
+--- a/.delivery.json
++++ b/.delivery.json
+@@ -1,22 +1,22 @@
+ {
+   "format": 1,
+   "package": "diag",
+-  "version": "diag-v1.4.14",
++  "version": "diag-v1.5.0",
+   "source": {
+     "repo": "gh_agent_k8s",
+-    "ref": "agent-v1.4.14",
+-    "commit": "ce6da96ffae03710f13e6031b72a08b91a5b3fe1",
+-    "date": "2026-11-16T00:36:00-08:00"
++    "ref": "agent-v1.5.0",
++    "commit": "42acc9cc3a9e26deddcf5cc709946c8f6ada1f47",
++    "date": "2026-11-19T11:21:00+08:00"
+   },
+   "base": {
+-    "version": "diag-v1.4.13",
++    "version": "diag-v1.4.14",
+     "source": {
+       "repo": "gh_agent_k8s",
+-      "ref": "agent-v1.4.13",
+-      "commit": "e0071e545536eaa9618e97e8c6c111eeb986bcc1",
+-      "date": "2026-11-12T14:37:26+08:00"
++      "ref": "agent-v1.4.14",
++      "commit": "ce6da96ffae03710f13e6031b72a08b91a5b3fe1",
++      "date": "2026-11-16T00:36:00-08:00"
+     }
+   },
+-  "files": 430,
+-  "digest": "2856c06f3ed8701f1c72f4ecc4344af53014f3c8f4a5e9251a4fd7e35bd7ee1e"
++  "files": 431,
++  "digest": "9fd1085ce38b3542a63be97a0107397cee776db4f71cbbc61d647c0ffffd3a50"
+ }
+diff --git a/common/VERSION b/common/VERSION
+index 1afe4aa..ea7d5e0 100644
+--- a/common/VERSION
++++ b/common/VERSION
+@@ -1 +1 @@
+-agent-v1.4.14
++agent-v1.5.0
+diff --git a/scripts/registry/explain/kernel_funcs.yaml b/scripts/registry/explain/kernel_funcs.yaml
+index 470ca8e..a4d0d10 100644
+--- a/scripts/registry/explain/kernel_funcs.yaml
++++ b/scripts/registry/explain/kernel_funcs.yaml
+@@ -8,6 +8,8 @@
+ #   item = 'func:gs_get_kernel_info'  detail = ''(无参)
+ # 函数不存在时对应行不出现——调用方按缺行判定,不按 detail 判定。
+ # 只查 pg_proc + version(),任何版本都能跑,是这组脚本里唯一无条件安全的一条。
++# 拼接一律 concat(…),不用 ||(2026-11-17 现场):本脚本切到业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、
++# 不是字符串拼接,整条报「argument … not type name」。concat 在 A / M 两种兼容模式下都是拼接。守卫:test_registry_m_compat_units.py。
+ name: explain.kernel_funcs
+ database_type: appbusiness
+ description: 探测 GaussDB 私有内核函数(gs_get_explain / gs_get_kernel_info)是否存在,并带回 version()
+@@ -15,6 +17,6 @@ readonly: true
+ sql: |
+   SELECT 'version' AS item, version() AS detail
+   UNION ALL
+-  SELECT 'func:' || p.proname AS item, pg_get_function_arguments(p.oid) AS detail
++  SELECT concat('func:', p.proname) AS item, pg_get_function_arguments(p.oid) AS detail
+     FROM pg_proc p
+    WHERE p.proname IN ('gs_get_explain', 'gs_get_kernel_info');
+diff --git a/scripts/registry/health/stale_stats.yaml b/scripts/registry/health/stale_stats.yaml
+index 395c30f..b867c29 100644
+--- a/scripts/registry/health/stale_stats.yaml
++++ b/scripts/registry/health/stale_stats.yaml
+@@ -29,6 +29,8 @@
+ #   排序  ① 没有统计列、或冻结页数为 0 的表（判定会报的两类）排最前；
+ #         ② 冻结页数与实时页数偏离比例（判定用的同一个量）从高到低；③ 实时页数从大到小。
+ # pg_stats 的列数要参与排序，所以挪进了子查询，对每张候选表都数一次（og5 36 张候选 36 毫秒）。
++# 拼接一律 concat(…),不用 ||(2026-11-17 现场):本脚本切到业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、
++# 不是字符串拼接,整条报「argument … not type name」。concat 在 A / M 两种兼容模式下都是拼接。守卫:test_registry_m_compat_units.py。
+ name: health.stale_stats
+ database_type: appbusiness
+ description: 表的统计信息新鲜度证据（页数漂移 + 统计列数 + 上次 ANALYZE）
+@@ -36,7 +38,7 @@ sql: |
+   SELECT tbl_name, frozen_pages, cur_pages, frozen_tuples, live_tuples,
+          stat_columns, last_analyze, last_autoanalyze
+   FROM (
+-    SELECT n.nspname || '.' || c.relname AS tbl_name,
++    SELECT concat(n.nspname, '.', c.relname) AS tbl_name,
+            c.relpages AS frozen_pages,
+            pg_relation_size(c.oid) / current_setting('block_size')::bigint AS cur_pages,
+            c.reltuples::bigint AS frozen_tuples,
+diff --git a/scripts/registry/health/unused_index.yaml b/scripts/registry/health/unused_index.yaml
+index 8120387..ddd14ee 100644
+--- a/scripts/registry/health/unused_index.yaml
++++ b/scripts/registry/health/unused_index.yaml
+@@ -19,11 +19,13 @@
+ # schema_filter 是整段 SQL 片段（如 ('pg_catalog','information_schema')），
+ # GRMP 没有列表类型，只能当 String 塞进去 —— 注册时会标 STRING_PARAM。
+ # 防线在调用方：取值来自 collectors.py 里的固定常量，不来自用户输入。
++# 拼接一律 concat(…),不用 ||(2026-11-17 现场):本脚本切到业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、
++# 不是字符串拼接,整条报「argument … not type name」。concat 在 A / M 两种兼容模式下都是拼接。守卫:test_registry_m_compat_units.py。
+ name: health.unused_index
+ database_type: appbusiness
+ description: 索引用量全局视图（含扫描次数、大小、是否约束背书、所属表的扫描分布）
+ sql: |
+-  SELECT s.schemaname||'.'||s.indexrelname AS idx_name,
++  SELECT concat(s.schemaname, '.', s.indexrelname) AS idx_name,
+          s.relname AS table_name,
+          s.idx_scan,
+          s.idx_tup_read,
+diff --git a/scripts/registry/lockwait/pairs.yaml b/scripts/registry/lockwait/pairs.yaml
+index 30224a3..96c05f9 100644
+--- a/scripts/registry/lockwait/pairs.yaml
++++ b/scripts/registry/lockwait/pairs.yaml
+@@ -25,6 +25,10 @@
+ # 类型 GaussDB JDBC 驱动不认识,整条报 un support type(2026-11-16 现场反馈与实测)。clock_timestamp() 两种
+ # 兼容模式下都返回 timestamptz,date_part 返回 double precision,A 兼容(postgres 库、og5)下结果与原写法一致。
+ # 守卫测试 test_registry_m_compat_units.py:业务库脚本不许再出现 now()。
++# 拼接一律 concat(…),不用 ||(2026-11-17 现场):本脚本切到业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、
++# 不是字符串拼接,整条报「argument … not type name」。concat 在 A / M 两种兼容模式下都是拼接。守卫:test_registry_m_compat_units.py。
++# lock_object 不能写成 COALESCE(concat(…), ''):锁对象不是表(事务号锁等)时 LEFT JOIN 不上、两列都是 NULL,
++# concat 在 A 兼容下跳过 NULL 得到 '.',在 M 兼容下得到 NULL —— 两边不一样。先判 relname 再拼,两种模式都回 ''。
+ name: lockwait.pairs
+ database_type: appbusiness
+ description: 锁堵塞的持有者/等待者成对明细（含双方锁模式、锁对象、等待时长、双方 SQL）
+@@ -37,7 +41,7 @@ sql: |
+          COALESCE(h.sessionid, 0)      AS holder_sessionid,
+          h.mode                        AS holder_mode,
+          w.locktype                    AS locktype,
+-         COALESCE(n.nspname || '.' || c.relname, '')  AS lock_object,
++         CASE WHEN c.relname IS NULL THEN '' ELSE concat(n.nspname, '.', c.relname) END AS lock_object,
+          COALESCE(w.locktag, '')       AS locktag,
+          round(date_part('epoch', clock_timestamp() - wa.query_start)::numeric, 1) AS waiter_wait_s,
+          COALESCE(wa.usename, '')      AS waiter_user,
+diff --git a/skills/gaussdb-login/scripts/selfcheck.py b/skills/gaussdb-login/scripts/selfcheck.py
+index ed99f53..3f9a5d1 100644
+--- a/skills/gaussdb-login/scripts/selfcheck.py
++++ b/skills/gaussdb-login/scripts/selfcheck.py
+@@ -28,7 +28,7 @@ import render  # noqa: E402
+ from common import access, cli, config  # noqa: E402
+ from common.version import package_version  # noqa: E402
+ from common.grmp import routing  # noqa: E402
+-from common.grmp.registry import Registry  # noqa: E402
++from common.grmp.registry import Registry, RegistryError  # noqa: E402
+ 
+ OK, WARN, FAIL = "✓", "！", "✕"
+ DEPLOY, MIDDLEWARE, OPS = "部署方", "中间件团队", "运维 DBA"
+@@ -59,6 +59,28 @@ class Item(NamedTuple):
+     owner: str = ""
+ 
+ 
++NO_REGISTRY = ("无法比对:读不到本地的脚本定义目录(%s)—— 技能包里的 scripts/ 没放进技能目录。"
++               "把技能包里的 scripts/ 整个放到技能目录下、与 common/ 同一层,再自检一次")
++
++
++def _safe(what: str, check, *args) -> List[Item]:
++    """一项检查出了意料之外的错,只把这一项记成 ✕ 并写出原因,报告照常输出完(2026-11-17 现场:一项抛错整份报告中断)。"""
++    try:
++        return check(*args)
++    except Exception as exc:  # noqa: BLE001 —— 自检本身不能因为某一项出错而中断
++        return [Item(what, FAIL, "自检这一项出错:%s" % _err(exc), DEPLOY)]
++
++
++def _registry() -> tuple:
++    """本地脚本定义(白名单核对、切库标注要拿它和中间件的清单比)。读不到返回 (None, 原因)。"""
++    reg = Registry()
++    try:
++        reg.names()
++    except RegistryError as exc:
++        return None, NO_REGISTRY % reg.root if "不存在" in str(exc) else "无法比对:本地脚本定义读取失败:%s" % _err(exc)
++    return reg, ""
++
++
+ def _err(exc: Exception) -> str:
+     text = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+     if BANK_OPAQUE in text:
+@@ -139,11 +161,12 @@ def check_scripts(runner) -> List[Item]:
+     return items
+ 
+ 
+-def check_routing(conn, runner, used: Optional[set] = None) -> List[Item]:
++def check_routing(conn, runner, used: Optional[set] = None, marks: bool = True) -> List[Item]:
+     """切到业务库(dbName,2026-11-11 行方切库方案):本会话切过去没有;行方白名单里的标注与本版是否一致。
+ 
+     used:本版用到的脚本。标注只比这些 —— 本版不再调用的旧脚本(如 v1.4.13 起不交付的两语句脚本)行方可以留着,
+-    增量不生成删除,按它们报「不一致」导完增量也消不掉(2026-11-12 回归)。"""
++    增量不生成删除,按它们报「不一致」导完增量也消不掉(2026-11-12 回归)。
++    marks=False:本地脚本定义读不到时只查「业务库切换」,标注比对由调用方标「无法比对」。"""
+     client = getattr(runner, "client", None)
+     if client is None:
+         return []
+@@ -171,6 +194,8 @@ def check_routing(conn, runner, used: Optional[set] = None) -> List[Item]:
+     else:
+         items.append(Item("业务库切换", WARN, "本会话没有切到业务库(登录时没给业务库名,或核实没通过 —— 见登录输出)。"
+                           "要诊断某个业务库的表、执行计划,登录时带 --database <业务库>", ""))
++    if not marks:
++        return items
+     if missing or others:
+         parts = []
+         if missing:
+@@ -223,9 +248,15 @@ def main(argv: Optional[List[str]] = None) -> int:
+         print(render_report(items), end="")
+         return 1
+     if conn.driver == "grmp":
+-        registry = Registry()
+-        items += check_whitelist(conn, registry) + check_routing(conn, runner, used_names(registry))
+-    items += check_scripts(runner) + check_switches(runner)
++        registry, why = _registry()
++        if registry is None:
++            items.append(Item("白名单", WARN, why, DEPLOY))
++            items += _safe("业务库切换", check_routing, conn, runner, None, False)
++            items.append(Item("白名单切库标注", WARN, why, DEPLOY))
++        else:
++            items += _safe("白名单", check_whitelist, conn, registry)
++            items += _safe("业务库切换", lambda: check_routing(conn, runner, used_names(registry)))
++    items += _safe("关键脚本试跑", check_scripts, runner) + _safe("数据库监控开关", check_switches, runner)
+     print(render_report(items), end="")
+     return 0 if all(i.mark != FAIL for i in items) else 1
+ 
+diff --git a/whitelist/scripts-delta-20261116.sql b/whitelist/scripts-delta-20261116.sql
+index 8049d26..0dcd61b 100644
+--- a/whitelist/scripts-delta-20261116.sql
++++ b/whitelist/scripts-delta-20261116.sql
+@@ -66,7 +66,7 @@ UPDATE grmp.script_config
+  WHERE script_name = 'lockwait.pairs';
+ 
+ -- [vacuum.dead_tuples]
+---   **多取三列**：这张表的更新、HOT 更新、删除次数（pg_stat_user_tables 的 n_tup_upd / n_tup_hot_upd / n_tup_del）， 报告据此说明死元组来自哪类业务操作。筛选、排序不变。只读。
++--   **时间差改用 date_part('epoch', clock_timestamp() - 列)**(last_autovacuum_age_s、last_vacuum_age_s 两列):本脚本在业务库执行,M 兼容模式的业务库里 now() 返回 datetime,与 timestamptz 列相减后结果类型 JDBC 驱动不认识,整条报「un support type」。新写法在 A / M 两种兼容模式下都返回数值。列名、筛选、排序不变。只读。(本行说明 2026-11-19 更正:原先误写成更早一次变更的说明,SQL 正文未改。)
+ UPDATE grmp.script_config
+    SET script_content   = 'SELECT n.nspname AS schema,
+        t.relname AS "table",
+diff --git a/whitelist/scripts-delta-20261119.sql b/whitelist/scripts-delta-20261119.sql
+new file mode 100644
+index 0000000..8070426
+--- /dev/null
++++ b/whitelist/scripts-delta-20261119.sql
+@@ -0,0 +1,162 @@
++-- =====================================================================
++-- GRMP 诊断脚本白名单 · 增量导入（2026-11-19）
++-- =====================================================================
++--
++-- 适用前提：已导入过上一版的 132 条脚本。本文件只含相对那一版的**增量**，
++-- 不要整份重导（整份见同目录 scripts.sql，共 132 条）。
++--
++-- 升级路径：本文件用于从 v1.4.14 升级到 v1.5.0（更新 4 条：拼接改用 concat，修 M 兼容业务库上报错）。
++-- 更早的版本：先按 v1.4.14 的说明依次导完以前的增量（最后一份是 scripts-delta-20261116.sql），再导本文件。
++-- 不确定导到了哪一份时，把白名单导出交给我方核对。
++--
++--   新增   0 条 INSERT
++--   更新   4 条 UPDATE
++--
++-- 全部脚本均为**只读查询**，只访问系统视图与系统表，不读业务数据、
++-- 不含 DML/DDL、不修改任何对象。
++--
++-- 执行库（database_type）：appbusiness 的脚本 parameter_config 最前面带
++--   {"key":"dbName","value":"","type":"String","autoAcquire":false}，
++-- 中间件按调用时传入的 dbName 切到该业务库执行；postgres 的脚本不带 dbName，在 postgres 库执行。
++-- 本文件里的 UPDATE 会同时写 database_type 与 parameter_config，以本文件为准覆盖手工改过的记录。
++--
++-- 导入前请确认两处与现有规范的对齐：
++--   1. `create_user` / `last_modify_user` 当前填 '999999999'，与上一版保持一致；
++--      若要求填真实工号，请统一替换。
++--   2. id 用 `grmp.script_config_seq.nextval`，不硬编码，避免与现有记录冲突。
++--
++-- =====================================================================
++-- 一、新增 0 条
++-- =====================================================================
++
++-- =====================================================================
++-- 二、更新 4 条已有脚本（SQL 正文 / 参数定义 / 执行库）
++-- =====================================================================
++
++-- [explain.kernel_funcs]
++--   **函数名一列的拼接改用 concat**:concat('func:', p.proname)。本脚本在业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、不是字符串拼接,整条报 「argument of OR must be type boolean, not type name」(2026-11-17 现场反馈)。concat 在 A / M 两种兼容模式下都是拼接, A 兼容库上结果与原写法一致。列名、筛选不变。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT ''version'' AS item, version() AS detail
++UNION ALL
++SELECT concat(''func:'', p.proname) AS item, pg_get_function_arguments(p.oid) AS detail
++  FROM pg_proc p
++ WHERE p.proname IN (''gs_get_explain'', ''gs_get_kernel_info'');
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'explain.kernel_funcs';
++
++-- [health.stale_stats]
++--   **表名一列的拼接改用 concat**:concat(n.nspname, '.', c.relname)。本脚本在业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、不是字符串拼接,整条报 「argument of OR must be type boolean, not type name」(2026-11-17 现场反馈)。concat 在 A / M 两种兼容模式下都是拼接, A 兼容库上结果与原写法一致。列名、筛选、排序不变。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT tbl_name, frozen_pages, cur_pages, frozen_tuples, live_tuples,
++       stat_columns, last_analyze, last_autoanalyze
++FROM (
++  SELECT concat(n.nspname, ''.'', c.relname) AS tbl_name,
++         c.relpages AS frozen_pages,
++         pg_relation_size(c.oid) / current_setting(''block_size'')::bigint AS cur_pages,
++         c.reltuples::bigint AS frozen_tuples,
++         COALESCE(t.n_live_tup, 0) AS live_tuples,
++         (SELECT count(*) FROM pg_stats s
++           WHERE s.schemaname = n.nspname AND s.tablename = c.relname) AS stat_columns,
++         COALESCE(to_char(t.last_analyze, ''YYYY-MM-DD HH24:MI:SS''), ''never'') AS last_analyze,
++         COALESCE(to_char(t.last_autoanalyze, ''YYYY-MM-DD HH24:MI:SS''), ''never'') AS last_autoanalyze
++  FROM pg_class c
++  JOIN pg_namespace n ON n.oid = c.relnamespace
++  LEFT JOIN pg_stat_user_tables t ON t.relid = c.oid
++  WHERE c.relkind = ''r'' AND n.nspname NOT IN {{schema_filter}}
++    AND (c.reltuples > {{min_rows}}
++         OR pg_relation_size(c.oid) / current_setting(''block_size'')::bigint > {{min_pages}})
++) x
++ORDER BY (stat_columns = 0 OR frozen_pages = 0) DESC,
++         CASE WHEN frozen_pages > 0
++              THEN CAST(abs(cur_pages - frozen_pages) AS float8) / frozen_pages
++              ELSE 0 END DESC,
++         cur_pages DESC
++LIMIT {{limit}};
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'health.stale_stats';
++
++-- [health.unused_index]
++--   **索引名一列的拼接改用 concat**:concat(s.schemaname, '.', s.indexrelname)。本脚本在业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、不是字符串拼接,整条报 「argument of OR must be type boolean, not type name」(2026-11-17 现场反馈)。concat 在 A / M 两种兼容模式下都是拼接, A 兼容库上结果与原写法一致。列名、筛选、排序不变。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT concat(s.schemaname, ''.'', s.indexrelname) AS idx_name,
++       s.relname AS table_name,
++       s.idx_scan,
++       s.idx_tup_read,
++       s.idx_tup_fetch,
++       pg_relation_size(s.indexrelid) AS idx_bytes,
++       i.indisprimary,
++       i.indisunique,
++       COALESCE(ts.seq_scan, 0) AS table_seq_scan,
++       COALESCE(ts.idx_scan, 0) AS table_idx_scan
++FROM pg_stat_user_indexes s
++JOIN pg_index i ON i.indexrelid = s.indexrelid
++LEFT JOIN pg_stat_user_tables ts ON ts.relid = s.relid
++WHERE pg_relation_size(s.indexrelid) > {{min_bytes}}
++  AND s.schemaname NOT IN {{schema_filter}}
++ORDER BY s.idx_scan ASC, pg_relation_size(s.indexrelid) DESC
++LIMIT {{limit}};
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'health.unused_index';
++
++-- [lockwait.pairs]
++--   **锁对象一列的拼接改用 concat**:CASE WHEN c.relname IS NULL THEN '' ELSE concat(n.nspname, '.', c.relname) END。本脚本在业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、不是字符串拼接,整条报 「argument of OR must be type boolean, not type name」(2026-11-17 现场反馈)。concat 在 A / M 两种兼容模式下都是拼接, A 兼容库上结果与原写法一致。 锁对象不是表(事务号锁等)时照旧返回空串。列名、筛选、排序不变;时间差写法同 v1.4.14。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT w.pid                         AS waiter_pid,
++       COALESCE(w.sessionid, 0)      AS waiter_sessionid,
++       w.mode                        AS waiter_mode,
++       h.pid                         AS holder_pid,
++       COALESCE(h.sessionid, 0)      AS holder_sessionid,
++       h.mode                        AS holder_mode,
++       w.locktype                    AS locktype,
++       CASE WHEN c.relname IS NULL THEN '''' ELSE concat(n.nspname, ''.'', c.relname) END AS lock_object,
++       COALESCE(w.locktag, '''')       AS locktag,
++       round(date_part(''epoch'', clock_timestamp() - wa.query_start)::numeric, 1) AS waiter_wait_s,
++       COALESCE(wa.usename, '''')      AS waiter_user,
++       COALESCE(wa.application_name, '''') AS waiter_app,
++       COALESCE(substr(wa.query, 1, 300), '''')       AS waiter_query,
++       COALESCE(ha.state, '''')        AS holder_state,
++       COALESCE(ha.usename, '''')      AS holder_user,
++       COALESCE(ha.application_name, '''') AS holder_app,
++       round(date_part(''epoch'', clock_timestamp() - ha.xact_start)::numeric, 1) AS holder_xact_age_s,
++       COALESCE(substr(ha.query, 1, 300), '''')       AS holder_query
++  FROM pg_locks w
++  JOIN pg_locks h
++    ON h.locktag = w.locktag AND h.granted AND h.pid <> w.pid
++  LEFT JOIN pg_class c     ON c.oid = w.relation
++  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
++  LEFT JOIN pg_stat_activity wa ON wa.pid = w.pid
++  LEFT JOIN pg_stat_activity ha ON ha.pid = h.pid
++ WHERE w.granted = false
++ ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
++ LIMIT {{limit}};
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'lockwait.pairs';
++
++-- =====================================================================
++-- 三、导入后自检
++-- =====================================================================
++-- 应为 132：
++--   SELECT count(*) FROM grmp.script_config WHERE scene = 'AGENT';
++-- 本次没有新增脚本。
++-- 更新应已生效（应返回 0 行；库编码为 UTF8 时 md5 与这里一致）：
++--   SELECT c.script_name FROM grmp.script_config c
++--     JOIN (VALUES
++--     ('explain.kernel_funcs', '896b5c1753ab8fca536ac67ac852d9bb'),
++--     ('health.stale_stats', '5b78f231bf8267ec44f210a2a0b207c9'),
++--     ('health.unused_index', '23e31f4263e706cc4c7595262febfd68'),
++--     ('lockwait.pairs', 'da54f420c37011ad2050cf565e7472e2')) AS v(name, sum) ON c.script_name = v.name
++--    WHERE md5(c.script_content) <> v.sum;
++-- 参数定义也一起更新了的（应列出这些脚本、且 parameter_config 与 scripts.sql 里一致）：
++--   SELECT script_name, parameter_config FROM grmp.script_config WHERE script_name IN ('-');
++-- 执行库应与本版一致（appbusiness 应为 39 条，且都以 dbName 开头）：
++--   SELECT count(*) FROM grmp.script_config WHERE scene = 'AGENT' AND database_type = 'appbusiness';
++--   SELECT script_name FROM grmp.script_config WHERE scene = 'AGENT' AND database_type = 'appbusiness'
++--      AND parameter_config NOT LIKE '[{"key":"dbName",%';     -- 应返回 0 行
+diff --git a/whitelist/scripts.sql b/whitelist/scripts.sql
+index debdb5c..e694317 100644
+--- a/whitelist/scripts.sql
++++ b/whitelist/scripts.sql
+@@ -25,24 +25,6 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
+ FROM pg_stat_database
+ WHERE datname = current_database();
+ ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.unused_index', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT s.schemaname||''.''||s.indexrelname AS idx_name,
+-       s.relname AS table_name,
+-       s.idx_scan,
+-       s.idx_tup_read,
+-       s.idx_tup_fetch,
+-       pg_relation_size(s.indexrelid) AS idx_bytes,
+-       i.indisprimary,
+-       i.indisunique,
+-       COALESCE(ts.seq_scan, 0) AS table_seq_scan,
+-       COALESCE(ts.idx_scan, 0) AS table_idx_scan
+-FROM pg_stat_user_indexes s
+-JOIN pg_index i ON i.indexrelid = s.indexrelid
+-LEFT JOIN pg_stat_user_tables ts ON ts.relid = s.relid
+-WHERE pg_relation_size(s.indexrelid) > {{min_bytes}}
+-  AND s.schemaname NOT IN {{schema_filter}}
+-ORDER BY s.idx_scan ASC, pg_relation_size(s.indexrelid) DESC
+-LIMIT {{limit}};
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"min_bytes","value":"","type":"INTEGER","autoAcquire":false},{"key":"schema_filter","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'memanalyze.activity', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT sessionid, pid, usename, application_name, state, query FROM pg_stat_activity;
+ ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'memanalyze.cols_bare', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT a.attname::text AS attname
+@@ -408,12 +390,6 @@ SELECT e.stat_name AS stat_name,
+   FROM e JOIN b USING (stat_name)
+  ORDER BY delta_us DESC;
+ ', '[{"key":"b","value":"","type":"INTEGER","autoAcquire":false},{"key":"e","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'explain.kernel_funcs', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''version'' AS item, version() AS detail
+-UNION ALL
+-SELECT ''func:'' || p.proname AS item, pg_get_function_arguments(p.oid) AS detail
+-  FROM pg_proc p
+- WHERE p.proname IN (''gs_get_explain'', ''gs_get_kernel_info'');
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'explain.active_pid', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT pid, unique_sql_id, query, query_start
+   FROM pg_stat_activity
+  WHERE unique_sql_id = {{sql_id}}
+@@ -816,32 +792,6 @@ WHERE sessionid <> 0
+ GROUP BY state
+ ORDER BY cnt DESC;
+ ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.stale_stats', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT tbl_name, frozen_pages, cur_pages, frozen_tuples, live_tuples,
+-       stat_columns, last_analyze, last_autoanalyze
+-FROM (
+-  SELECT n.nspname || ''.'' || c.relname AS tbl_name,
+-         c.relpages AS frozen_pages,
+-         pg_relation_size(c.oid) / current_setting(''block_size'')::bigint AS cur_pages,
+-         c.reltuples::bigint AS frozen_tuples,
+-         COALESCE(t.n_live_tup, 0) AS live_tuples,
+-         (SELECT count(*) FROM pg_stats s
+-           WHERE s.schemaname = n.nspname AND s.tablename = c.relname) AS stat_columns,
+-         COALESCE(to_char(t.last_analyze, ''YYYY-MM-DD HH24:MI:SS''), ''never'') AS last_analyze,
+-         COALESCE(to_char(t.last_autoanalyze, ''YYYY-MM-DD HH24:MI:SS''), ''never'') AS last_autoanalyze
+-  FROM pg_class c
+-  JOIN pg_namespace n ON n.oid = c.relnamespace
+-  LEFT JOIN pg_stat_user_tables t ON t.relid = c.oid
+-  WHERE c.relkind = ''r'' AND n.nspname NOT IN {{schema_filter}}
+-    AND (c.reltuples > {{min_rows}}
+-         OR pg_relation_size(c.oid) / current_setting(''block_size'')::bigint > {{min_pages}})
+-) x
+-ORDER BY (stat_columns = 0 OR frozen_pages = 0) DESC,
+-         CASE WHEN frozen_pages > 0
+-              THEN CAST(abs(cur_pages - frozen_pages) AS float8) / frozen_pages
+-              ELSE 0 END DESC,
+-         cur_pages DESC
+-LIMIT {{limit}};
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"min_rows","value":"","type":"INTEGER","autoAcquire":false},{"key":"min_pages","value":"","type":"INTEGER","autoAcquire":false},{"key":"schema_filter","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'vacuum.oldest_xmin', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''long_xact'' AS source,
+        CAST(pid AS text) AS identifier,
+        EXTRACT(EPOCH FROM (now()-xact_start)) AS xmin_age_s,
+@@ -1330,7 +1280,7 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
+        COALESCE(h.sessionid, 0)      AS holder_sessionid,
+        h.mode                        AS holder_mode,
+        w.locktype                    AS locktype,
+-       COALESCE(n.nspname || ''.'' || c.relname, '''')  AS lock_object,
++       CASE WHEN c.relname IS NULL THEN '''' ELSE concat(n.nspname, ''.'', c.relname) END AS lock_object,
+        COALESCE(w.locktag, '''')       AS locktag,
+        round(date_part(''epoch'', clock_timestamp() - wa.query_start)::numeric, 1) AS waiter_wait_s,
+        COALESCE(wa.usename, '''')      AS waiter_user,
+@@ -1352,3 +1302,53 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
+  ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
+  LIMIT {{limit}};
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.stale_stats', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT tbl_name, frozen_pages, cur_pages, frozen_tuples, live_tuples,
++       stat_columns, last_analyze, last_autoanalyze
++FROM (
++  SELECT concat(n.nspname, ''.'', c.relname) AS tbl_name,
++         c.relpages AS frozen_pages,
++         pg_relation_size(c.oid) / current_setting(''block_size'')::bigint AS cur_pages,
++         c.reltuples::bigint AS frozen_tuples,
++         COALESCE(t.n_live_tup, 0) AS live_tuples,
++         (SELECT count(*) FROM pg_stats s
++           WHERE s.schemaname = n.nspname AND s.tablename = c.relname) AS stat_columns,
++         COALESCE(to_char(t.last_analyze, ''YYYY-MM-DD HH24:MI:SS''), ''never'') AS last_analyze,
++         COALESCE(to_char(t.last_autoanalyze, ''YYYY-MM-DD HH24:MI:SS''), ''never'') AS last_autoanalyze
++  FROM pg_class c
++  JOIN pg_namespace n ON n.oid = c.relnamespace
++  LEFT JOIN pg_stat_user_tables t ON t.relid = c.oid
++  WHERE c.relkind = ''r'' AND n.nspname NOT IN {{schema_filter}}
++    AND (c.reltuples > {{min_rows}}
++         OR pg_relation_size(c.oid) / current_setting(''block_size'')::bigint > {{min_pages}})
++) x
++ORDER BY (stat_columns = 0 OR frozen_pages = 0) DESC,
++         CASE WHEN frozen_pages > 0
++              THEN CAST(abs(cur_pages - frozen_pages) AS float8) / frozen_pages
++              ELSE 0 END DESC,
++         cur_pages DESC
++LIMIT {{limit}};
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"min_rows","value":"","type":"INTEGER","autoAcquire":false},{"key":"min_pages","value":"","type":"INTEGER","autoAcquire":false},{"key":"schema_filter","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.unused_index', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT concat(s.schemaname, ''.'', s.indexrelname) AS idx_name,
++       s.relname AS table_name,
++       s.idx_scan,
++       s.idx_tup_read,
++       s.idx_tup_fetch,
++       pg_relation_size(s.indexrelid) AS idx_bytes,
++       i.indisprimary,
++       i.indisunique,
++       COALESCE(ts.seq_scan, 0) AS table_seq_scan,
++       COALESCE(ts.idx_scan, 0) AS table_idx_scan
++FROM pg_stat_user_indexes s
++JOIN pg_index i ON i.indexrelid = s.indexrelid
++LEFT JOIN pg_stat_user_tables ts ON ts.relid = s.relid
++WHERE pg_relation_size(s.indexrelid) > {{min_bytes}}
++  AND s.schemaname NOT IN {{schema_filter}}
++ORDER BY s.idx_scan ASC, pg_relation_size(s.indexrelid) DESC
++LIMIT {{limit}};
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"min_bytes","value":"","type":"INTEGER","autoAcquire":false},{"key":"schema_filter","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'explain.kernel_funcs', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''version'' AS item, version() AS detail
++UNION ALL
++SELECT concat(''func:'', p.proname) AS item, pg_get_function_arguments(p.oid) AS detail
++  FROM pg_proc p
++ WHERE p.proname IN (''gs_get_explain'', ''gs_get_kernel_info'');
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
