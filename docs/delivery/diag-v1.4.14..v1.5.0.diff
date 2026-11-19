@@ -1,5 +1,5 @@
 diff --git a/.delivery.json b/.delivery.json
-index 9c6a690..500bc2b 100644
+index 9c6a690..2cb9406 100644
 --- a/.delivery.json
 +++ b/.delivery.json
 @@ -1,22 +1,22 @@
@@ -14,8 +14,8 @@ index 9c6a690..500bc2b 100644
 -    "commit": "ce6da96ffae03710f13e6031b72a08b91a5b3fe1",
 -    "date": "2026-11-16T00:36:00-08:00"
 +    "ref": "agent-v1.5.0",
-+    "commit": "495575b5a3be53fd71742051e00df91af31ceecd",
-+    "date": "2026-11-19T12:52:53+08:00"
++    "commit": "ef0c07795c295caf85ab44fc213b083aa1a4ba60",
++    "date": "2026-11-19T13:32:04+08:00"
    },
    "base": {
 -    "version": "diag-v1.4.13",
@@ -33,7 +33,7 @@ index 9c6a690..500bc2b 100644
 -  "files": 430,
 -  "digest": "2856c06f3ed8701f1c72f4ecc4344af53014f3c8f4a5e9251a4fd7e35bd7ee1e"
 +  "files": 432,
-+  "digest": "451b296d3ca6e162ad77405e1a2cbc3233325269336fec6404d2b732e7bf6a8f"
++  "digest": "5a44da79c26304e7526634020dfeba75ad901b225c1d0ff9714c65983c04e54c"
  }
 diff --git a/common/VERSION b/common/VERSION
 index 1afe4aa..ea7d5e0 100644
@@ -427,7 +427,7 @@ index 4456c08..dbb3c74 100644
      tail = "——未找到的按编造处理,回答里不得引用" if n_bad else ""
      lines.append(f"合计 {len(cites)} 个 ID:{n_ok} 个在库,{n_warn} 个需注意,{n_bad} 个未找到{tail}")
 diff --git a/skills/gaussdb-login/scripts/selfcheck.py b/skills/gaussdb-login/scripts/selfcheck.py
-index ed99f53..72c2870 100644
+index ed99f53..b87cded 100644
 --- a/skills/gaussdb-login/scripts/selfcheck.py
 +++ b/skills/gaussdb-login/scripts/selfcheck.py
 @@ -27,8 +27,8 @@ for _anc in _HERE.parents:
@@ -470,20 +470,25 @@ index ed99f53..72c2870 100644
  def _err(exc: Exception) -> str:
      text = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
      if BANK_OPAQUE in text:
-@@ -113,9 +135,9 @@ def check_whitelist(conn, registry: Registry) -> List[Item]:
+@@ -112,10 +134,13 @@ def check_whitelist(conn, registry: Registry) -> List[Item]:
+     want = used_names(registry)
      missing = sorted(want - have)
      if not missing:
-         return [Item("白名单", OK, "本版本用到的 %d 条都已登记(中间件共 %d 条)" % (len(want), len(have)))]
+-        return [Item("白名单", OK, "本版本用到的 %d 条都已登记(中间件共 %d 条)" % (len(want), len(have)))]
 -    return [Item("白名单", FAIL, "缺 %d 条(中间件 %d 条,本版本要 %d 条):%s%s。按补充说明「SQL 白名单」一节导入增量"
 -                 % (len(missing), len(have), len(want), "、".join(missing[:8]), "等" if len(missing) > 8 else ""),
 -                 MIDDLEWARE)]
++        # 清单接口只回脚本名与参数、没有正文:只改正文的增量没导时这里照样 ✓(2026-11-19 补测)。级别保持 ✓,只点明这一点
++        latest = deltas.DELTAS[-1].file if deltas.DELTAS else deltas.FULL
++        return [Item("白名单", OK, "本版本用到的 %d 条都已登记(中间件共 %d 条)。脚本正文是否为最新本项看不出"
++                     "(中间件清单接口不返回正文):请确认已导到 %s" % (len(want), len(have), latest))]
 +    return [Item("白名单", FAIL, "缺 %d 条(中间件 %d 条,本版本要 %d 条):%s%s。%s"
 +                 % (len(missing), len(have), len(want), "、".join(missing[:8]), "等" if len(missing) > 8 else "",
 +                    deltas.advice(missing=missing)), MIDDLEWARE)]
  
  
  def check_scripts(runner) -> List[Item]:
-@@ -139,11 +161,12 @@ def check_scripts(runner) -> List[Item]:
+@@ -139,11 +164,12 @@ def check_scripts(runner) -> List[Item]:
      return items
  
  
@@ -498,7 +503,7 @@ index ed99f53..72c2870 100644
      client = getattr(runner, "client", None)
      if client is None:
          return []
-@@ -171,6 +194,8 @@ def check_routing(conn, runner, used: Optional[set] = None) -> List[Item]:
+@@ -171,6 +197,8 @@ def check_routing(conn, runner, used: Optional[set] = None) -> List[Item]:
      else:
          items.append(Item("业务库切换", WARN, "本会话没有切到业务库(登录时没给业务库名,或核实没通过 —— 见登录输出)。"
                            "要诊断某个业务库的表、执行计划,登录时带 --database <业务库>", ""))
@@ -507,7 +512,7 @@ index ed99f53..72c2870 100644
      if missing or others:
          parts = []
          if missing:
-@@ -179,7 +204,9 @@ def check_routing(conn, runner, used: Optional[set] = None) -> List[Item]:
+@@ -179,7 +207,9 @@ def check_routing(conn, runner, used: Optional[set] = None) -> List[Item]:
          if others:
              parts.append("%d 条读 SQL 历史 / WDR 快照 / 实例级视图的带了 dbName(%s%s),本版对它们明确带 postgres,照常可用"
                           % (len(others), "、".join(others[:4]), "等" if len(others) > 4 else ""))
@@ -518,7 +523,7 @@ index ed99f53..72c2870 100644
      elif reg:
          items.append(Item("白名单切库标注", OK, "与本版一致(%d 条在业务库执行)" % len(reg)))
      return items
-@@ -223,9 +250,15 @@ def main(argv: Optional[List[str]] = None) -> int:
+@@ -223,9 +253,15 @@ def main(argv: Optional[List[str]] = None) -> int:
          print(render_report(items), end="")
          return 1
      if conn.driver == "grmp":
