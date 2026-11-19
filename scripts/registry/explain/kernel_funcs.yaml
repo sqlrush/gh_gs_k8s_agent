@@ -8,6 +8,8 @@
 #   item = 'func:gs_get_kernel_info'  detail = ''(无参)
 # 函数不存在时对应行不出现——调用方按缺行判定,不按 detail 判定。
 # 只查 pg_proc + version(),任何版本都能跑,是这组脚本里唯一无条件安全的一条。
+# 拼接一律 concat(…),不用 ||(2026-11-17 现场):本脚本切到业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、
+# 不是字符串拼接,整条报「argument … not type name」。concat 在 A / M 两种兼容模式下都是拼接。守卫:test_registry_m_compat_units.py。
 name: explain.kernel_funcs
 database_type: appbusiness
 description: 探测 GaussDB 私有内核函数(gs_get_explain / gs_get_kernel_info)是否存在,并带回 version()
@@ -15,6 +17,6 @@ readonly: true
 sql: |
   SELECT 'version' AS item, version() AS detail
   UNION ALL
-  SELECT 'func:' || p.proname AS item, pg_get_function_arguments(p.oid) AS detail
+  SELECT concat('func:', p.proname) AS item, pg_get_function_arguments(p.oid) AS detail
     FROM pg_proc p
    WHERE p.proname IN ('gs_get_explain', 'gs_get_kernel_info');

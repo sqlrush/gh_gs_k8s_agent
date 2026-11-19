@@ -27,8 +27,8 @@ for _anc in _HERE.parents:
 import render  # noqa: E402
 from common import access, cli, config  # noqa: E402
 from common.version import package_version  # noqa: E402
-from common.grmp import routing  # noqa: E402
-from common.grmp.registry import Registry  # noqa: E402
+from common.grmp import deltas, routing  # noqa: E402
+from common.grmp.registry import Registry, RegistryError  # noqa: E402
 
 OK, WARN, FAIL = "✓", "！", "✕"
 DEPLOY, MIDDLEWARE, OPS = "部署方", "中间件团队", "运维 DBA"
@@ -57,6 +57,28 @@ class Item(NamedTuple):
     mark: str
     detail: str
     owner: str = ""
+
+
+NO_REGISTRY = ("无法比对:读不到本地的脚本定义目录(%s)—— 技能包里的 scripts/ 没放进技能目录。"
+               "把技能包里的 scripts/ 整个放到技能目录下、与 common/ 同一层,再自检一次")
+
+
+def _safe(what: str, check, *args) -> List[Item]:
+    """一项检查出了意料之外的错,只把这一项记成 ✕ 并写出原因,报告照常输出完(2026-11-17 现场:一项抛错整份报告中断)。"""
+    try:
+        return check(*args)
+    except Exception as exc:  # noqa: BLE001 —— 自检本身不能因为某一项出错而中断
+        return [Item(what, FAIL, "自检这一项出错:%s" % _err(exc), DEPLOY)]
+
+
+def _registry() -> tuple:
+    """本地脚本定义(白名单核对、切库标注要拿它和中间件的清单比)。读不到返回 (None, 原因)。"""
+    reg = Registry()
+    try:
+        reg.names()
+    except RegistryError as exc:
+        return None, NO_REGISTRY % reg.root if "不存在" in str(exc) else "无法比对:本地脚本定义读取失败:%s" % _err(exc)
+    return reg, ""
 
 
 def _err(exc: Exception) -> str:
@@ -112,10 +134,13 @@ def check_whitelist(conn, registry: Registry) -> List[Item]:
     want = used_names(registry)
     missing = sorted(want - have)
     if not missing:
-        return [Item("白名单", OK, "本版本用到的 %d 条都已登记(中间件共 %d 条)" % (len(want), len(have)))]
-    return [Item("白名单", FAIL, "缺 %d 条(中间件 %d 条,本版本要 %d 条):%s%s。按补充说明「SQL 白名单」一节导入增量"
-                 % (len(missing), len(have), len(want), "、".join(missing[:8]), "等" if len(missing) > 8 else ""),
-                 MIDDLEWARE)]
+        # 清单接口只回脚本名与参数、没有正文:只改正文的增量没导时这里照样 ✓(2026-11-19 补测)。级别保持 ✓,只点明这一点
+        latest = deltas.DELTAS[-1].file if deltas.DELTAS else deltas.FULL
+        return [Item("白名单", OK, "本版本用到的 %d 条都已登记(中间件共 %d 条)。脚本正文是否为最新本项看不出"
+                     "(中间件清单接口不返回正文):请确认已导到 %s" % (len(want), len(have), latest))]
+    return [Item("白名单", FAIL, "缺 %d 条(中间件 %d 条,本版本要 %d 条):%s%s。%s"
+                 % (len(missing), len(have), len(want), "、".join(missing[:8]), "等" if len(missing) > 8 else "",
+                    deltas.advice(missing=missing)), MIDDLEWARE)]
 
 
 def check_scripts(runner) -> List[Item]:
@@ -139,11 +164,12 @@ def check_scripts(runner) -> List[Item]:
     return items
 
 
-def check_routing(conn, runner, used: Optional[set] = None) -> List[Item]:
+def check_routing(conn, runner, used: Optional[set] = None, marks: bool = True) -> List[Item]:
     """切到业务库(dbName,2026-11-11 行方切库方案):本会话切过去没有;行方白名单里的标注与本版是否一致。
 
     used:本版用到的脚本。标注只比这些 —— 本版不再调用的旧脚本(如 v1.4.13 起不交付的两语句脚本)行方可以留着,
-    增量不生成删除,按它们报「不一致」导完增量也消不掉(2026-11-12 回归)。"""
+    增量不生成删除,按它们报「不一致」导完增量也消不掉(2026-11-12 回归)。
+    marks=False:本地脚本定义读不到时只查「业务库切换」,标注比对由调用方标「无法比对」。"""
     client = getattr(runner, "client", None)
     if client is None:
         return []
@@ -171,6 +197,8 @@ def check_routing(conn, runner, used: Optional[set] = None) -> List[Item]:
     else:
         items.append(Item("业务库切换", WARN, "本会话没有切到业务库(登录时没给业务库名,或核实没通过 —— 见登录输出)。"
                           "要诊断某个业务库的表、执行计划,登录时带 --database <业务库>", ""))
+    if not marks:
+        return items
     if missing or others:
         parts = []
         if missing:
@@ -179,7 +207,9 @@ def check_routing(conn, runner, used: Optional[set] = None) -> List[Item]:
         if others:
             parts.append("%d 条读 SQL 历史 / WDR 快照 / 实例级视图的带了 dbName(%s%s),本版对它们明确带 postgres,照常可用"
                          % (len(others), "、".join(others[:4]), "等" if len(others) > 4 else ""))
-        items.append(Item("白名单切库标注", WARN, ";".join(parts) + "。按本版增量白名单导入后一致", MIDDLEWARE))
+        # 2026-11-19:原先只说「按本版增量导入」,现场往往还缺更早的增量 —— 按对不上的脚本推出从哪一份起导
+        items.append(Item("白名单切库标注", WARN, ";".join(parts) + "。" + deltas.advice(misrouted=set(missing) | set(others)),
+                          MIDDLEWARE))
     elif reg:
         items.append(Item("白名单切库标注", OK, "与本版一致(%d 条在业务库执行)" % len(reg)))
     return items
@@ -223,9 +253,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(render_report(items), end="")
         return 1
     if conn.driver == "grmp":
-        registry = Registry()
-        items += check_whitelist(conn, registry) + check_routing(conn, runner, used_names(registry))
-    items += check_scripts(runner) + check_switches(runner)
+        registry, why = _registry()
+        if registry is None:
+            items.append(Item("白名单", WARN, why, DEPLOY))
+            items += _safe("业务库切换", check_routing, conn, runner, None, False)
+            items.append(Item("白名单切库标注", WARN, why, DEPLOY))
+        else:
+            items += _safe("白名单", check_whitelist, conn, registry)
+            items += _safe("业务库切换", lambda: check_routing(conn, runner, used_names(registry)))
+    items += _safe("关键脚本试跑", check_scripts, runner) + _safe("数据库监控开关", check_switches, runner)
     print(render_report(items), end="")
     return 0 if all(i.mark != FAIL for i in items) else 1
 

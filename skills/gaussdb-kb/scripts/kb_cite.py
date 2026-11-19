@@ -3,6 +3,7 @@
 只报告不拦截:给用户复核模型的回答,也给模型交稿前自查。
   存在 / 前缀匹配   ID 在库里(报告里案例 ID 常被截断显示成 S2-20250120-CBST-…,去掉省略号后按前缀找)
   已废止           条款在 archive/,不得作为判定依据
+  已退役           官方文档集条目所在的那套文档已整套退役(archive/docsets/),以在用版本为准
   不唯一           截断的前缀对上了多个案例
   未找到           库里没有——按编造处理,退出码 2
 等待事件名、GUC 名、错误码不是知识库 ID,不在核对范围。真相是 <kb>/ 的文件,不连库。
@@ -21,7 +22,7 @@ import pathlib
 import re
 import sys
 from dataclasses import asdict, dataclass
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from common.kb import cases as kbcases
 from common.kb import citestyle
@@ -32,7 +33,7 @@ _ELLIPSIS_RE = re.compile(r"(?:…|\.{2,})+$")
 TYPED_RE = re.compile(r"(?<![A-Za-z0-9_-])(?:WK-\d{4}|PD-[A-Z][A-Z0-9]{1,9}-\d{5}|PD-\d{4}|KD-\d{4}|RB-[A-Z]{2,4}-\d{3}"
                       r"|BL-[A-Z0-9_]+-[A-Z0-9_]+|EP-[A-Z0-9_]+)(?![A-Za-z0-9_])")
 
-STATUS_MARK = {"存在": "✓", "前缀匹配": "✓", "已废止": "⚠", "不唯一": "⚠", "未找到": "✗"}
+STATUS_MARK = {"存在": "✓", "前缀匹配": "✓", "已废止": "⚠", "已退役": "⚠", "不唯一": "⚠", "未找到": "✗"}
 _LIB_RE = re.compile(r"[(（]\s*引用自\s*(%s)\s+([A-Z][^\s,，;;:：、。)）]*)" % "|".join(
     re.escape(n) for n in sorted(citestyle.LIBRARY_NAMES, key=len, reverse=True)))
 
@@ -109,9 +110,23 @@ def typed_ids(kb: pathlib.Path) -> Dict[str, str]:
     return out
 
 
-def _check_typed(tok: str, ids: Dict[str, str]) -> Cite:
+def _check_docset(tok: str, kb: pathlib.Path) -> Optional[Cite]:
+    """官方文档集条目(PD-<代号>-<5 位>)在 <kb>/docsets/<代号>/items/,不在类型化条目里(2026-11-19 修:原先一律判编造)。
+    在用的文档集里有 → 存在;只在整套退役的文档集里有 → 已退役(提示换新版文档的依据,不按编造处理)。"""
+    from common.kb import docset
+    if docset.code_of(tok) is None:
+        return None
+    if docset.find_item(kb, tok) is not None:
+        return Cite(tok, "typed", "存在", tok)
+    if docset.find_retired_item(kb, tok) is not None:
+        return Cite(tok, "typed", "已退役", tok, "所在的官方文档集已整套退役,请以在用版本的文档为准")
+    return None
+
+
+def _check_typed(tok: str, ids: Dict[str, str], kb: Optional[pathlib.Path] = None) -> Cite:
     if tok not in ids:
-        return Cite(tok, "typed", "未找到", note="疑似编造")
+        hit = _check_docset(tok, kb) if kb is not None else None
+        return hit or Cite(tok, "typed", "未找到", note="疑似编造")
     if ids[tok] != tok:
         return Cite(tok, "typed", "前缀匹配", ids[tok], note=f"旧 ID,已改为 {ids[tok]}")
     return Cite(tok, "typed", "存在", tok)
@@ -147,7 +162,7 @@ def check(text: str, kb: pathlib.Path) -> List[Cite]:
         elif kind == "clause":
             out.append(_check_clause(tok, active, archived))
         else:
-            out.append(_check_typed(tok, typed))
+            out.append(_check_typed(tok, typed, kb))
     return out
 
 
@@ -177,7 +192,7 @@ def render(cites: List[Cite]) -> str:
         note = f"({c.note})" if c.note else ""
         lines.append(f"  {STATUS_MARK[c.status]} {c.token}  {c.status}{extra} {note}".rstrip())
     n_ok = sum(1 for c in cites if c.status in ("存在", "前缀匹配"))
-    n_warn = sum(1 for c in cites if c.status in ("已废止", "不唯一"))
+    n_warn = sum(1 for c in cites if c.status in ("已废止", "已退役", "不唯一"))
     n_bad = sum(1 for c in cites if c.status == "未找到")
     tail = "——未找到的按编造处理,回答里不得引用" if n_bad else ""
     lines.append(f"合计 {len(cites)} 个 ID:{n_ok} 个在库,{n_warn} 个需注意,{n_bad} 个未找到{tail}")

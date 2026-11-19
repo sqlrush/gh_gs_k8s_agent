@@ -66,7 +66,7 @@ UPDATE grmp.script_config
  WHERE script_name = 'lockwait.pairs';
 
 -- [vacuum.dead_tuples]
---   **多取三列**：这张表的更新、HOT 更新、删除次数（pg_stat_user_tables 的 n_tup_upd / n_tup_hot_upd / n_tup_del）， 报告据此说明死元组来自哪类业务操作。筛选、排序不变。只读。
+--   **时间差改用 date_part('epoch', clock_timestamp() - 列)**(last_autovacuum_age_s、last_vacuum_age_s 两列):本脚本在业务库执行,M 兼容模式的业务库里 now() 返回 datetime,与 timestamptz 列相减后结果类型 JDBC 驱动不认识,整条报「un support type」。新写法在 A / M 两种兼容模式下都返回数值。列名、筛选、排序不变。只读。(本行说明 2026-11-19 更正:原先误写成更早一次变更的说明,SQL 正文未改。)
 UPDATE grmp.script_config
    SET script_content   = 'SELECT n.nspname AS schema,
        t.relname AS "table",
