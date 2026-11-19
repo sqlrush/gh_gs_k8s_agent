@@ -1,6 +1,6 @@
 # Fuyao 沙箱部署手册：从零到上线（预览）
 
-> 本文随测试仓库 [gh_agent_k8s](https://github.com/sqlrush/gh_agent_k8s) 标签 `agent-v1.5.0` 发布(源文件同名,在其 `docs/` 下)。文中提到的 `k8s/`、`docker/`、`scripts/`、`gateway/` 等路径指该仓库或离线交付包里的同名路径,不在本仓库。
+> 本文随测试仓库 [gh_agent_k8s](https://github.com/sqlrush/gh_agent_k8s) 标签 `agent-v1.5.0` 发布(源文件同名,在其 `docs/` 下;§16「制作容器镜像与鲲鹏沙箱镜像」为发布后补充)。文中提到的 `k8s/`、`docker/`、`scripts/`、`gateway/` 等路径指该仓库或离线交付包里的同名路径,不在本仓库。
 
 > **预览**：Fuyao 沙箱模式随 `agent-v1.5.0` 发布，属于**预览**功能。平台的三项安全前提（envd 认证、沙箱出网限制、OpenSandbox 认证）落实之前，**只用于测试环境**：只用测试账号、测试库与模拟中间件，不接生产数据库与真实的中间件令牌。按需、固定池化两种模式不受影响。
 
@@ -173,6 +173,9 @@ Fuyao 模式里出现的「承载 Pod」是**平台的**对象（每个承载 Po
 ## 2. 准备材料
 
 ### 2.1 离线包内容
+
+镜像有两种取法：用我方发布的（离线包，或从 `ghcr.io/sqlrush` 直接拉 K8s 镜像，见 §3）；或现场从源码自己制作，见 **§16**。
+两种做法得到的镜像内容相同，后续步骤也相同。
 
 我方用 `scripts/package-images.sh <TAG> --e2b` 打包（`--e2b` 不能与 `--without-kbstd` 同用）。包目录 `gaussdb-agent-v<版本>-oc1.18.27/` 下：
 
@@ -942,3 +945,147 @@ curl -s -X POST -H "X-Admin-Token: $ADMIN" -H 'Content-Type: application/json' -
 4. 模板在哪台主机构建、由谁注册；内部镜像仓库与证书；模板的删除方式。
 5. 宿主机时钟同步（NTP）、沙箱到两个集群服务的连通性、沙箱出网规则。
 6. 承载 Pod 故障、宿主机重启时沙箱的行为；暂停快照的存放位置与容量。
+
+---
+
+## 16. 附录：制作容器镜像与鲲鹏沙箱镜像（现场自行构建时）
+
+正常部署用离线包或 `ghcr.io/sqlrush` 上的现成镜像即可，**不需要**自己构建。以下情况才需要：
+现场要求从源码构建、要推进内网镜像仓库而又不方便导入离线包、或改了代码要出自己的镜像。
+只是**改虚拟机规格**（vCPU、内存）不用重建镜像，按 §11.3 用 `--cpu` / `--memory` 重新注册模板即可。
+
+一共两类、八个镜像：
+
+| 类别 | 镜像 | 做法 | 用在 |
+|---|---|---|---|
+| 容器镜像（5 个） | `gaussdb-agent-runtime`、`-kb-import`、`-gateway`、`-frontend`、`-kbstd` | §16.3 | K8s（§3） |
+| 发版台（1 个） | `gaussdb-agent-release` | §16.3（随上面一起构建） | 跳板机，不进集群 |
+| 鲲鹏沙箱镜像（2 个） | `gaussdb-agent-runtime-e2b`（诊断）、`gaussdb-agent-kb-import-e2b`（导入） | §16.4 | 注册成平台模板（§4），**不进 K8s** |
+
+沙箱镜像是在同版本的 runtime、kb-import、kbstd 三个容器镜像之上加工出来的，**先做容器镜像，再做沙箱镜像**。
+
+### 16.1 构建机要求
+
+| 项 | 要求 |
+|---|---|
+| 系统与工具 | Linux 或 macOS；Docker 24 及以上，带 `buildx`（我方构建用 Docker 29）；`git`、`bash`、`python3` |
+| 架构 | 鲲鹏是 **arm64**。在 arm64 机器上构建最快；在 x86 机器上要交叉构建（`--platform linux/arm64`，需要 buildx 的 QEMU / binfmt 支持），会慢很多 |
+| 磁盘 | 预留 40 GB 以上（两个沙箱镜像各含 6 GB 占位文件，构建过程中要展开） |
+| 外网 | 构建期要访问：Docker Hub（基础镜像 `python:3.12-slim-bookworm`、`nginxinc/nginx-unprivileged:1.27-alpine`、Dockerfile 语法前端 `docker/dockerfile:1.7`）、Debian 软件源、GitHub（opencode 1.18.27 程序包）、`models.dev`（模型清单）、PyPI。**镜像里不保留任何外网依赖**，运行时不联外。内网构建要为以上地址配好代理或镜像源，否则请直接用离线包 |
+| 源码 | `gh_agent_k8s` 仓库的发布标签，例如 `agent-v1.5.0` |
+| 标准知识库包 | `kb-std-<代号>-<内容版本>.tar.gz`（官方文档集，如 `kb-std-G25132C-….tar.gz`）。**不在代码仓库里**（官方文档的派生内容），向我方索取；也可以不自己构建 kbstd 镜像，直接用离线包或 GHCR 上的同版本 kbstd 镜像（它的内容只随文档集变化，不随代码变化） |
+
+### 16.2 取源码
+
+```bash
+git clone https://github.com/sqlrush/gh_agent_k8s.git
+cd gh_agent_k8s
+git checkout agent-v1.5.0
+cat agent/common/VERSION                 # 预期:agent-v1.5.0
+TAG=agent-v1.5.0-oc1.18.27               # 镜像标签 = 发布标签 + opencode 版本
+```
+
+### 16.3 制作容器镜像（5 个 + 发版台）
+
+在 arm64 机器上（本机架构，标签不带后缀）：
+
+```bash
+scripts/build-images.sh $TAG --kbstd /path/to/kbstd              # 目录里放 kb-std-*.tar.gz
+```
+
+在 x86 机器上交叉构建 arm64（标签带 `-arm64` 后缀，便于和本机架构的区分；打离线包时脚本按这个规则找）：
+
+```bash
+scripts/build-images.sh $TAG-arm64 --platform linux/arm64 --kbstd /path/to/kbstd
+```
+
+**预期**：`docker images | grep $TAG` 列出 6 个：runtime、kb-import、gateway、frontend、release、kbstd。
+不给 `--kbstd` 时跳过 kbstd 并提示，此时 kbstd 用现成的（见 §16.1）。
+
+**自检**：
+
+```bash
+docker image inspect gaussdb-agent-runtime:$TAG --format '{{.Architecture}}'      # 预期 arm64
+docker run --rm --entrypoint cat gaussdb-agent-runtime:$TAG \
+    /opt/agent/config/opencode/skills/common/VERSION                               # 预期 agent-v1.5.0
+```
+
+**推进内网镜像仓库**（任选其一）：
+
+```bash
+# a) 直接构建并推送(多架构,推荐;一个标签同时含 amd64 与 arm64;需要 buildx 的 docker-container 驱动,先 docker buildx create --use)
+scripts/build-images.sh $TAG --registry registry.example/gaussdb-agent --platform linux/amd64,linux/arm64 --push --kbstd /path/to/kbstd
+# b) 只推 arm64(要显式确认是单架构)
+scripts/build-images.sh $TAG --registry registry.example/gaussdb-agent --platform linux/arm64 --push --single-arch --kbstd /path/to/kbstd
+# c) 已经构建在本机:逐个 docker tag 成内网地址再 docker push(同 §3)
+```
+
+`--push` 有两道闸：必须给 `--registry`（否则会推去公共仓库）；只给一种架构时必须加 `--single-arch`
+（单架构镜像在另一种架构的节点上拉取会失败，而推送这一侧不会报错）。
+
+**打成离线包**（可选，格式与我方发布的相同）：
+
+```bash
+scripts/package-images.sh $TAG --arch arm64 --e2b      # 产物在 dist/gaussdb-agent-v1.5.0-oc1.18.27/,同时做好 §16.4 的沙箱镜像
+```
+
+### 16.4 制作鲲鹏沙箱镜像（2 个，Fuyao 模板用）
+
+沙箱镜像由 `docker/Dockerfile.e2b` 在同版本的三个容器镜像之上加工，内容与容器版逐字节同源，只多三点：
+
+1. 内置官方文档集（沙箱挂不了 NAS，文档集随模板走）；
+2. 一个全零的磁盘占位文件（平台模板的磁盘大小参数不生效，靠它撑大磁盘；沙箱首次启动时删掉，空间留给用户）；
+3. **把整个文件系统压成一层**（平台的模板构建服务解层时不处理删除标记，分层的镜像会出错）。
+
+| 构建参数 | 默认 | 说明 |
+|---|---|---|
+| `RUNTIME_IMAGE` / `KBIMPORT_IMAGE` / `KBSTD_IMAGE` | 必填 | 同一版本的三个容器镜像（§16.3 做好的，或现成的） |
+| `RESERVE_MB` | `6144` | 占位文件大小（MB）。默认值下沙箱磁盘约 8.9 GB、删除占位文件后可用约 7.7 GB |
+
+| 构建目标 | 产出 |
+|---|---|
+| `runtime-e2b` | `gaussdb-agent-runtime-e2b`（诊断沙箱） |
+| `kbimport-e2b` | `gaussdb-agent-kb-import-e2b`（导入沙箱） |
+
+**做法一：在构建机上做成 OCI 包，再到模板构建主机注册（推荐，与离线包一致）**
+
+```bash
+for K in runtime:runtime-e2b kb-import:kbimport-e2b; do
+  docker buildx build --load --platform linux/arm64 -f docker/Dockerfile.e2b --target ${K#*:} \
+    --build-arg RUNTIME_IMAGE=gaussdb-agent-runtime:$TAG \
+    --build-arg KBIMPORT_IMAGE=gaussdb-agent-kb-import:$TAG \
+    --build-arg KBSTD_IMAGE=gaussdb-agent-kbstd:$TAG \
+    -t gaussdb-agent-${K%%:*}-e2b:$TAG .
+done
+docker save --platform linux/arm64 -o gaussdb-agent-v1.5.0-oc1.18.27-e2b-arm64.oci.tar \
+    gaussdb-agent-runtime-e2b:$TAG gaussdb-agent-kb-import-e2b:$TAG
+```
+
+（交叉构建时，三个底镜像用 §16.3 带 `-arm64` 后缀的标签。）上面这段就是 `package-images.sh --e2b` 做的事，用它打包可以省掉这一步。
+然后把 OCI 包和 `scripts/build-e2b-template.py`、`scripts/oci-serve.py` 拷到模板构建主机，按 **§4.1** 用 `--from-oci` 注册。
+
+**做法二：在模板构建主机上直接构建并注册**
+
+模板构建主机装有 `nerdctl` 与 buildkit、并且能从某个仓库拉到同版本的三个容器镜像时，可以一步完成：
+
+```bash
+python3 scripts/build-e2b-template.py --tag $TAG --arch arm64 --registry registry.example/gaussdb-agent
+```
+
+脚本在主机上用 `nerdctl build` 按 `Dockerfile.e2b` 构建，导出成 OCI 目录，在本机 `127.0.0.1:5050` 起只读临时仓库，再调平台接口注册模板
+（所以不受构建服务缺根证书的影响）。参数见 §4.1；占位文件大小用 `--reserve-mb` 调。
+
+**自检**（做法一，在构建机上）：
+
+```bash
+docker image inspect gaussdb-agent-runtime-e2b:$TAG --format '{{.Architecture}} 层数 {{len .RootFS.Layers}}'
+# 预期:arm64 层数 2(压平的文件系统一层 + WORKDIR 建目录的一层,没有删除标记)
+docker run --rm --user root --entrypoint sh gaussdb-agent-runtime-e2b:$TAG -c 'ls /data/kb/docsets; du -sh /var/lib/gsdb/disk-reserve'
+# 预期:列出文档集代号(如 G25132C);占位文件约 6.0G
+```
+
+**注意**
+
+- 沙箱镜像**不要**推进 K8s 用的镜像仓库、也不要拿来跑 Pod：它压成了一层，内容比容器镜像多几个 GB，只用于注册模板。
+- 每个版本要重新做两个沙箱镜像并重新注册模板（模板名随版本变，§10）；只换虚拟机规格不用重做（§11.3）。
+- 现场换根规范时，`rootspec-overlay.sh` 会在离线包里一并重建沙箱镜像（包里有 OCI 包时），换完同样要重新注册模板。
