@@ -76,8 +76,8 @@ cat $SK/common/VERSION                                 # v1.5.0 显示 agent-v1.
 | 交付物 | 内容 | 用在 |
 |---|---|---|
 | 5 个 Docker 镜像 + 发版台 | `ghcr.io/sqlrush/gaussdb-agent-{gateway,frontend,runtime,kb-import,kbstd}:agent-v1.5.0-oc1.18.27`（amd64 / arm64 双架构），发版台 `gaussdb-agent-release`；离线包里同样有 | K8s 集群：网关、前端、状态服务与凭据代理服务（runtime 镜像不同入口）、标准知识库安装 Job |
-| 2 个沙箱模板镜像 | `gaussdb-agent-runtime-e2b`、`gaussdb-agent-kb-import-e2b`，**只在离线包里**（`gaussdb-agent-v1.5.0-oc1.18.27-e2b-arm64.oci.tar`，本版只出 arm64） | 在平台的模板构建主机上注册成诊断、导入两种沙箱模板 |
-| 模板注册脚本 | 离线包 `e2b/scripts/build-e2b-template.py`（`--from-oci` 用上面的 OCI 包，本机起临时只读仓库供平台拉取） | 模板构建主机（root） |
+| 2 个沙箱模板镜像 | `ghcr.io/sqlrush/gaussdb-agent-{runtime-e2b,kb-import-e2b}:agent-v1.5.0-oc1.18.27`（本版只出 arm64）；离线包里是同内容的 OCI 包 `gaussdb-agent-v1.5.0-oc1.18.27-e2b-arm64.oci.tar`。从 GHCR 拉的要先导出成 OCI 包，做法见部署手册 §2.3 | 在平台的模板构建主机上注册成诊断、导入两种沙箱模板 |
+| 模板注册脚本 | 离线包 `e2b/scripts/build-e2b-template.py`，或测试仓库标签 `agent-v1.5.0` 的 `scripts/build-e2b-template.py`、`scripts/oci-serve.py`（`--from-oci` 用上面的 OCI 包，本机起临时只读仓库供平台拉取） | 模板构建主机（root） |
 
 | 文档 | 给谁 | 内容 |
 |---|---|---|

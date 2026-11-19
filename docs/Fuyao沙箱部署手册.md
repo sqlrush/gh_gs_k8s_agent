@@ -1,6 +1,6 @@
 # Fuyao 沙箱部署手册：从零到上线（预览）
 
-> 本文随测试仓库 [gh_agent_k8s](https://github.com/sqlrush/gh_agent_k8s) 标签 `agent-v1.5.0` 发布(源文件同名,在其 `docs/` 下;§16「制作容器镜像与鲲鹏沙箱镜像」为发布后补充)。文中提到的 `k8s/`、`docker/`、`scripts/`、`gateway/` 等路径指该仓库或离线交付包里的同名路径,不在本仓库。
+> 本文随测试仓库 [gh_agent_k8s](https://github.com/sqlrush/gh_agent_k8s) 标签 `agent-v1.5.0` 发布(源文件同名,在其 `docs/` 下;§2.3「从 GHCR 直接拉」与 §16「制作容器镜像与鲲鹏沙箱镜像」为发布后补充)。文中提到的 `k8s/`、`docker/`、`scripts/`、`gateway/` 等路径指该仓库或离线交付包里的同名路径,不在本仓库。
 
 > **预览**：Fuyao 沙箱模式随 `agent-v1.5.0` 发布，属于**预览**功能。平台的三项安全前提（envd 认证、沙箱出网限制、OpenSandbox 认证）落实之前，**只用于测试环境**：只用测试账号、测试库与模拟中间件，不接生产数据库与真实的中间件令牌。按需、固定池化两种模式不受影响。
 
@@ -174,8 +174,8 @@ Fuyao 模式里出现的「承载 Pod」是**平台的**对象（每个承载 Po
 
 ### 2.1 离线包内容
 
-镜像有两种取法：用我方发布的（离线包，或从 `ghcr.io/sqlrush` 直接拉 K8s 镜像，见 §3）；或现场从源码自己制作，见 **§16**。
-两种做法得到的镜像内容相同，后续步骤也相同。
+镜像有三种取法：用我方发布的离线包（本节）；能连外网时从 `ghcr.io/sqlrush` 直接拉，K8s 镜像与两个沙箱模板镜像都有，见 **§2.3**；或现场从源码自己制作，见 **§16**。
+三种做法得到的镜像内容相同，后续步骤也相同。
 
 我方用 `scripts/package-images.sh <TAG> --e2b` 打包（`--e2b` 不能与 `--without-kbstd` 同用）。包目录 `gaussdb-agent-v<版本>-oc1.18.27/` 下：
 
@@ -202,11 +202,67 @@ cat MANIFEST.txt
 **预期**：每个文件 `OK`。`MANIFEST.txt` 列出的就是导入后的实际镜像标签：在哪种架构的机器上打的包，那份没有后缀，另一份带 `-<架构>` 后缀。
 **任何一个校验失败就停下**，重新传输。
 
+### 2.3 不用离线包：从 GHCR 直接拉
+
+能连外网的机器可以直接从 GHCR 拉，不用传离线包。镜像公开，**不用登录**。版本 `agent-v1.5.0` 的地址：
+
+| 镜像 | 地址 | 架构 | 用在 |
+|---|---|---|---|
+| runtime | `ghcr.io/sqlrush/gaussdb-agent-runtime:agent-v1.5.0-oc1.18.27` | amd64、arm64 | 状态服务、凭据代理（§3） |
+| kb-import | `ghcr.io/sqlrush/gaussdb-agent-kb-import:agent-v1.5.0-oc1.18.27` | amd64、arm64 | 标准知识库安装 Job（§3） |
+| gateway | `ghcr.io/sqlrush/gaussdb-agent-gateway:agent-v1.5.0-oc1.18.27` | amd64、arm64 | 网关（§3） |
+| frontend | `ghcr.io/sqlrush/gaussdb-agent-frontend:agent-v1.5.0-oc1.18.27` | amd64、arm64 | 前端（§3） |
+| kbstd | `ghcr.io/sqlrush/gaussdb-agent-kbstd:agent-v1.5.0-oc1.18.27` | amd64、arm64 | 标准知识库安装 Job（§3） |
+| runtime-e2b | `ghcr.io/sqlrush/gaussdb-agent-runtime-e2b:agent-v1.5.0-oc1.18.27` | 只有 arm64 | 诊断沙箱模板（§4） |
+| kb-import-e2b | `ghcr.io/sqlrush/gaussdb-agent-kb-import-e2b:agent-v1.5.0-oc1.18.27` | 只有 arm64 | 导入沙箱模板（§4） |
+| release（可选） | `ghcr.io/sqlrush/gaussdb-agent-release:agent-v1.5.0-oc1.18.27` | amd64、arm64 | 发版台，升级用（§10） |
+
+前五个是多架构镜像，`docker pull` 会按本机架构自动取；也有带后缀的单架构标签（`…-oc1.18.27-arm64`、`…-oc1.18.27-amd64`），在 x86 跳板机上要拉 arm64 时用。
+两个沙箱模板镜像只出 arm64，另有同内容的 `…-oc1.18.27-arm64` 标签。
+
+**K8s 镜像**：拉下来推进内网仓库，再按 §3 往后做（`docker load` 那一行换成 `docker pull`）：
+
+```bash
+TAG=agent-v1.5.0-oc1.18.27
+REG=registry.example/gaussdb-agent         # 内网仓库前缀,按现场填
+ARCH=arm64                                 # 集群节点的架构(鲲鹏为 arm64)
+for img in runtime kb-import gateway frontend kbstd; do
+  docker pull --platform linux/$ARCH ghcr.io/sqlrush/gaussdb-agent-$img:$TAG
+  docker tag ghcr.io/sqlrush/gaussdb-agent-$img:$TAG $REG/gaussdb-agent-$img:$TAG
+  docker push $REG/gaussdb-agent-$img:$TAG
+done
+```
+
+**沙箱模板镜像**：平台的模板构建服务拉不了公网仓库（§4.1），要先在一台能连外网的机器上把两个镜像导出成 OCI 包，
+得到的文件与离线包里的 `<包名>-e2b-arm64.oci.tar` 等价，再按 §4.1 用 `--from-oci` 注册。下面两种工具任选一种：
+
+```bash
+TAG=agent-v1.5.0-oc1.18.27
+OUT=gaussdb-agent-v1.5.0-oc1.18.27-e2b-arm64.oci.tar
+R=ghcr.io/sqlrush/gaussdb-agent-runtime-e2b:$TAG
+K=ghcr.io/sqlrush/gaussdb-agent-kb-import-e2b:$TAG
+
+# 做法一：Docker（要用 containerd 镜像存储：Docker Desktop 默认即是；Linux 上 `docker info` 里 driver-type 为 io.containerd.snapshotter.v1）
+docker pull --platform linux/arm64 $R
+docker pull --platform linux/arm64 $K
+docker save --platform linux/arm64 -o $OUT $R $K
+
+# 做法二：containerd 的 ctr（K8s 节点上一般都有；用单独的命名空间，不碰 k8s.io 里的镜像）
+ctr -n gsdb-e2b images pull --platform linux/arm64 $R
+ctr -n gsdb-e2b images pull --platform linux/arm64 $K
+ctr -n gsdb-e2b images export --platform linux/arm64 $OUT $R $K
+ctr -n gsdb-e2b images rm $R $K                       # 导出后可删
+```
+
+**预期**：`tar -tf $OUT | grep -c '^blobs/sha256/'` 不少于 5；`tar -xOf $OUT index.json` 里能看到两个镜像名。
+`--from-oci` 按镜像名最后一段（`gaussdb-agent-runtime-e2b`、`gaussdb-agent-kb-import-e2b`）和标签找镜像，带 `ghcr.io/sqlrush/` 前缀不影响。
+模板注册脚本不在镜像里：从代码仓库标签 `agent-v1.5.0` 取 `scripts/build-e2b-template.py` 与 `scripts/oci-serve.py`，放到构建主机的 `e2b/scripts/` 下，§4.1 的命令照用。
+
 ---
 
 ## 3. 步骤一：导入 K8s 镜像（我方运维，跳板机或节点）
 
-与《部署手册-从零到上线》§1.2–§1.3 相同，五个镜像都要导入并推进内网仓库：
+与《部署手册-从零到上线》§1.2–§1.3 相同，五个镜像都要导入并推进内网仓库（不用离线包、直接从 GHCR 拉的见 §2.3）：
 
 ```bash
 TAG=agent-v1.5.0-oc1.18.27
@@ -248,7 +304,7 @@ root 权限；`/root/.e2b/config.json` 里有团队 API Key（`teamApiKey`）；
 
 ### 4.1 注册
 
-把离线包里的 `e2b/` 目录与 `<包名>-e2b-<架构>.oci.tar` 拷到构建主机，例如 `/root/gsdb-e2b/`：
+把离线包里的 `e2b/` 目录与 `<包名>-e2b-<架构>.oci.tar` 拷到构建主机（从 GHCR 拉的，按 §2.3 导出 OCI 包、取脚本），例如 `/root/gsdb-e2b/`：
 
 ```bash
 cd /root/gsdb-e2b
@@ -259,7 +315,7 @@ python3 e2b/scripts/build-e2b-template.py --tag agent-v1.5.0-oc1.18.27 --arch ar
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `--tag` | 必填 | 版本标签。模板名由它派生：`agent-v1.5.0-…` → `gsdb-runtime-v1-5-0`、`gsdb-import-v1-5-0`；不以 `agent-v<主>.<次>.<修订>` 开头的标签按字面转成小写连字符 |
-| `--from-oci` | 空 | 离线包里的模板 OCI 包（tar 或已解开的目录）。**推荐用这个**：构建服务没有根证书，拉不了公网仓库（实测 `x509 unknown authority`），脚本在本机 `127.0.0.1:5050` 起只读临时仓库供它拉取 |
+| `--from-oci` | 空 | 离线包里的模板 OCI 包，或按 §2.3 从 GHCR 导出的（tar 或已解开的目录）。**推荐用这个**：构建服务没有根证书，拉不了公网仓库（实测 `x509 unknown authority`），脚本在本机 `127.0.0.1:5050` 起只读临时仓库供它拉取 |
 | `--arch` | `arm64` | 与包一致。非本机架构的镜像标签带 `-<架构>` 后缀，脚本两种写法都认 |
 | `--cpu` / `--memory` | `2` / `4096`（MB） | **虚拟机的实际规格**。沙箱组的每台上限（§5）与 `FUYAO_CPU` / `FUYAO_MEMORY`（§6.2）要与它一致 |
 | `--kind` | `all` | `runtime` / `kb-import` / `all`，只注册其中一种时用 |
@@ -950,7 +1006,7 @@ curl -s -X POST -H "X-Admin-Token: $ADMIN" -H 'Content-Type: application/json' -
 
 ## 16. 附录：制作容器镜像与鲲鹏沙箱镜像（现场自行构建时）
 
-正常部署用离线包或 `ghcr.io/sqlrush` 上的现成镜像即可，**不需要**自己构建。以下情况才需要：
+正常部署用离线包或 `ghcr.io/sqlrush` 上的现成镜像（§2.3，含两个沙箱模板镜像）即可，**不需要**自己构建。以下情况才需要：
 现场要求从源码构建、要推进内网镜像仓库而又不方便导入离线包、或改了代码要出自己的镜像。
 只是**改虚拟机规格**（vCPU、内存）不用重建镜像，按 §11.3 用 `--cpu` / `--memory` 重新注册模板即可。
 
