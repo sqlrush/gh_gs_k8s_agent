@@ -59,6 +59,10 @@ class Connection:
     # 两者都没有时回落到 credentials/<name>.enc —— 老配置不用改就能继续用。
     password: str = ""
     encrypted: bool = False
+    # 业务库的兼容模式(v1.5.1,common/compat.py):登录探针取的 datcompatibility(A / M / …)与
+    # lower_case_table_names。空 = 未知(按 A 处理)。存在会话的旁挂文件 <句柄>.compat 里,不进会话 yaml。
+    compat: str = ""
+    lctn: str = ""
 
     @property
     def qualified(self) -> str:
