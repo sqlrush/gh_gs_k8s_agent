@@ -36,6 +36,7 @@ from common.grmp.values import as_bool, as_float, as_int  # noqa: E402
 from common import explain_actual as ea  # noqa: E402
 from common import search_path as sp  # noqa: E402
 from common import catalog_scope as cs  # noqa: E402
+from common import compat  # noqa: E402
 
 # SQL 已迁到 scripts/registry/sqltune/ —— 两条路径共用同一份定义
 VERSION_SCRIPT = "sqltune.version"
@@ -377,11 +378,12 @@ def collect(runner, db, sql_text: str, do_analyze: bool, schema: str = "") -> Ev
         except ValueError as exc:
             sp_note = str(exc)
         plan = explain(db, sql_text, do_analyze)
-    names = extract_tables(sql_text)
+    fold = compat.folds_unquoted(runner)          # M 兼容库表名区分大小写时不折小写(v1.5.1)
+    names = extract_tables(sql_text, fold)
     # 目录行按 schema 过滤:SQL 里显式写的 schema.表 优先,其次本次解析出的 schema;都没有就不过滤。
     # schema 是搜索路径串(`fl, public`)时按第一段过滤:keep_rows 在第一段一行都没有时自己退到 public,
     # 正好是 `fl, public` 的解析顺序;拿整串去比 nspname 永远比不上,同名表就会错选成 public 那张。
-    scope = cs.Scope(explicit=cs.explicit_schemas(extract_table_refs(sql_text)), default=sp.primary_schema(schema))
+    scope = cs.Scope(explicit=cs.explicit_schemas(extract_table_refs(sql_text, fold)), default=sp.primary_schema(schema))
     return Evidence(
         sql=sql_text,
         version=version,

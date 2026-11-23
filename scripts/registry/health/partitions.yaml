@@ -9,15 +9,21 @@
 # 把两件事混在一起,会让人以为分区数正常就等于裁剪正常。
 #
 # ORDER BY 分区数倒序:分区过多(几千个)时规划开销显著上升,那才是要先看的那张表。
+# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
+#   partstrategy 是 "char" 类型,max() / COALESCE() 直接处理它在 M 库报 un support type。先用 CASE 映射成同样的单字母文字常量
+#   (取值见 PG_PARTITION:r 范围、i 间隔、l 列表、a 自动扩展列表、h 哈希、n 无),再聚合;输出与原来相同,collectors.py 不动。
+#   "char" 列与字面量比较(parttype = 'p'、relkind = 'r')在 M 库可用(现场其他脚本已跑通)。
 name: health.partitions
 database_type: appbusiness
 description: 分区表的分区数量与分区策略
 readonly: true
 sql: |
-  SELECT n.nspname      AS schema,
-         c.relname      AS "table",
-         count(*)       AS parts,
-         COALESCE(max(p.partstrategy), '') AS strategy
+  SELECT n.nspname AS schema,
+         c.relname AS "table",
+         count(*)  AS parts,
+         COALESCE(max(CASE p.partstrategy WHEN 'r' THEN 'r' WHEN 'i' THEN 'i' WHEN 'l' THEN 'l'
+                                          WHEN 'a' THEN 'a' WHEN 'h' THEN 'h' WHEN 'n' THEN 'n'
+                                          ELSE '?' END), '') AS strategy
     FROM pg_partition p
     JOIN pg_class c     ON c.oid = p.parentid
     JOIN pg_namespace n ON n.oid = c.relnamespace

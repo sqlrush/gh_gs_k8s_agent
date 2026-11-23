@@ -73,7 +73,7 @@ metadata:
 
 3. **合成值提醒。** `## Variable Substitution` 一节说明游标变量被按声明类型填了合成值——计划「形状」可靠，行数/选择性是近似值。把这点说清楚，并提示可用 `--bind` 传真实值做精确验证。
 
-4. **加载方法论。** 阅读 `{baseDir}/references/proc-tuning-methodology.md`，对照证据各节按其检查清单分析。涉及 OpenGauss 内幕（嵌套语句统计、子事务成本、A 兼容游标语义）查 `{baseDir}/references/proc-internals.md`。**游标 SELECT 的优化等同单 SQL**，按需查 GaussDB 专项知识：CBO 与诊断 → `{baseDir}/references/gaussdb-cbo-and-diagnosis.md`；改写候选 → `{baseDir}/references/gaussdb-rewrite-patterns.md`；A 兼容 → `{baseDir}/references/gaussdb-a-compat-gotchas.md`；分区/分布 → `{baseDir}/references/gaussdb-partition-distribution.md`。
+4. **加载方法论。** 阅读 `{baseDir}/references/proc-tuning-methodology.md`，对照证据各节按其检查清单分析。涉及 OpenGauss 内幕（嵌套语句统计、子事务成本、A 兼容游标语义）查 `{baseDir}/references/proc-internals.md`。**游标 SELECT 的优化等同单 SQL**，按需查 GaussDB 专项知识：CBO 与诊断 → `{baseDir}/references/gaussdb-cbo-and-diagnosis.md`；改写候选 → `{baseDir}/references/gaussdb-rewrite-patterns.md`；A 兼容 → `{baseDir}/references/gaussdb-a-compat-gotchas.md`；M 兼容 → `{baseDir}/references/gaussdb-m-compat-gotchas.md`；分区/分布 → `{baseDir}/references/gaussdb-partition-distribution.md`。
 
 5. **索引建议——只用已验证的那一节。** 每个游标的 `## Verified Index Candidates` 是 hypopg 假设索引硬验证过的。
    - **只推荐出现在那张已验证表里的索引**，引用真实的 `Orig → Hypo cost (N×)`。

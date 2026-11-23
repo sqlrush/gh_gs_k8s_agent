@@ -29,6 +29,9 @@
 # 不是字符串拼接,整条报「argument … not type name」。concat 在 A / M 两种兼容模式下都是拼接。守卫:test_registry_m_compat_units.py。
 # lock_object 不能写成 COALESCE(concat(…), ''):锁对象不是表(事务号锁等)时 LEFT JOIN 不上、两列都是 NULL,
 # concat 在 A 兼容下跳过 NULL 得到 '.',在 M 兼容下得到 NULL —— 两边不一样。先判 relname 再拼,两种模式都回 ''。
+# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
+#   名字类列(name 类型)进 concat / COALESCE 前先 ::text:M 库按自己的类型推导矩阵处理 name 类型,
+#   health.table_writes 就栽在 COALESCE(name, name) 上;显式转成文字,两种模式结果一致。
 name: lockwait.pairs
 database_type: appbusiness
 description: 锁堵塞的持有者/等待者成对明细（含双方锁模式、锁对象、等待时长、双方 SQL）
@@ -41,14 +44,14 @@ sql: |
          COALESCE(h.sessionid, 0)      AS holder_sessionid,
          h.mode                        AS holder_mode,
          w.locktype                    AS locktype,
-         CASE WHEN c.relname IS NULL THEN '' ELSE concat(n.nspname, '.', c.relname) END AS lock_object,
+         CASE WHEN c.relname IS NULL THEN '' ELSE concat(n.nspname::text, '.', c.relname::text) END AS lock_object,
          COALESCE(w.locktag, '')       AS locktag,
          round(date_part('epoch', clock_timestamp() - wa.query_start)::numeric, 1) AS waiter_wait_s,
-         COALESCE(wa.usename, '')      AS waiter_user,
+         COALESCE(wa.usename::text, '') AS waiter_user,
          COALESCE(wa.application_name, '') AS waiter_app,
          COALESCE(substr(wa.query, 1, 300), '')       AS waiter_query,
          COALESCE(ha.state, '')        AS holder_state,
-         COALESCE(ha.usename, '')      AS holder_user,
+         COALESCE(ha.usename::text, '') AS holder_user,
          COALESCE(ha.application_name, '') AS holder_app,
          round(date_part('epoch', clock_timestamp() - ha.xact_start)::numeric, 1) AS holder_xact_age_s,
          COALESCE(substr(ha.query, 1, 300), '')       AS holder_query

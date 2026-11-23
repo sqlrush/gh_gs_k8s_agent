@@ -15,6 +15,7 @@ import re
 import sys
 
 import evidence
+from common import compat  # noqa: E402
 import placeholder
 
 COLUMN_TYPES_SCRIPT = "sqltune.column_types"
@@ -42,7 +43,7 @@ def infer_types(runner, sql_text: str, schema: str = "") -> list:
         return []
     columns = [placeholder.comparison_column(c) for c in contexts]
     wanted = sorted({c for c in columns if c})
-    tables = evidence.extract_tables(sql_text)
+    tables = evidence.extract_tables(sql_text, compat.folds_unquoted(runner))
     if not wanted or not tables:
         return [None] * len(contexts)
 

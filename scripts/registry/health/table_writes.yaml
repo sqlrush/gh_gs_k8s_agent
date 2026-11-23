@@ -8,6 +8,11 @@
 # 按 last_data_changed(这张表最近一次数据变化的时间)倒序取前 {{limit}} 张:正在写的表一定排在前面;
 # 按累计写入量排会把「历史上写得多、现在不写」的表排进来,而把正在猛写的新表挤掉。
 # 系统 schema 排除表照抄 health/bloat.yaml;找不到所属表的 TOAST(系统表的)随 pg_toast 一起排除。
+# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
+#   原写法两处不行:① COALESCE(pn.nspname, s.schemaname) 两个 name 类型在 M 库推导成 any,外层 schema NOT IN (…) 报
+#   「operator does not exist: any <> unknown」;② 外层 SELECT 里的 "table" 在 M 库是字符串常量(双引号默认是字符串),
+#   修好①之后整列会静默变成字面值 'table'。改成一层查询:名字列先 ::text 再进 CASE,双引号只留在最外层别名 AS "table"。
+#   口径不变:普通表取自身;TOAST 折回所属表;找不到所属表的 TOAST(pn 为空)与系统 schema 一并排除。
 name: health.table_writes
 database_type: appbusiness
 description: 各表（大字段写入折回所属表）的插入 / 更新 / 删除行数与 TOAST 大小
@@ -17,17 +22,18 @@ params:
     type: INTEGER
     description: 返回条数上限
 sql: |
-  SELECT schema, "table", is_toast, n_tup_ins, n_tup_upd, n_tup_del, toast_bytes
-    FROM (SELECT COALESCE(pn.nspname, s.schemaname) AS schema,
-                 COALESCE(pc.relname, s.relname) AS "table",
-                 (s.schemaname = 'pg_toast') AS is_toast,
-                 s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
-                 CASE WHEN s.schemaname = 'pg_toast' THEN pg_relation_size(s.relid) END AS toast_bytes,
-                 s.last_data_changed
-            FROM pg_stat_all_tables s
-            LEFT JOIN pg_class pc ON s.schemaname = 'pg_toast' AND pc.reltoastrelid = s.relid
-            LEFT JOIN pg_namespace pn ON pn.oid = pc.relnamespace) t
-   WHERE schema NOT IN ('pg_catalog','information_schema','snapshot','dbe_perf','dbe_pldeveloper','cstore','pg_toast')
-     AND n_tup_ins + n_tup_upd + n_tup_del > 0
-   ORDER BY last_data_changed DESC NULLS LAST
+  SELECT CASE WHEN s.schemaname = 'pg_toast' THEN pn.nspname::text ELSE s.schemaname::text END AS schema,
+         CASE WHEN s.schemaname = 'pg_toast' THEN pc.relname::text ELSE s.relname::text END AS "table",
+         (s.schemaname = 'pg_toast') AS is_toast,
+         s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
+         CASE WHEN s.schemaname = 'pg_toast' THEN pg_relation_size(s.relid) END AS toast_bytes
+    FROM pg_stat_all_tables s
+    LEFT JOIN pg_class pc     ON s.schemaname = 'pg_toast' AND pc.reltoastrelid = s.relid
+    LEFT JOIN pg_namespace pn ON pn.oid = pc.relnamespace
+   WHERE s.n_tup_ins + s.n_tup_upd + s.n_tup_del > 0
+     AND ((s.schemaname <> 'pg_toast'
+           AND s.schemaname NOT IN ('pg_catalog','information_schema','snapshot','dbe_perf','dbe_pldeveloper','cstore'))
+       OR (s.schemaname = 'pg_toast' AND pn.nspname IS NOT NULL
+           AND pn.nspname NOT IN ('pg_catalog','information_schema','snapshot','dbe_perf','dbe_pldeveloper','cstore','pg_toast')))
+   ORDER BY s.last_data_changed DESC NULLS LAST
    LIMIT {{limit}};

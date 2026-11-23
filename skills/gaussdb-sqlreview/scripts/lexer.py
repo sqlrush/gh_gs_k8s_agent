@@ -32,6 +32,32 @@ _DQL_HEADS = {"select", "with", "values", "table", "explain"}
 
 _FILL = "x"  # stand-in byte for literal bodies inside mask()
 
+# M 兼容库(v1.5.1):业务库是 MySQL 词法时由 sqlreview.py 按会话的兼容模式打开(common/compat.py is_mysql_like)。
+# 打开后:# 到行尾是注释;-- 后面跟空白才是注释;双引号是字符串(不是标识符);字符串里反斜杠转义;反引号是标识符。
+# 默认关:A 库与 1.5.0 的词法一字不差。
+_MYSQL = False
+
+
+def set_mysql(flag: bool) -> None:
+    global _MYSQL
+    _MYSQL = bool(flag)
+
+
+def _quoted_end(sql: str, i: int, quote: str, backslash: bool) -> int:
+    """sql[i] 是开引号,返回配对闭引号之后的位置(连写两个引号是转义;backslash 时反斜杠转义下一个字符)。"""
+    n, j = len(sql), i + 1
+    while j < n:
+        if backslash and sql[j] == "\\":
+            j += 2
+            continue
+        if sql[j] == quote:
+            if j + 1 < n and sql[j + 1] == quote:
+                j += 2
+                continue
+            return j + 1
+        j += 1
+    return n
+
 
 @dataclass(frozen=True)
 class Span:
@@ -58,7 +84,29 @@ def spans(sql: str) -> tuple[Span, ...]:
     while i < n:
         ch = sql[i]
 
-        if ch == "-" and sql.startswith("--", i):
+        if _MYSQL and (ch == "#" or (sql.startswith("--", i) and (i + 2 >= n or sql[i + 2].isspace()))):
+            flush_code(i)
+            end = sql.find("\n", i)
+            end = n if end < 0 else end
+            out.append(Span("line_comment", i, end))
+            i = code_start = end
+
+        elif _MYSQL and ch in ("'", '"'):
+            flush_code(i)
+            j = _quoted_end(sql, i, ch, backslash=True)
+            out.append(Span("string", i, j))
+            i = code_start = j
+
+        elif _MYSQL and ch == "`":
+            flush_code(i)
+            j = _quoted_end(sql, i, "`", backslash=False)
+            out.append(Span("ident", i, j))
+            i = code_start = j
+
+        elif _MYSQL and ch == "-":
+            i += 1                               # MySQL 里 --x 不是注释(两个负号)
+
+        elif ch == "-" and sql.startswith("--", i):
             flush_code(i)
             end = sql.find("\n", i)
             end = n if end < 0 else end          # newline itself stays code
@@ -169,8 +217,9 @@ def normalize(sql: str) -> tuple[str, dict[str, str]]:
 def _literal_body(kind: str, text: str) -> str:
     """The literal's content, without its quoting."""
     if kind == "string":
-        inner = text[1:-1] if len(text) >= 2 and text.endswith("'") else text[1:]
-        return inner.replace("''", "'")
+        q = text[:1] or "'"                    # M 兼容库里双引号也是字符串
+        inner = text[1:-1] if len(text) >= 2 and text.endswith(q) else text[1:]
+        return inner.replace(q + q, q)
     tag_end = text.find("$", 1) + 1        # dollar: strip $tag$ from both ends
     return text[tag_end:-tag_end] if tag_end > 0 else text
 
@@ -213,7 +262,7 @@ def _written(name: str) -> str:
 
     Naming rules judge what the author typed, so they need this, not `_bare`.
     """
-    return name.split(".")[-1].strip().strip('"')
+    return name.split(".")[-1].strip().strip('"').strip("`")
 
 
 def _bare(name: str) -> str:
@@ -223,22 +272,22 @@ def _bare(name: str) -> str:
 
 _RE_CREATE_TABLE = re.compile(
     r"\bCREATE\s+(?:(?:GLOBAL|LOCAL)\s+)?(?:(?:TEMP|TEMPORARY|UNLOGGED)\s+)?TABLE\s+"
-    r"(?:IF\s+NOT\s+EXISTS\s+)?([\w.\"]+)", re.I)
+    r"(?:IF\s+NOT\s+EXISTS\s+)?([\w.\"`]+)", re.I)
 # 列清单用 _index_items 按括号配对取:原先 `ON t (…)` 紧挨着,`USING btree/gin (…)`(gs_dump 与各种建表工具导出的
 # DDL 默认都带)整条匹配不上,IDX001 / IDX002 静默失效;函数索引 `(lower(name))` 被 [^)]* 截断、列取成了函数名
 # (2026-11-08 行方报告 M1 / M2)。
 _RE_CREATE_INDEX = re.compile(
     r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"
-    r"([\w.\"]+)?\s*ON\s+(?:ONLY\s+)?([\w.\"]+)\s*(?:USING\s+(\w+)\s*)?\(", re.I)
-_PLAIN_COL = re.compile(r'[\w$]+|"(?:[^"]|"")+"')
+    r"([\w.\"`]+)?\s*ON\s+(?:ONLY\s+)?([\w.\"`]+)\s*(?:USING\s+(\w+)\s*)?\(", re.I)
+_PLAIN_COL = re.compile(r'[\w$]+|"(?:[^"]|"")+"|`(?:[^`]|``)+`')
 _RE_INDEX_ITEM_TAIL = re.compile(
     r"(?:\s+COLLATE\s+\S+)?(?:\s+[A-Za-z_]\w*_ops)?(?:\s+(?:ASC|DESC))?(?:\s+NULLS\s+(?:FIRST|LAST))?\s*$", re.I)
 _RE_ALTER_TABLE = re.compile(
-    r"\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?([\w.\"]+)", re.I)
-_RE_DELETE = re.compile(r"\bDELETE\s+FROM\s+(?:ONLY\s+)?([\w.\"]+)", re.I)
-_RE_UPDATE = re.compile(r"\bUPDATE\s+(?:ONLY\s+)?([\w.\"]+)", re.I)
-_RE_INSERT = re.compile(r"\bINSERT\s+INTO\s+([\w.\"]+)", re.I)
-_RE_FROM = re.compile(r"\bFROM\s+([\w.\"]+)", re.I)
+    r"\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?([\w.\"`]+)", re.I)
+_RE_DELETE = re.compile(r"\bDELETE\s+FROM\s+(?:ONLY\s+)?([\w.\"`]+)", re.I)
+_RE_UPDATE = re.compile(r"\bUPDATE\s+(?:ONLY\s+)?([\w.\"`]+)", re.I)
+_RE_INSERT = re.compile(r"\bINSERT\s+INTO\s+([\w.\"`]+)", re.I)
+_RE_FROM = re.compile(r"\bFROM\s+([\w.\"`]+)", re.I)
 
 
 def _index_items(text: str, open_paren: int) -> list:

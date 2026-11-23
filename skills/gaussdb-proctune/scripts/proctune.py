@@ -46,6 +46,7 @@ for _anc in _HERE.parents:                      # locate common/ (repo root or i
 
 import common  # noqa: E402
 from common import access  # noqa: E402
+from common import compat  # noqa: E402
 from common import cli  # noqa: E402
 from common import kbsection  # noqa: E402
 from common import proc_locate  # noqa: E402
@@ -526,10 +527,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                 else access.DEFAULT_SKILL_TIMEOUT_SECONDS)
         if args.cmd == "collect":
             pe = proc_collect(runner, args.proc)
-            out = _collect_json(pe) if args.format == "json" else proc_collect_report(pe)
+            out = _collect_json(pe) if args.format == "json" else compat.report_line(runner) + proc_collect_report(pe)
         else:
             tr = tune_cursors(runner, db, args.proc, args.cursor, binds)
-            out = _tune_json(tr) if args.format == "json" else cursor_tune_report(tr)
+            out = _tune_json(tr) if args.format == "json" else compat.report_line(runner) + cursor_tune_report(tr)
         print(out, end="" if args.format == "markdown" else "\n")
         return 0
     except sysprocs.SystemProcSkipped as exc:

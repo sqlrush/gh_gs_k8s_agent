@@ -126,51 +126,6 @@ WHERE unique_query_id = {{sid}}
 ORDER BY start_time DESC
 LIMIT 1;
 ', '[{"key":"sid","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlreview.indexes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT
-  n.nspname::text                                              AS schema,
-  t.relname::text                                              AS table,
-  i.relname::text                                              AS name,
-  array_to_string(
-    COALESCE((SELECT array_agg(a.attname::text ORDER BY k.ord)
-              FROM (SELECT s AS ord,
-                           (string_to_array(ix.indkey::text, '' ''))[s]::smallint AS attnum
-                    FROM generate_series(
-                           1,
-                           array_length(string_to_array(ix.indkey::text, '' ''), 1)) s) k
-              JOIN pg_attribute a
-                ON a.attrelid = t.oid AND a.attnum = k.attnum),
-             ARRAY[]::text[]), '','')                            AS columns,
-  ix.indisunique                                               AS is_unique,
-  ix.indisprimary                                              AS is_primary,
-  COALESCE(s.idx_scan, 0)                                      AS scans
-FROM pg_index ix
-JOIN pg_class i     ON i.oid = ix.indexrelid
-JOIN pg_class t     ON t.oid = ix.indrelid
-JOIN pg_namespace n ON n.oid = t.relnamespace
-LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = ix.indexrelid
-WHERE n.nspname = ''{{schema}}''
-ORDER BY t.relname, i.relname;
-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlreview.tables', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT
-  n.nspname::text                                              AS schema,
-  c.relname::text                                              AS table,
-  EXISTS (SELECT 1 FROM pg_constraint pk
-          WHERE pk.conrelid = c.oid AND pk.contype = ''p'')      AS has_pk,
-  array_to_string(
-    COALESCE((SELECT array_agg(fk.conname::text)
-              FROM pg_constraint fk
-              WHERE fk.conrelid = c.oid AND fk.contype = ''f''),
-             ARRAY[]::text[]), '','')                            AS fks,
-  array_to_string(
-    COALESCE((SELECT array_agg(a.attname::text ORDER BY a.attnum)
-              FROM pg_attribute a
-              WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped),
-             ARRAY[]::text[]), '','')                            AS columns
-FROM pg_class c
-JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE c.relkind = ''r'' AND n.nspname = ''{{schema}}''
-ORDER BY c.relname;
-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
 INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlreview.top_sql', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT unique_sql_id::text, query
 FROM dbe_perf.statement
 WHERE n_calls > 0 AND query IS NOT NULL AND LENGTH(TRIM(query)) > 0
@@ -434,32 +389,6 @@ WHERE unique_sql_id = {{sid}}
   AND LENGTH(TRIM(query)) > 0
 LIMIT 1;
 ', '[{"key":"sid","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.proc_def', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, p.proname, l.lanname, p.prosrc,
-       pg_catalog.pg_get_function_arguments(p.oid) AS args,
-       COALESCE(k.pkgname, '''') AS package
-FROM pg_proc p
-JOIN pg_namespace n ON n.oid = p.pronamespace
-JOIN pg_language l ON l.oid = p.prolang
-LEFT JOIN gs_package k ON k.oid = p.propackageid
-WHERE p.proname = ''{{name}}''
-  AND (''{{schema}}'' IS NULL OR ''{{schema}}'' = '''' OR n.nspname = ''{{schema}}'')
-  AND (''{{package}}'' IS NULL OR ''{{package}}'' = '''' OR k.pkgname = ''{{package}}'')
-ORDER BY (n.nspname = ''public'') DESC, n.nspname, k.pkgname
-LIMIT 5;
-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.proc_def', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, p.proname, l.lanname, p.prosrc,
-       pg_catalog.pg_get_function_arguments(p.oid) AS args,
-       COALESCE(k.pkgname, '''') AS package
-FROM pg_proc p
-JOIN pg_namespace n ON n.oid = p.pronamespace
-JOIN pg_language l ON l.oid = p.prolang
-LEFT JOIN gs_package k ON k.oid = p.propackageid
-WHERE p.proname = ''{{name}}''
-  AND (''{{schema}}'' IS NULL OR ''{{schema}}'' = '''' OR n.nspname = ''{{schema}}'')
-  AND (''{{package}}'' IS NULL OR ''{{package}}'' = '''' OR k.pkgname = ''{{package}}'')
-ORDER BY (n.nspname = ''public'') DESC, n.nspname, k.pkgname
-LIMIT 5;
-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
 INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.indexes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname AS schema_name, t.relname AS table_name,
        i.relname AS index_name,
        ix.indisunique,
@@ -514,22 +443,6 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
 FROM pg_namespace n
 WHERE n.nspname = ''{{schema}}'';
 ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.locate_search', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''proc'' AS kind, n.nspname, COALESCE(k.pkgname, '''') AS pkgname, p.proname
-FROM pg_proc p
-LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
-LEFT JOIN gs_package k ON k.oid = p.propackageid
-WHERE p.proname ILIKE ''%{{name}}%''
-  AND (n.nspname IS NULL OR (n.nspname NOT LIKE ''pg_%'' AND n.nspname NOT LIKE ''dbe_%''
-       AND n.nspname NOT IN (''information_schema'', ''pkg_service'', ''pkg_util'', ''sqladvisor'', ''db4ai'',
-                             ''snapshot'', ''blockchain'', ''cstore'', ''pmk'', ''coverage'')))
-UNION ALL
-SELECT ''package'' AS kind, n.nspname, k.pkgname, '''' AS proname
-FROM gs_package k
-LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
-WHERE COALESCE(length(''{{package}}''), 0) > 0 AND k.pkgname ILIKE ''%{{package}}%''
-ORDER BY 1, 2, 3, 4
-LIMIT 40;
-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
 INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.locate_context', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT current_database() AS db, current_user AS usr,
        (SELECT string_agg(datname, '', '' ORDER BY datname) FROM pg_database WHERE NOT datistemplate) AS databases;
 ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
@@ -537,22 +450,6 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
 FROM pg_namespace n
 WHERE n.nspname = ''{{schema}}'';
 ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.locate_search', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''proc'' AS kind, n.nspname, COALESCE(k.pkgname, '''') AS pkgname, p.proname
-FROM pg_proc p
-LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
-LEFT JOIN gs_package k ON k.oid = p.propackageid
-WHERE p.proname ILIKE ''%{{name}}%''
-  AND (n.nspname IS NULL OR (n.nspname NOT LIKE ''pg_%'' AND n.nspname NOT LIKE ''dbe_%''
-       AND n.nspname NOT IN (''information_schema'', ''pkg_service'', ''pkg_util'', ''sqladvisor'', ''db4ai'',
-                             ''snapshot'', ''blockchain'', ''cstore'', ''pmk'', ''coverage'')))
-UNION ALL
-SELECT ''package'' AS kind, n.nspname, k.pkgname, '''' AS proname
-FROM gs_package k
-LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
-WHERE COALESCE(length(''{{package}}''), 0) > 0 AND k.pkgname ILIKE ''%{{package}}%''
-ORDER BY 1, 2, 3, 4
-LIMIT 40;
-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
 INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'explain.from_history', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT schema_name, query
 FROM dbe_perf.statement_history
 WHERE unique_query_id = {{sid}}
@@ -587,19 +484,6 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
   FROM pg_settings
  ORDER BY name;
 ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.partitions', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname      AS schema,
-       c.relname      AS "table",
-       count(*)       AS parts,
-       COALESCE(max(p.partstrategy), '''') AS strategy
-  FROM pg_partition p
-  JOIN pg_class c     ON c.oid = p.parentid
-  JOIN pg_namespace n ON n.oid = c.relnamespace
- WHERE p.parttype = ''p''
-   AND n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',
-                         ''dbe_pldeveloper'',''cstore'',''pg_toast'')
- GROUP BY n.nspname, c.relname
- ORDER BY parts DESC;
-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
 INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.sync_commit', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''peers_configured'' AS item,
        (SELECT count(*)::text FROM pg_settings
          WHERE name LIKE ''replconninfo%'' AND COALESCE(setting,'''') <> '''') AS value
@@ -1070,21 +954,6 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
 INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.xlog_position', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT pg_current_xlog_location()::text AS lsn,
        to_char(clock_timestamp(), ''YYYY-MM-DD HH24:MI:SS.US'') AS at;
 ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.table_writes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT schema, "table", is_toast, n_tup_ins, n_tup_upd, n_tup_del, toast_bytes
-  FROM (SELECT COALESCE(pn.nspname, s.schemaname) AS schema,
-               COALESCE(pc.relname, s.relname) AS "table",
-               (s.schemaname = ''pg_toast'') AS is_toast,
-               s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
-               CASE WHEN s.schemaname = ''pg_toast'' THEN pg_relation_size(s.relid) END AS toast_bytes,
-               s.last_data_changed
-          FROM pg_stat_all_tables s
-          LEFT JOIN pg_class pc ON s.schemaname = ''pg_toast'' AND pc.reltoastrelid = s.relid
-          LEFT JOIN pg_namespace pn ON pn.oid = pc.relnamespace) t
- WHERE schema NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'',''pg_toast'')
-   AND n_tup_ins + n_tup_upd + n_tup_del > 0
- ORDER BY last_data_changed DESC NULLS LAST
- LIMIT {{limit}};
-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
 INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.write_sql', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT unique_sql_id::text,
        LEFT(REGEXP_REPLACE(COALESCE(NULLIF(REGEXP_REPLACE(query, ''^(\s*(--[^\n]*(\n|$)|/\*([^*]|\*+[^*/])*\*+/))+\s*'', ''''), ''''), query),
                           ''\s+'', '' '', ''g''), 80) AS query,
@@ -1233,8 +1102,6 @@ WHERE n_calls > 0
 ORDER BY {{order}}
 LIMIT {{limit}};
 ', '[{"key":"order","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'login.current_db', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT current_database() AS db, current_user AS usr;
-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
 INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'memanalyze.sql_mem_history', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT unique_query_id AS queryid,
        user_name,
        start_time,
@@ -1273,39 +1140,41 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
  ORDER BY t.n_dead_tup DESC
  LIMIT {{limit}};
 ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'lockwait.pairs', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT w.pid                         AS waiter_pid,
-       COALESCE(w.sessionid, 0)      AS waiter_sessionid,
-       w.mode                        AS waiter_mode,
-       h.pid                         AS holder_pid,
-       COALESCE(h.sessionid, 0)      AS holder_sessionid,
-       h.mode                        AS holder_mode,
-       w.locktype                    AS locktype,
-       CASE WHEN c.relname IS NULL THEN '''' ELSE concat(n.nspname, ''.'', c.relname) END AS lock_object,
-       COALESCE(w.locktag, '''')       AS locktag,
-       round(date_part(''epoch'', clock_timestamp() - wa.query_start)::numeric, 1) AS waiter_wait_s,
-       COALESCE(wa.usename, '''')      AS waiter_user,
-       COALESCE(wa.application_name, '''') AS waiter_app,
-       COALESCE(substr(wa.query, 1, 300), '''')       AS waiter_query,
-       COALESCE(ha.state, '''')        AS holder_state,
-       COALESCE(ha.usename, '''')      AS holder_user,
-       COALESCE(ha.application_name, '''') AS holder_app,
-       round(date_part(''epoch'', clock_timestamp() - ha.xact_start)::numeric, 1) AS holder_xact_age_s,
-       COALESCE(substr(ha.query, 1, 300), '''')       AS holder_query
-  FROM pg_locks w
-  JOIN pg_locks h
-    ON h.locktag = w.locktag AND h.granted AND h.pid <> w.pid
-  LEFT JOIN pg_class c     ON c.oid = w.relation
-  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
-  LEFT JOIN pg_stat_activity wa ON wa.pid = w.pid
-  LEFT JOIN pg_stat_activity ha ON ha.pid = h.pid
- WHERE w.granted = false
- ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.partitions', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname AS schema,
+       c.relname AS "table",
+       count(*)  AS parts,
+       COALESCE(max(CASE p.partstrategy WHEN ''r'' THEN ''r'' WHEN ''i'' THEN ''i'' WHEN ''l'' THEN ''l''
+                                        WHEN ''a'' THEN ''a'' WHEN ''h'' THEN ''h'' WHEN ''n'' THEN ''n''
+                                        ELSE ''?'' END), '''') AS strategy
+  FROM pg_partition p
+  JOIN pg_class c     ON c.oid = p.parentid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE p.parttype = ''p''
+   AND n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',
+                         ''dbe_pldeveloper'',''cstore'',''pg_toast'')
+ GROUP BY n.nspname, c.relname
+ ORDER BY parts DESC;
+', '[{"key":"dbName","value":"","type":"String","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.table_writes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT CASE WHEN s.schemaname = ''pg_toast'' THEN pn.nspname::text ELSE s.schemaname::text END AS schema,
+       CASE WHEN s.schemaname = ''pg_toast'' THEN pc.relname::text ELSE s.relname::text END AS "table",
+       (s.schemaname = ''pg_toast'') AS is_toast,
+       s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
+       CASE WHEN s.schemaname = ''pg_toast'' THEN pg_relation_size(s.relid) END AS toast_bytes
+  FROM pg_stat_all_tables s
+  LEFT JOIN pg_class pc     ON s.schemaname = ''pg_toast'' AND pc.reltoastrelid = s.relid
+  LEFT JOIN pg_namespace pn ON pn.oid = pc.relnamespace
+ WHERE s.n_tup_ins + s.n_tup_upd + s.n_tup_del > 0
+   AND ((s.schemaname <> ''pg_toast''
+         AND s.schemaname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore''))
+     OR (s.schemaname = ''pg_toast'' AND pn.nspname IS NOT NULL
+         AND pn.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'',''pg_toast'')))
+ ORDER BY s.last_data_changed DESC NULLS LAST
  LIMIT {{limit}};
 ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
 INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.stale_stats', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT tbl_name, frozen_pages, cur_pages, frozen_tuples, live_tuples,
        stat_columns, last_analyze, last_autoanalyze
 FROM (
-  SELECT concat(n.nspname, ''.'', c.relname) AS tbl_name,
+  SELECT concat(n.nspname::text, ''.'', c.relname::text) AS tbl_name,
          c.relpages AS frozen_pages,
          pg_relation_size(c.oid) / current_setting(''block_size'')::bigint AS cur_pages,
          c.reltuples::bigint AS frozen_tuples,
@@ -1323,12 +1192,12 @@ FROM (
 ) x
 ORDER BY (stat_columns = 0 OR frozen_pages = 0) DESC,
          CASE WHEN frozen_pages > 0
-              THEN CAST(abs(cur_pages - frozen_pages) AS float8) / frozen_pages
+              THEN abs(cur_pages - frozen_pages) * 1.0 / frozen_pages
               ELSE 0 END DESC,
          cur_pages DESC
 LIMIT {{limit}};
 ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"min_rows","value":"","type":"INTEGER","autoAcquire":false},{"key":"min_pages","value":"","type":"INTEGER","autoAcquire":false},{"key":"schema_filter","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.unused_index', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT concat(s.schemaname, ''.'', s.indexrelname) AS idx_name,
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.unused_index', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT concat(s.schemaname::text, ''.'', s.indexrelname::text) AS idx_name,
        s.relname AS table_name,
        s.idx_scan,
        s.idx_tup_read,
@@ -1346,9 +1215,136 @@ WHERE pg_relation_size(s.indexrelid) > {{min_bytes}}
 ORDER BY s.idx_scan ASC, pg_relation_size(s.indexrelid) DESC
 LIMIT {{limit}};
 ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"min_bytes","value":"","type":"INTEGER","autoAcquire":false},{"key":"schema_filter","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlreview.tables', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT
+  n.nspname::text                                              AS schema,
+  c.relname::text                                              AS "table",
+  EXISTS (SELECT 1 FROM pg_constraint pk
+          WHERE pk.conrelid = c.oid AND pk.contype = ''p'')      AS has_pk,
+  COALESCE((SELECT array_to_string(array_agg(fk.conname::text), '','')
+              FROM pg_constraint fk
+             WHERE fk.conrelid = c.oid AND fk.contype = ''f''), '''') AS fks,
+  COALESCE((SELECT array_to_string(array_agg(a.attname::text ORDER BY a.attnum), '','')
+              FROM pg_attribute a
+             WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), '''') AS columns
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind = ''r'' AND n.nspname = ''{{schema}}''
+ORDER BY c.relname;
+', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlreview.indexes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT
+  n.nspname::text                                              AS schema,
+  t.relname::text                                              AS "table",
+  i.relname::text                                              AS name,
+  COALESCE((SELECT array_to_string(array_agg(a.attname::text
+                     ORDER BY position(concat('' '', a.attnum::text, '' '') IN concat('' '', ix.indkey::text, '' ''))), '','')
+              FROM pg_attribute a
+             WHERE a.attrelid = t.oid AND a.attnum > 0
+               AND position(concat('' '', a.attnum::text, '' '') IN concat('' '', ix.indkey::text, '' '')) > 0), '''') AS columns,
+  ix.indisunique                                               AS is_unique,
+  ix.indisprimary                                              AS is_primary,
+  COALESCE(s.idx_scan, 0)                                      AS scans
+FROM pg_index ix
+JOIN pg_class i     ON i.oid = ix.indexrelid
+JOIN pg_class t     ON t.oid = ix.indrelid
+JOIN pg_namespace n ON n.oid = t.relnamespace
+LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = ix.indexrelid
+WHERE n.nspname = ''{{schema}}''
+ORDER BY t.relname, i.relname;
+', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.locate_search', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''proc'' AS kind, n.nspname::text AS nspname, COALESCE(k.pkgname::text, '''') AS pkgname, p.proname::text AS proname
+FROM pg_proc p
+LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
+LEFT JOIN gs_package k ON k.oid = p.propackageid
+WHERE lower(p.proname::text) LIKE lower(''%{{name}}%'')
+  AND (n.nspname IS NULL OR (n.nspname NOT LIKE ''pg_%'' AND n.nspname NOT LIKE ''dbe_%''
+       AND n.nspname NOT IN (''information_schema'', ''pkg_service'', ''pkg_util'', ''sqladvisor'', ''db4ai'',
+                             ''snapshot'', ''blockchain'', ''cstore'', ''pmk'', ''coverage'')))
+UNION ALL
+SELECT ''package'' AS kind, n.nspname::text AS nspname, k.pkgname::text AS pkgname, '''' AS proname
+FROM gs_package k
+LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
+WHERE COALESCE(length(''{{package}}''), 0) > 0 AND lower(k.pkgname::text) LIKE lower(''%{{package}}%'')
+ORDER BY 1, 2, 3, 4
+LIMIT 40;
+', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.locate_search', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''proc'' AS kind, n.nspname::text AS nspname, COALESCE(k.pkgname::text, '''') AS pkgname, p.proname::text AS proname
+FROM pg_proc p
+LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
+LEFT JOIN gs_package k ON k.oid = p.propackageid
+WHERE lower(p.proname::text) LIKE lower(''%{{name}}%'')
+  AND (n.nspname IS NULL OR (n.nspname NOT LIKE ''pg_%'' AND n.nspname NOT LIKE ''dbe_%''
+       AND n.nspname NOT IN (''information_schema'', ''pkg_service'', ''pkg_util'', ''sqladvisor'', ''db4ai'',
+                             ''snapshot'', ''blockchain'', ''cstore'', ''pmk'', ''coverage'')))
+UNION ALL
+SELECT ''package'' AS kind, n.nspname::text AS nspname, k.pkgname::text AS pkgname, '''' AS proname
+FROM gs_package k
+LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
+WHERE COALESCE(length(''{{package}}''), 0) > 0 AND lower(k.pkgname::text) LIKE lower(''%{{package}}%'')
+ORDER BY 1, 2, 3, 4
+LIMIT 40;
+', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'login.current_db', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT current_database() AS db, current_user AS usr,
+       (SELECT datcompatibility::text FROM pg_database WHERE datname = current_database()) AS compat,
+       (SELECT setting FROM pg_settings WHERE name = ''lower_case_table_names'') AS lctn;
+', '[{"key":"dbName","value":"","type":"String","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
 INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'explain.kernel_funcs', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''version'' AS item, version() AS detail
 UNION ALL
-SELECT concat(''func:'', p.proname) AS item, pg_get_function_arguments(p.oid) AS detail
+SELECT concat(''func:'', p.proname::text) AS item, pg_get_function_arguments(p.oid) AS detail
   FROM pg_proc p
  WHERE p.proname IN (''gs_get_explain'', ''gs_get_kernel_info'');
 ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'lockwait.pairs', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT w.pid                         AS waiter_pid,
+       COALESCE(w.sessionid, 0)      AS waiter_sessionid,
+       w.mode                        AS waiter_mode,
+       h.pid                         AS holder_pid,
+       COALESCE(h.sessionid, 0)      AS holder_sessionid,
+       h.mode                        AS holder_mode,
+       w.locktype                    AS locktype,
+       CASE WHEN c.relname IS NULL THEN '''' ELSE concat(n.nspname::text, ''.'', c.relname::text) END AS lock_object,
+       COALESCE(w.locktag, '''')       AS locktag,
+       round(date_part(''epoch'', clock_timestamp() - wa.query_start)::numeric, 1) AS waiter_wait_s,
+       COALESCE(wa.usename::text, '''') AS waiter_user,
+       COALESCE(wa.application_name, '''') AS waiter_app,
+       COALESCE(substr(wa.query, 1, 300), '''')       AS waiter_query,
+       COALESCE(ha.state, '''')        AS holder_state,
+       COALESCE(ha.usename::text, '''') AS holder_user,
+       COALESCE(ha.application_name, '''') AS holder_app,
+       round(date_part(''epoch'', clock_timestamp() - ha.xact_start)::numeric, 1) AS holder_xact_age_s,
+       COALESCE(substr(ha.query, 1, 300), '''')       AS holder_query
+  FROM pg_locks w
+  JOIN pg_locks h
+    ON h.locktag = w.locktag AND h.granted AND h.pid <> w.pid
+  LEFT JOIN pg_class c     ON c.oid = w.relation
+  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+  LEFT JOIN pg_stat_activity wa ON wa.pid = w.pid
+  LEFT JOIN pg_stat_activity ha ON ha.pid = h.pid
+ WHERE w.granted = false
+ ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
+ LIMIT {{limit}};
+', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.proc_def', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, p.proname, l.lanname, p.prosrc,
+       pg_catalog.pg_get_function_arguments(p.oid) AS args,
+       COALESCE(k.pkgname::text, '''') AS package
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_language l ON l.oid = p.prolang
+LEFT JOIN gs_package k ON k.oid = p.propackageid
+WHERE p.proname = ''{{name}}''
+  AND (''{{schema}}'' IS NULL OR ''{{schema}}'' = '''' OR n.nspname = ''{{schema}}'')
+  AND (''{{package}}'' IS NULL OR ''{{package}}'' = '''' OR k.pkgname = ''{{package}}'')
+ORDER BY (n.nspname = ''public'') DESC, n.nspname, k.pkgname
+LIMIT 5;
+', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.proc_def', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, p.proname, l.lanname, p.prosrc,
+       pg_catalog.pg_get_function_arguments(p.oid) AS args,
+       COALESCE(k.pkgname::text, '''') AS package
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_language l ON l.oid = p.prolang
+LEFT JOIN gs_package k ON k.oid = p.propackageid
+WHERE p.proname = ''{{name}}''
+  AND (''{{schema}}'' IS NULL OR ''{{schema}}'' = '''' OR n.nspname = ''{{schema}}'')
+  AND (''{{package}}'' IS NULL OR ''{{package}}'' = '''' OR k.pkgname = ''{{package}}'')
+ORDER BY (n.nspname = ''public'') DESC, n.nspname, k.pkgname
+LIMIT 5;
+', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());

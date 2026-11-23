@@ -359,6 +359,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     #
     # 这几条原先写在取到计划之后，那时才 return 1：白跑一次 EXPLAIN、白建一次
     # 连接，而且拒绝理由与「已经拿到计划」同时出现，读起来自相矛盾。
+    # 纯文本检查也要按业务库的词法切(M 兼容库:# 注释、反斜杠转义…,v1.5.1),连库之前先按连接设好方言。
+    access.prime_dialect(args.conn)
     reject = shape_reject(sql_text)
     if reject:
         print(reject)

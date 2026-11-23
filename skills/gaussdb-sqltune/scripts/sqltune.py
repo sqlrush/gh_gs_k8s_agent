@@ -32,6 +32,7 @@ for _anc in _HERE.parents:                      # locate common/ (repo root or i
 import coltypes  # noqa: E402
 import common  # noqa: E402
 from common import access  # noqa: E402
+from common import compat  # noqa: E402
 from common import cli  # noqa: E402
 from common import exec_db  # noqa: E402
 from common import reports  # noqa: E402
@@ -691,7 +692,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.format == "json":
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
-            print(sqltune_report(tr), end="")
+            print(compat.report_line(runner) + sqltune_report(tr), end="")
         archive_tune(payload)
         return 0
     except systables.SystemSQLSkipped as exc:

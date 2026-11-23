@@ -19,25 +19,24 @@
 # 列名 schema/table/has_pk/fks/columns 原本就唯一且有意义，未加别名。
 # has_pk 是布尔列，取回来是 't'/'f'（或 'true'/'false'，取决于中间件的
 # 布尔渲染），调用方必须用 _as_bool 判断 —— bool('f') 是 True。
+# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
+#   TABLE 在 M 库是保留字,`AS table` 报 syntax error:别名改成 AS "table"(M 库里双引号别名按字符串别名处理,A 库是加引号的标识符,
+#   两边列名都是 table)。顺带去掉 ARRAY[]::text[] 字面量:COALESCE 挪到 array_to_string 外面,空集仍得 ''。
 name: sqlreview.tables
 database_type: appbusiness
 description: 某模式下的表清单（主键/外键/列名）
 sql: |
   SELECT
     n.nspname::text                                              AS schema,
-    c.relname::text                                              AS table,
+    c.relname::text                                              AS "table",
     EXISTS (SELECT 1 FROM pg_constraint pk
             WHERE pk.conrelid = c.oid AND pk.contype = 'p')      AS has_pk,
-    array_to_string(
-      COALESCE((SELECT array_agg(fk.conname::text)
+    COALESCE((SELECT array_to_string(array_agg(fk.conname::text), ',')
                 FROM pg_constraint fk
-                WHERE fk.conrelid = c.oid AND fk.contype = 'f'),
-               ARRAY[]::text[]), ',')                            AS fks,
-    array_to_string(
-      COALESCE((SELECT array_agg(a.attname::text ORDER BY a.attnum)
+               WHERE fk.conrelid = c.oid AND fk.contype = 'f'), '') AS fks,
+    COALESCE((SELECT array_to_string(array_agg(a.attname::text ORDER BY a.attnum), ',')
                 FROM pg_attribute a
-                WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped),
-               ARRAY[]::text[]), ',')                            AS columns
+               WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), '') AS columns
   FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE c.relkind = 'r' AND n.nspname = '{{schema}}'

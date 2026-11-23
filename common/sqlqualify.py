@@ -35,6 +35,23 @@ _TOKEN_RE = re.compile(
     """,
     re.S | re.X,
 )
+# M 兼容库(MySQL 词法,v1.5.1):反引号是标识符;双引号、单引号都是字符串,里面反斜杠转义;# 与「-- 加空白」是行注释;
+# /*! … */ 是会执行的内容,不当注释。词法按库来:同一段 SQL 在 A 库与 M 库里切出的字符串 / 注释不一样。
+_TOKEN_RE_M = re.compile(
+    r"""
+    (?P<ws>\s+)
+  | (?P<lcomment>(?:--(?=\s)|\#)[^\n]*)
+  | (?P<bcomment>/\*(?!!).*?\*/)
+  | (?P<str>'(?:\\.|''|[^'\\])*'|"(?:\\.|""|[^"\\])*")
+  | (?P<qident>`(?:``|[^`])+`)
+  | (?P<param>\{\{[^}]*\}\}|\$\d+|:[A-Za-z_]\w*|\?)
+  | (?P<ident>[A-Za-z_][A-Za-z0-9_$]*)
+  | (?P<num>\d+(?:\.\d+)?)
+  | (?P<punct>[(),.;=<>+\-*/%|^&!~\[\]])
+  | (?P<other>.)
+    """,
+    re.S | re.X,
+)
 
 # 引导词后面可能先出现的修饰词,越过它们再看名字
 _SKIP_AFTER_LEADER = {"only", "lateral"}
@@ -60,9 +77,9 @@ _NOT_A_FUNCTION = _NOT_A_TABLE | _FROM_CLAUSE_ENDERS | {
 }
 
 
-def _tokens(sql: str):
+def _tokens(sql: str, mysql: bool = False):
     pos = 0
-    for m in _TOKEN_RE.finditer(sql):
+    for m in (_TOKEN_RE_M if mysql else _TOKEN_RE).finditer(sql):
         assert m.start() == pos, "tokenizer left a gap"
         pos = m.end()
         yield m.lastgroup, m.group(0)
@@ -105,7 +122,7 @@ def _cte_names(sig) -> set:
                 j += 1
                 if not (j < len(sig) and sig[j] == ("punct", "(")):
                     break
-                names.add(name[1:-1].lower() if name.startswith('"') else name.lower())
+                names.add(name[1:-1].lower() if name[:1] in ('"', "`") else name.lower())
                 j = _skip_parens(sig, j)                               # 跳过 CTE 体
                 if j < len(sig) and sig[j] == ("punct", ","):
                     j += 1
@@ -117,25 +134,29 @@ def _cte_names(sig) -> set:
     return names
 
 
-def _schema_prefix(schema: str) -> str:
-    return (schema if schema == schema.lower() else '"%s"' % schema) + "."
+def _schema_prefix(schema: str, mysql: bool = False) -> str:
+    """大小写混写的 schema 要加引号:A 库用双引号,M 兼容库用反引号(那里双引号是字符串)。"""
+    if schema == schema.lower():
+        return schema + "."
+    return ("`%s`." % schema) if mysql else ('"%s".' % schema)
 
 
-def qualify_tables(sql: str, schema: str) -> Tuple[str, List[str]]:
-    """返回 (补全后的 SQL, 被补全的表名列表——按出现顺序,原样大小写/引号)。没有可补的就原样返回。"""
+def qualify_tables(sql: str, schema: str, mysql: bool = False) -> Tuple[str, List[str]]:
+    """返回 (补全后的 SQL, 被补全的表名列表——按出现顺序,原样大小写/引号)。没有可补的就原样返回。
+    mysql=True:SQL 按 M 兼容库(MySQL 词法)切词、补的 schema 用反引号(common/compat.py is_mysql_like)。"""
     if not valid_schema(schema):
         raise ValueError("schema 名 %r 不是合法标识符" % (schema,))
-    return _rewrite(sql, _schema_prefix(schema))
+    return _rewrite(sql, _schema_prefix(schema, mysql), mysql)
 
 
-def unqualified_tables(sql: str) -> List[str]:
+def unqualified_tables(sql: str, mysql: bool = False) -> List[str]:
     """SQL 里表位置上不带 schema 的名字(按出现顺序,原样大小写/引号)——贴文本没带 --schema 时拿去目录里找 schema 用。"""
-    return _rewrite(sql, None)[1]
+    return _rewrite(sql, None, mysql)[1]
 
 
-def _rewrite(sql: str, prefix: Optional[str]) -> Tuple[str, List[str]]:
+def _rewrite(sql: str, prefix: Optional[str], mysql: bool = False) -> Tuple[str, List[str]]:
     """单趟扫描,按括号层级各自记住「这一层正处在 FROM 列表里」。prefix 为 None 时只收集不改写。"""
-    toks = list(_tokens(sql))
+    toks = list(_tokens(sql, mysql))
     sig_idx = [i for i, (k, _) in enumerate(toks) if k not in ("ws", "lcomment", "bcomment")]
     sig = [toks[i] for i in sig_idx]
     ctes = _cte_names(sig)

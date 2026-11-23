@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from common import procname
+from common import compat, procname
 from common.grmp.errors import QueryError
 
 MAX_LINES = 20000                   # 与 <skill>.source_adm 的 LIMIT 20001 配套:多出那一行就是「超限」
@@ -195,6 +195,11 @@ def _reason(exc: Exception) -> str:
 
 
 def _query(runner, script: str, name: str) -> List[Dict[str, Any]]:
+    # M 兼容库只继承了部分系统视图,ADM_* 不在其中(官方文档《M-Compatibility 开发者指南》系统视图;
+    # 2026-11-20 现场:Relation "pg_catalog.adm_source" does not exist)。没有对等写法,不发这条脚本,原因写清。
+    if compat.is_mysql_like(runner):
+        raise Unavailable("本库是 %s,没有 ADM_SOURCE 视图(它只在 A 兼容库提供),pg_proc 取不到时没有别的兜底"
+                          % compat.label(runner))
     # 名字进的是白名单模板的 String 参数位,中间件按文本替换 —— 只放行合法标识符。用户给的名字在 procname 里校验过,
     # 但「pg_proc 里过程体为空」那一路的包名是从数据库读回来的,同样要过这一关
     if not procname.IDENT_RE.match(name or ""):

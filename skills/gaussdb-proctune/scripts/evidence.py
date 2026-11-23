@@ -37,6 +37,7 @@ from common.grmp.values import as_bool, as_float, as_int  # noqa: E402
 from common import explain_actual as ea  # noqa: E402
 from common import search_path as sp  # noqa: E402
 from common import catalog_scope as cs  # noqa: E402
+from common import compat  # noqa: E402
 
 # SQL 已迁到 scripts/registry/proctune/ —— 两条路径共用同一份定义
 DB_VERSION_SCRIPT = "proctune.db_version"
@@ -274,8 +275,9 @@ def collect(runner, db, sql_text: str, do_analyze: bool, schema: str = "") -> Ev
         except ValueError as exc:
             sp_note = str(exc)
         plan = explain(db, sql_text, do_analyze)
-    names = extract_tables(sql_text)
-    scope = cs.Scope(explicit=cs.explicit_schemas(extract_table_refs(sql_text)), default=schema or "")
+    fold = compat.folds_unquoted(runner)          # M 兼容库表名区分大小写时不折小写(v1.5.1)
+    names = extract_tables(sql_text, fold)
+    scope = cs.Scope(explicit=cs.explicit_schemas(extract_table_refs(sql_text, fold)), default=schema or "")
     return Evidence(
         sql=sql_text,
         version=version,

@@ -85,7 +85,7 @@ def _s_table_has_foreign_key(stmt: Statement, rule: Rule) -> list[Finding]:
     if not _RE_FOREIGN_KEY.search(stmt.normalized):
         return []
     m = _RE_FK_NAME.search(stmt.normalized)
-    name = m.group(1).strip('"') if m else "(匿名)"
+    name = m.group(1).strip('"').strip("`") if m else "(匿名)"
     return [_finding(rule, _at(stmt),
                      _fmt(rule.message, table=_tbl(stmt), constraint=name),
                      snippet=stmt.raw)]
