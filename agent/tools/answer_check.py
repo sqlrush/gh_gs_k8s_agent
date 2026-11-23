@@ -7,6 +7,10 @@
 
 模板靠提示词执行,模型偶尔会漏段、并段、把出处写回旧格式 —— 这里在回归评估里把它们抓出来。只看格式,
 不判断内容对不对(内容由人评审);引用编号在不在库里交给 `kb.py cite-check`。有 ✗ 退出 1。
+
+另有三条「视角」检查(2026-11-05 行方要求站在应用 / 运维 DBA 角度):不出现「数据库缺陷、打补丁、找厂商」这类说法;
+诊断类回答里建议修改的参数都在允许清单里、按本类写法写(common/guc_policy.py);根因段落到业务对象
+(sql_id、pid、sessionid、应用、表),或明说「尚未定位到引起它的业务」。
 """
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ from typing import List, Optional, Sequence, Tuple
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from common import guc_policy  # noqa: E402
 from common.kb import citestyle  # noqa: E402
 
 # 各类回答的段落(按顺序)。每段给几种可接受的写法,命中其一即可。
@@ -41,6 +46,15 @@ _FONT = re.compile(r"<font color=(#[0-9a-fA-F]{6})>(.*?)</font>", re.S)
 _AFTER = re.compile(r"\s{0,2}[(（]\s*引用自\s*([^)）]*?)\s+([A-Z][^\s,，;;:：、。)）]*)")
 _INSIDE = re.compile(r"[(（]\s*引用自\s*([^)）]*?)\s+([A-Z][^\s,，;;:：、。)）]*)[^)）]*[)）]\s*$")
 _HEADING = re.compile(r"^\s*(#{1,6}\s|\*\*|[①②③④⑤])")
+# 站在数据库产品开发人员角度的说法:归为数据库缺陷、打补丁、升级版本、找厂商改、讲源码
+PERSPECTIVE_BANNED = ("内核缺陷", "数据库缺陷", "产品缺陷", "内核bug", "内核 bug", "数据库bug", "数据库 bug", "打补丁",
+                      "升级内核", "升级数据库版本", "联系厂商", "找厂商", "内核源码", "源码实现")
+DIAGNOSIS = ("health", "fault", "sqltune", "proctune", "explain", "ranking", "wdr")
+ROOT_SECTION = {"health": ("根因和证据链", "根因与证据链"), "fault": ("根因",), "wdr": ("问题与元凶",)}
+# 「应用视角:」是段内标签,不算业务对象;应用要带名字(应用 xxx、应用「xxx」、application_name)
+_BUSINESS = re.compile(r"sql_id|unique_sql_id|SQL ?ID|sqlid|\bpid\b|sessionid|会话\s*\d|应用(名)?\s*[「“\"'`]|应用名|"
+                       r"应用\s*[A-Za-z0-9_\-]{2,}|application|"
+                       r"(?<![\w.])[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_$]*(?![\w(])|尚未定位到引起它的业务", re.I)
 
 
 @dataclass(frozen=True)
@@ -137,11 +151,57 @@ def citation_checks(text: str, kind: str) -> List[Check]:
     return out
 
 
+def _section(text: str, names: Sequence[str]) -> str:
+    """从标题含 names 之一的那一段到下一个段落标题(① ② ③ ④ 或 #)之间的正文。"""
+    heads = _heading_lines(text)
+    for i, (pos, line) in enumerate(heads):
+        if any(n in line for n in names):
+            end = next((p for p, l in heads[i + 1:] if re.match(r"^\s*(#{1,6}\s|\*\*)?\s*[①②③④⑤]", l)), len(text))
+            return text[pos:end]
+    return ""
+
+
+_DENIED = re.compile(r"(不是|并非|也不是|不属于|而非|排除|不建议|不要|无需|不必|没有必要)[^。;；\n]{0,10}$")
+
+
+def _said(text: str, phrase: str) -> bool:
+    """说了这个说法(否定的不算:「不是内核 bug」「不建议据此打补丁」恰恰是对的说法)。"""
+    low, p = text.lower(), phrase.lower()
+    i = low.find(p)
+    while i >= 0:
+        if not _DENIED.search(low[max(0, i - 16):i]):
+            return True
+        i = low.find(p, i + 1)
+    return False
+
+
+def perspective_checks(text: str, kind: str) -> List[Check]:
+    """视角三条:说法、参数、根因落到业务。"""
+    said = [w for w in PERSPECTIVE_BANNED if _said(text, w)]
+    out = [Check(not said, "视角:说法", "出现了 " + "、".join(said) if said else "没有归为数据库缺陷 / 打补丁 / 找厂商的说法")]
+    if kind in DIAGNOSIS:
+        bad = guc_policy.violations(text)
+        out.append(Check(not bad, "视角:参数", ";".join("%s:%s" % (n, why) for n, _s, why in bad[:4]) if bad
+                         else "建议的参数都在允许清单里"))
+    if kind in ROOT_SECTION:
+        sec = _section(text, ROOT_SECTION[kind])
+        ok = bool(sec) and bool(_BUSINESS.search(sec))
+        out.append(Check(ok, "视角:根因落到业务", "根因里有业务对象" if ok else
+                         "根因只停在指标,没有 SQL / 会话 / 应用 / 表,也没写「尚未定位到引起它的业务」"))
+    return out
+
+
+def perspective(text: str, kind: str) -> Check:
+    """视角三条合成一项(验收评分用:一题一项,不改变其它格式项的权重分配之外的东西)。"""
+    bad = [c for c in perspective_checks(text, kind) if not c.ok]
+    return Check(not bad, "视角", ";".join("%s(%s)" % (c.name, c.detail) for c in bad) or "应用 / 运维 DBA 视角")
+
+
 def check(text: str, kind: str) -> List[Check]:
     if kind not in SECTIONS:
         raise ValueError("kind 只能是 %s" % " / ".join(SECTIONS))
     checks = [check_sections(text, kind), check_opening(text, kind), check_followup(text, kind), check_views(text, kind)]
-    return [c for c in checks if c is not None] + citation_checks(text, kind)
+    return [c for c in checks if c is not None] + citation_checks(text, kind) + perspective_checks(text, kind)
 
 
 def render(checks: Sequence[Check]) -> str:

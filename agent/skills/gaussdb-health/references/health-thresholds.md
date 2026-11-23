@@ -38,7 +38,7 @@
 
 ## 已知口径与边界
 
-- **长/空闲事务、最老事务、活跃集中度、执行中的长 SQL 只统计真实客户端会话**（`client_port` 非空）。GaussDB 内部后台线程（WLM 的 workload、WDRSnapshot、Asp、JobScheduler 等，有的长期 active 且带事务开始时间）的 `client_port` 为 NULL，据此排除（否则 WLM 会被误报为 35h 长事务）；真实客户端 TCP 是端口号、本地 Unix socket 是 -1，都纳入检查。**不再按 `connection_info` 非空认客户端**：只有 openGauss 自带的 libpq（gsql 等）会填这一列，psycopg2 这类社区 libpq 系驱动、不少中间件不填——2026-10-24 faultlab 实测，这类客户端的长事务 / 空闲事务因此整类看不见。
+- **长/空闲事务、最老事务、活跃集中度、执行中的长 SQL 只统计真实客户端会话**（`client_port` 非空）。GaussDB 内部后台线程（WLM 的 workload、WDRSnapshot、Asp、JobScheduler 等，有的长期 active 且带事务开始时间）的 `client_port` 为 NULL，据此排除（否则 WLM 会被误报为 35h 长事务）；真实客户端 TCP 是端口号、本地 Unix socket 是 -1，都纳入检查。**不再按 `connection_info` 非空认客户端**：只有 openGauss 自带的 libpq（gsql 等）会填这一列，psycopg2 这类社区 libpq 系驱动、不少中间件不填——2026-10-24 故障演练实测，这类客户端的长事务 / 空闲事务因此整类看不见。
 - **执行中的长 SQL（`SLOWSQL_RUNNING`）**：慢 SQL 表读的 `dbe_perf.statement` 只记已完成的执行，还在跑的语句不在里面；这一项从 `pg_stat_activity` 看此刻 active 的语句已执行多久。**在等锁的不算**（`waiting=true`，耗时花在锁上，看锁阻塞链），只在标题里点数。
 - **连接状态分布只数 `sessionid <> 0` 的会话**：开线程池时 `pg_stat_activity` 里有 `sessionid = 0` 的空闲工作线程条目，不是会话。
 - **归档失败计数在 PG 9.2 内核 GaussDB 不可得**（无 `pg_stat_archiver`）；该维仅报 `archive_mode` 与 checkpoint 压力。

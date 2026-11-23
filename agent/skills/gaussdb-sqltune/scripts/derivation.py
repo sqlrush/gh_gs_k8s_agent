@@ -130,10 +130,8 @@ def _section_calibration(calibration) -> str:
     out.append(render.table(
         ["算子", "对象", "复算", "实测", "相对偏差", "判定"], rows))
     out.append("\n%s\n" % calibration.summary())
-    out.append("采用的内核版本变体：min_io_split_seq=%s、btree_page_cpu_cost=%s"
-               "（四种变体逐个试出来的，不是假设的）\n"
-               % (calibration.variant.min_io_split_seq,
-                  calibration.variant.btree_page_cpu_cost))
+    # 采用的是哪种代价常数变体(min_io_split_seq / btree_page_cpu_cost)只对维护者有用,不进报告(2026-11-05:
+    # 报告站在应用 / 运维 DBA 角度,不印优化器内部常数);calibration 对象里照旧留着,单测核对。
 
     unmodeled = [c for c in calibration.checks if c.status == _cal.UNMODELED]
     if unmodeled:

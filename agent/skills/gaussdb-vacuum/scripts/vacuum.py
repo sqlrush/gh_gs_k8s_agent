@@ -55,9 +55,7 @@ import common  # noqa: E402
 from common import access  # noqa: E402
 from common import cli  # noqa: E402
 from common import kbsection  # noqa: E402
-from common import kernel_funcs as kf  # noqa: E402
 from common.finding import findings_to_json  # noqa: E402
-from common.grmp.hints import with_hint  # noqa: E402
 # 结果值全是字符串：bool("f") 是 True、NULL 渲染成空串而不是 None。
 # 类型/空值还原一律走这里，不用裸 int()/float()/`is None`/`or 默认值`。
 from common.grmp.values import as_float, is_null  # noqa: E402
@@ -74,11 +72,12 @@ DEAD_SCRIPT = "vacuum.dead_tuples"
 SETTINGS_SCRIPT = "vacuum.autovac_settings"
 WORKERS_SCRIPT = "vacuum.autovac_workers"
 XMIN_SCRIPT = "vacuum.oldest_xmin"
+HOLDER_SCRIPT = "vacuum.xmin_holder"     # 精确定位持有最老 xmin 的事务(2026-11-05)
+XID_LAG_SCRIPT = "vacuum.xid_lag"
 FREEZE_SCRIPT = "vacuum.freeze_age"
 BLOAT_SCRIPT = "vacuum.bloat_estimate"
-# 内核事务水位(GaussDB 私有,先探测再用;交付闸按脚本名全串在 skills/ 里检索,故写全):
-#   explain.kernel_funcs —— 探测;vacuum.kernel_info —— gs_get_kernel_info() 原样四列
-# openGauss 没有这个函数,报告不出这一节;GaussDB 该有而没有,用中文说明原因。
+# 内核事务水位(vacuum.kernel_info,gs_get_kernel_info 原样四列)2026-11-05 起不再取:报告站在应用 / 运维 DBA 角度,
+# 不印内核内存态指标;「卡在哪个 xid、被谁卡住」由 vacuum.xmin_holder 给出。白名单里的这条脚本保留(行方已导入)。
 
 MB = 1024 * 1024
 
@@ -88,26 +87,30 @@ class VacuumReport:
     tables: list = field(default_factory=list)      # 每项含原行 + trigger_line + hits
     settings: dict = field(default_factory=dict)
     workers: list = field(default_factory=list)
-    oldest_xmin: list = field(default_factory=list)
+    oldest_xmin: list = field(default_factory=list)   # 卡住回收的来源(rules.blockers 的结果)
     findings: list = field(default_factory=list)
-    kernel_info: list = field(default_factory=list)   # gs_get_kernel_info 的 node/module/name/value 行
-    kernel_note: str = ""                              # 没取到时的原因(中文);openGauss 为空
+    holder_note: str = ""                               # 持有者取不到时的原因(白名单还没导入新脚本等)
+    xid_lag: list = field(default_factory=list)         # 每个节点:oldest_xmin / next_xid
     freeze: list = field(default_factory=list)         # 每个库一行:datname/freeze_age/max_age
     freeze_note: str = ""                              # 取不到时的原因(中文);取到了为空
     bloat: list = field(default_factory=list)          # 膨胀估算的输入行
     bloat_note: str = ""                               # 取不到时的原因(中文)
 
 
-def _kernel_info(runner) -> tuple:
-    """gs_get_kernel_info 有就取;没有就按引擎决定要不要说明;任何失败都不影响主报告。"""
-    probe = kf.probe(runner)
-    if not probe.kernel_info:
-        return [], kf.missing_note(probe)
+def _holders(runner, limit: int) -> tuple:
+    """持有 xmin 的事务。取不到返回 (None, 原因) —— 退回只看长事务的旧口径,并在报告里说明。"""
     try:
-        return kf.kernel_info(runner), ""
+        return runner.run(HOLDER_SCRIPT, {"limit": int(limit)}), ""
     except (access.QueryError, common.DBError) as exc:
-        msg = str(exc)
-        return [], "gs_get_kernel_info 调用失败:" + (msg if "提示:" in msg else with_hint(msg))
+        return None, ("持有最老 xmin 的事务取不到,下面按「此刻有哪些长事务」列出(指不出确切的持有者):"
+                      + str(exc))
+
+
+def _xid_lag(runner) -> list:
+    try:
+        return runner.run(XID_LAG_SCRIPT, {})
+    except (access.QueryError, common.DBError):
+        return []
 
 
 def _freeze(runner) -> tuple:
@@ -135,8 +138,8 @@ def collect(runner, limit: int, th) -> VacuumReport:
                 for r in runner.run(SETTINGS_SCRIPT, {})}
     raw = runner.run(DEAD_SCRIPT, {"limit": int(limit)})
     workers = runner.run(WORKERS_SCRIPT, {})
-    xmin = runner.run(XMIN_SCRIPT, {})
-    kernel_rows, kernel_note = _kernel_info(runner)
+    holders, holder_note = _holders(runner, limit)
+    xmin = rules.blockers(holders, runner.run(XMIN_SCRIPT, {}), th)
     freeze_rows, freeze_note = _freeze(runner)
     bloat_rows, bloat_note = _bloat(runner, limit)
     tables = []
@@ -150,7 +153,7 @@ def collect(runner, limit: int, th) -> VacuumReport:
                         findings=(rules.judge_tables(raw, settings, xmin, th)
                                   + freeze_mod.judge(freeze_rows)
                                   + bloat_mod.judge(bloat_rows)),
-                        kernel_info=kernel_rows, kernel_note=kernel_note,
+                        holder_note=holder_note, xid_lag=_xid_lag(runner),
                         freeze=freeze_rows, freeze_note=freeze_note,
                         bloat=bloat_rows, bloat_note=bloat_note)
 
@@ -182,6 +185,7 @@ _KEY_GUCS = (
 )
 
 _XMIN_SOURCE_LABELS = {
+    "xmin_holder": "持有 xmin 的事务",
     "long_xact": "长事务",
     "prepared_xact": "两阶段（prepared）事务",
     "replication_slot": "复制槽",
@@ -270,12 +274,15 @@ def _xmin_blockers_section(rep: VacuumReport) -> str:
     """独立于任何一张表是否命中 R4——只看 `vacuum.oldest_xmin` 有没有返回
     行。见本文件头部注释与
     test_xmin_blocker_is_reported_even_when_no_table_hits_r4。"""
+    lag = _xid_lag_line(rep)
+    note = ("> %s\n\n" % rep.holder_note) if rep.holder_note else ""
     if not rep.oldest_xmin:
-        return ("### 回收阻塞源（长事务 / 两阶段事务 / 复制槽）\n\n"
+        return ("### 回收阻塞源（长事务 / 两阶段事务 / 复制槽）\n\n" + note +
                 "当前没有发现阻塞死元组回收的长事务、两阶段事务或复制槽"
-                "（`vacuum.oldest_xmin` 未返回任何行）。\n")
+                "（持有 xmin 的事务都在正常并发范围内）。\n" + lag)
     lines = [
         "### 回收阻塞源（长事务 / 两阶段事务 / 复制槽）\n",
+        note.rstrip("\n") + ("\n" if note else ""),
         "发现 %d 个可能阻塞死元组回收的来源——只要它们存在，`VACUUM` 就"
         "无法回收这些快照仍可能用到的死元组，与本报告风险表里有没有表"
         "命中 R4 无关：\n" % len(rep.oldest_xmin),
@@ -284,8 +291,11 @@ def _xmin_blockers_section(rep: VacuumReport) -> str:
         source = x.get("source", "?")
         label = _XMIN_SOURCE_LABELS.get(source, source)
         identifier = x.get("identifier", "?")
-        line = ("- %s（标识 %s）：%s —— `VACUUM` 无法回收它快照之前产生的死"
-               "元组" % (label, identifier, _xmin_age_display(x)))
+        if source == "xmin_holder":       # 标识已是整句(会话、应用、用户),不再套「标识」
+            line = "- %s：%s —— `VACUUM` 无法回收它快照之前产生的死元组" % (identifier, _xmin_age_display(x))
+        else:
+            line = ("- %s（标识 %s）：%s —— `VACUUM` 无法回收它快照之前产生的死"
+                    "元组" % (label, identifier, _xmin_age_display(x)))
         # detail 带着 usename/state/query 之类的原始上下文——不只是给人看
         # 的补充信息：它也是唯一能证明"这一行确实是一个独立于取数会话
         # 本身的真实事务"的证据。见 tools/matrix_vacuum.py 的
@@ -295,26 +305,24 @@ def _xmin_blockers_section(rep: VacuumReport) -> str:
         # 复用，单看 pid 活不活会给出假阳性的"通过"。
         detail = x.get("detail")
         if not is_null(detail):
-            line += "（%s）" % render.truncate(str(detail), 160)
+            line += "（%s）" % render.truncate(str(detail), 240)
+        if x.get("is_oldest"):
+            line += " —— **持有当前最老的 xmin**"
         lines.append(line)
     lines.append("")
-    return "\n".join(lines)
+    return "\n".join(lines) + lag
 
 
-def _kernel_info_section(rep: VacuumReport) -> str:
-    """gs_get_kernel_info(GaussDB 私有)的内核事务水位。有行就原样列出,不做判定;
-    没取到但有原因(GaussDB 该有而没有 / 调用失败)就写原因;openGauss 整节不出现。"""
-    if rep.kernel_info:
-        rows = [[str(r.get("node_name", "")), str(r.get("module", "")),
-                 str(r.get("name", "")), str(r.get("value", ""))] for r in rep.kernel_info]
-        return ("\n### 内核事务水位（gs_get_kernel_info）\n\n"
-                "> GaussDB 私有函数返回的内核内存态指标（XACT / STANDBY / UNDO 等模块），"
-                "**每行是一个指标，不是一个事务**；要看具体挡着回收的事务或复制槽，看上面的「回收阻塞源」。"
-                "这里只原样列出，不做判定。\n\n" +
-                render.table(["节点", "模块", "指标", "值"], rows))
-    if rep.kernel_note:
-        return "\n### 内核事务水位（gs_get_kernel_info）\n\n> " + rep.kernel_note + "\n"
-    return ""
+def _xid_lag_line(rep: VacuumReport) -> str:
+    """最老 xmin 落后下一个事务号多少:给「xmin 推不动」一个量。"""
+    out = []
+    for r in rep.xid_lag or []:
+        a, b = as_float(r.get("oldest_xmin")), as_float(r.get("next_xid"))
+        if a and b and b >= a:
+            out.append("%s 落后 %s 个" % (r.get("node") or "本节点", "{:,}".format(int(b - a))))
+    if not out:
+        return ""
+    return "\n最老 xmin 落后下一个事务号:%s(几百、几千是正常并发;持续涨到几十万以上,说明有事务长时间不结束)。\n" % "；".join(out)
 
 
 def _i64(n: int) -> str:
@@ -346,8 +354,8 @@ def _freeze_section(rep: VacuumReport) -> str:
     head = "最高 %.1f%%" % worst if worst >= 0 else "算不出占比"
     return ("\n### 事务号冻结水位（%s）\n\n"
             "> 占比到 100%% 时 autovacuum 会对大表做**全表冻结扫描** —— 不择时的 IO 风暴，"
-            "现场表现是「某天夜里突然很慢，却没有慢 SQL、没有锁」；水位不推进时 clog/csnlog "
-            "也一直不能截断、持续占盘。\n"
+            "现场表现是「某天夜里突然很慢，却没有慢 SQL、没有锁」；水位不推进时事务状态文件"
+            "也一直清理不掉、持续占盘。\n"
             "> **本内核是 64 位事务号，不会像 PostgreSQL 那样到 2^31 就拒绝写入** —— "
             "看到占比高不必做停机抢救，在低峰期手工 `VACUUM FREEZE` 即可。\n\n"
             % head + render.table(["库", "水位", "max_age", "占比"], rows))
@@ -391,7 +399,8 @@ def _mb(n: int) -> str:
 def _autovac_status_section(rep: VacuumReport) -> str:
     return ("\n## autovacuum 近期运行情况\n\n" + _guc_section(rep) + "\n" +
             _workers_section(rep) + "\n" + _xmin_blockers_section(rep) +
-            _freeze_section(rep) + _bloat_section(rep) + _kernel_info_section(rep))
+            _freeze_section(rep) + _bloat_section(rep))
+
 
 
 def _manual_cleanup_section(rep: VacuumReport) -> str:

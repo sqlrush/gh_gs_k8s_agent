@@ -56,7 +56,26 @@ def section(findings: Sequence[Any]) -> Tuple[str, Dict[str, Any]]:
         reason = f"common/kb 未安装:{exc}"
         return (f"{SECTION_TITLE}\n> 知识库未接入({reason})\n\n",
                 {"status": {"attached": False, "reason": reason}, "items": []})
-    return kbquery.section_for(_distinct(findings))
+    return kbquery.section_for(_distinct(findings), alias=current_alias())
+
+
+def current_alias() -> str:
+    """本进程登录会话的连接别名(skill 脚本里 --session 选中的那个);取不到就空串,永不抛。"""
+    try:
+        from common import session as gsession
+        conn = gsession.current()
+        if conn is None:
+            return ""
+        # api(中间件)模式下会话里的连接名是按实例地址生成的(10-0-0-9-postgres),用户、画像认的是登录时的
+        # 别名(og5)——按部署时登记的别名表反查回去(2026-10-24 测试环境:画像登记了 og5,诊断时没匹配上)
+        if getattr(conn, "data_ip", ""):
+            from common import config as gconfig
+            for a in gconfig.instance_aliases():
+                if a.ip == conn.data_ip and (not conn.database or a.database == conn.database):
+                    return a.name
+        return str(getattr(conn, "name", "") or "")
+    except Exception:                                  # noqa: BLE001  没登录、旧安装都不影响知识库
+        return ""
 
 
 def markdown(findings: Sequence[Any]) -> str:

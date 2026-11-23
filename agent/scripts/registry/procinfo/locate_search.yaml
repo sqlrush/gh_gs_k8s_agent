@@ -4,6 +4,7 @@
 # 包那半段只在给了包名时才搜(A 兼容库 '' 即 NULL,所以用 length 判空而不是 <> '')。
 # {{name}} / {{package}} 进的是 ILIKE 的引号里,调用方(common/procname.py)只放行合法标识符。
 name: procinfo.locate_search
+database_type: appbusiness
 description: 过程找不到时的排查:按名字模糊搜过程(schema 不可见时 nspname 为空)与包
 sql: |
   SELECT 'proc' AS kind, n.nspname, COALESCE(k.pkgname, '') AS pkgname, p.proname

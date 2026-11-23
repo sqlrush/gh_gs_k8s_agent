@@ -198,3 +198,58 @@ def test_kbstd_job_with_the_same_name_but_other_images_is_recreated(tmp_path, ol
     assert store.run(rid)["status"] == "done", store.run(rid)["error"]
     assert (("delete", "kbstd-install-v1-4-4") in kube.calls) == deleted
     assert ("apply", "kbstd-install-v1-4-4") in kube.calls
+
+
+# ---- 建议导入哪几份增量:按白名单本身推断导到了哪里,不按集群版本(2026-11-19) ------------------------------------
+# 演练环境回归:集群已是新版本,白名单却还停在更早的增量 —— 按集群版本只会叫人导本版那一份,前面缺的照样缺。
+
+def _gate_suggest(tmp_path, monkeypatch, mutate):
+    delivery = _ROOT / "docs" / "delivery"
+    exp = whitelist.parse_dml((delivery / "scripts.sql").read_text(encoding="utf-8"))
+    rel = {"whitelist": {"scripts": whitelist.to_json(exp), "deltas": whitelist.deltas_from_dir(delivery)}}
+    monkeypatch.setattr(steps, "_pkg", lambda ctx: Package(tag="t", root=tmp_path, release=rel))
+    regs = {s.name: [s.name, s.md5, s.params] for s in exp.values()}
+    mutate(regs, rel["whitelist"]["deltas"])
+    rows = ["script_name,content_md5,parameter_config,is_valid"] + [
+        '%s,%s,"%s",1' % (n, md5, str([{"key": k, "type": t} for k, t in params]).replace("'", '""'))
+        for n, md5, params in regs.values()]
+    store, eng = _engine(tmp_path, {"whitelist": steps.step_whitelist})
+    store.kv_set("whitelist.export", "\n".join(rows) + "\n")
+    rid = eng.start("upgrade", "agent-v1.4.14", "agent-v1.5.0", [{"id": "whitelist", "subs": ["a", "b", "c", "d"]}],
+                    {"to_tag": "t", "whitelist_files": ["scripts-delta-20261119.sql"]}, None)
+    end = time.time() + 5
+    while store.open_gate(rid) is None and time.time() < end:
+        time.sleep(0.01)
+    sh = store.kv_get("run:%d" % rid)["whitelist"]
+    full = ["script_name,content_md5,parameter_config,is_valid"] + [            # 收尾:补登记齐了放行,别留着等关卡的线程
+        '%s,%s,"%s",1' % (s.name, s.md5, str([{"key": k, "type": t} for k, t in s.params]).replace("'", '""'))
+        for s in exp.values()]
+    store.kv_set("whitelist.export", "\n".join(full) + "\n")
+    eng.resolve(rid, "recheck")
+    eng.wait()
+    return sh
+
+
+def test_the_gate_infers_where_the_whitelist_stopped_from_its_contents(tmp_path, monkeypatch):
+    def stopped_at_20261111(regs, deltas):
+        regs.pop("memanalyze.sql_mem_history")                              # 20261112 新增的,没导
+        old = next(d for d in deltas if d["file"] == "scripts-delta-20261111.sql")["changed"]["lockwait.pairs"]
+        regs["lockwait.pairs"][1] = old                                     # 正文停在 20261111 那一版
+    sh = _gate_suggest(tmp_path, monkeypatch, stopped_at_20261111)
+    assert sh["suggest"] == ["scripts-delta-20261112.sql", "scripts-delta-20261116.sql", "scripts-delta-20261119.sql"]
+
+
+def test_a_whitelist_one_delta_behind_gets_only_that_delta(tmp_path, monkeypatch):
+    def stopped_at_20261116(regs, deltas):
+        d = next(d for d in deltas if d["file"] == "scripts-delta-20261116.sql")["changed"]["lockwait.pairs"]
+        regs["lockwait.pairs"][1] = d
+    sh = _gate_suggest(tmp_path, monkeypatch, stopped_at_20261116)
+    assert sh["suggest"] == ["scripts-delta-20261119.sql"]
+
+
+def test_a_body_no_delta_explains_asks_for_the_export_instead_of_guessing(tmp_path, monkeypatch):
+    """推断不出就不猜:多列一份已经导过、带 INSERT 的增量,重导会插出重名记录。"""
+    def hand_edited(regs, deltas):
+        regs["lockwait.pairs"][1] = "0" * 32
+    sh = _gate_suggest(tmp_path, monkeypatch, hand_edited)
+    assert sh["suggest"] is None and "lockwait.pairs" in sh["suggest_reason"] and "对不上" in sh["suggest_reason"]

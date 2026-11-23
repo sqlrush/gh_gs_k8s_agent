@@ -91,7 +91,7 @@ def collect_instance(runner, cat: Catalog, th: Thresholds, _top: int) -> DimResu
         d.findings.append(Finding(
             DIM_INSTANCE, "MEM_OTHER_HIGH", Severity.NOTICE, "other 内存占比",
             f"{other_pct:.1f}%", f">={th.other_pct_notice:.0f}%",
-            f"other_used_memory {human_mb(other)}（非托管内存，多为第三方库/元数据）"))
+            f"other_used_memory {human_mb(other)}（不归内存上下文管的部分）"))
 
     d.headline = (f"动态内存 {human_mb(used)} / {human_mb(max_dyn)}"
                   f"（{dyn_pct:.1f}%），历史峰值 {human_mb(peak)}（{peak_pct:.1f}%）")
@@ -144,7 +144,7 @@ def collect_context(runner, cat: Catalog, th: Thresholds, top: int) -> DimResult
                 f"context {trunc(name, 40)} 空闲率", f"{frag:.1f}%",
                 f">={th.context_frag_pct:.0f}%",
                 f"total {human_mb(total_b / _MB)} 中有 {human_mb(free_b / _MB)} "
-                f"空闲未归还，疑似内存碎片"))
+                f"空闲未归还（这个上下文申请过大块内存、用完后没有还给系统；多见于会话里跑过大查询后长期不断开）"))
 
     d.headline = (f"Top context：{d.rows[0][0]}（{d.rows[0][3]}）"
                   if d.rows else "未采集到内存上下文数据")

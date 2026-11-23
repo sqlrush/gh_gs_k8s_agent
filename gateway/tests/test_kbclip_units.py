@@ -199,3 +199,58 @@ def test_bookmarklet_and_page_scripts_are_valid_javascript(tmp_path):
         r = subprocess.run(["node", "--check", str(f)], capture_output=True, text=True)
         assert r.returncode == 0, "%s 语法错误:%s" % (name, r.stderr)
     assert "__" not in bm and "location.origin===P" in bm
+
+
+# -- Fuyao 模式:落地页 / 剪藏会话链接要编码沙箱里的工作目录(2026-11-18 鲲鹏现场) ------------------------------
+# opencode 网页按 URL 里的目录分项目:目录不对就进到一个空项目、看不到会话。现场实测:按 /data/state/workspace
+# 列会话是 0 个,按沙箱实际的 /data/me/workspace 才看到「导入剪藏」那个会话。
+
+class _ImportSandboxRouter:
+    handles_kb_import = True
+
+    def __init__(self):
+        self.noted = []
+
+    def target(self, user, interactive=True, kind=pods.KIND_RUNTIME):
+        from gateway import poolrouter
+        return poolrouter.Target("sbx-imp", 0, "10.9.9.9", 4096, "pw-imp", 4097, "rt-imp")
+
+    def note_activity(self, user, kind=pods.KIND_RUNTIME):
+        self.noted.append((user, kind))
+
+
+def _fuyao(app):
+    app.cfg = dataclasses.replace(app.cfg, runtime_mode=gwconfig.RUNTIME_FUYAO)
+    app.pool = _ImportSandboxRouter()
+    return app.pool
+
+
+def test_workspace_landings_match_where_each_mode_keeps_the_workspace():
+    import base64
+    sys.path.insert(0, str(_ROOT / "docker"))
+    import fuyao as launcher                                    # docker/fuyao.py:沙箱启动器
+    decode = lambda p: base64.urlsafe_b64decode(p.lstrip("/") + "=" * (-len(p.lstrip("/")) % 4)).decode()
+    assert decode(server.LANDING_FUYAO) == launcher.ME + "/workspace", "沙箱里 STATE_LOCAL 指向 ME,工作区在 ME/workspace"
+    entry = (_ROOT / "docker" / "entrypoint.sh").read_text(encoding="utf-8")
+    assert "STATE_LOCAL=${STATE_LOCAL:-/data/state}" in entry and "WORKSPACE=$STATE_LOCAL/workspace" in entry
+    assert decode(server.LANDING) == "/data/state/workspace", "K8s 两种模式的工作区"
+
+
+def test_fuyao_switch_lands_on_the_sandbox_workspace(gw):
+    port, app, *_ = gw
+    assert app.landing == server.LANDING, "K8s 模式不变"
+    _fuyao(app)
+    code, h, _b = _call(port, "/kb-import/", ADMIN_H)
+    assert code == 303 and h["Location"] == server.LANDING_FUYAO
+    code, h, _b = _call(port, "/runtime/", ADMIN_H)
+    assert code == 303 and h["Location"] == server.LANDING_FUYAO
+
+
+def test_fuyao_clip_session_link_uses_the_sandbox_workspace(gw):
+    port, app, asked, _touched, ready, _up = gw
+    router = _fuyao(app)
+    code, _h, body = _call(port, "/kb-import/clip/upload", {**ADMIN_H, **UP_H}, "POST", json.dumps(PAGE))
+    assert code == 200, body
+    assert json.loads(body)["open_url"] == server.LANDING_FUYAO + "/session/ses_abc"
+    assert asked == [("10.9.9.9", kbclip.CLIP_PORT)] and ready == [], "Fuyao 模式经路由器取导入沙箱,不走 K8s 的导入容器"
+    assert router.noted == [("u2001", pods.KIND_KB_IMPORT)]

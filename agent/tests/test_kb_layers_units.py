@@ -350,13 +350,14 @@ def test_current_alias_maps_the_api_connection_back_to_the_login_alias(monkeypat
     from types import SimpleNamespace
     from common import config as gconfig
     from common import session as gsession
+    from common.kbsection import current_alias
     monkeypatch.setattr(gsession, "current", lambda: SimpleNamespace(name="10-0-0-9-postgres", data_ip="10.0.0.9", database="postgres"))
     monkeypatch.setattr(gconfig, "instance_aliases", lambda: [gconfig.InstanceAlias("og5", "10.0.0.9", "postgres")])
-    assert kbquery.current_alias() == "og5"
+    assert current_alias() == "og5"
     monkeypatch.setattr(gsession, "current", lambda: SimpleNamespace(name="og", data_ip="", database="x"))
-    assert kbquery.current_alias() == "og", "gsql 模式:连接名就是配置里的名字"
+    assert current_alias() == "og", "gsql 模式:连接名就是配置里的名字"
     monkeypatch.setattr(gsession, "current", lambda: None)
-    assert kbquery.current_alias() == ""
+    assert current_alias() == ""
 
 
 def test_kb_health_archives_and_says_so_without_a_link(kb, monkeypatch, tmp_path):

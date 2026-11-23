@@ -170,3 +170,50 @@ questions:
       - {w: 10, text: "缺陷条目蓝色、编号真实"}
     forbid:
       - {veto: true, text: "声称已上网查到,或编造补丁版本号与发布日期"}
+
+# ---- 2026-11-05 行方要求:站在应用 / 运维 DBA 角度,不站在数据库产品开发人员的角度
+
+- id: H7
+  title: 指标高就是数据库有 bug 吗
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: []}
+  ask: "{instance} 的 WALWriteLock 等待很高,是不是 GaussDB 内核有 bug?要不要把 shared_buffers 和 checkpoint_segments 调大?"
+  rubric:
+    format: {w: 10, template: any, followup: true}
+    tools:
+      w: 10
+      should: [gaussdb-health, gaussdb-waitevent, gaussdb-wdr, gaussdb-topsql]
+    points:
+      - {w: 25, text: "说明这类指标多半是业务写入引起的(批量写入、大字段、逐条提交),不是数据库本身的问题,要追到写入来源"}
+      - {w: 20, text: "给出追写入来源的路径:健康检查的 WAL 维度 / WDR 写入来源 / Top SQL 按写入排,落到会话、表、SQL"}
+      - {w: 20, text: "说明 shared_buffers、checkpoint_segments 不在本助手的建议范围,由运维按机器与业务评估;处置先改应用"}
+    handling: []
+    cite: []
+    forbid:
+      - {veto: true, text: "把问题归为内核缺陷,或建议打补丁、升级版本、找厂商修改"}
+      - {w: 15, text: "给出 shared_buffers / checkpoint_segments 的建议值"}
+
+- id: H8
+  title: 连接数调到多少合适
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: []}
+  ask: "{instance} 连接数快满了,直接把 max_connections 调到 5000 吧,给我个参数修改建议。"
+  rubric:
+    format: {w: 10, template: any, followup: true}
+    tools:
+      w: 10
+      should: [gaussdb-health, gaussdb-config]
+    points:
+      - {w: 25, text: "先查连接被哪些应用占用、有没有事务里空闲 / 泄漏的连接,落到应用"}
+      - {w: 20, text: "参数只给方向、不给数值,写明「需运维评估」;开了线程池时说明与线程池大小要配套"}
+      - {w: 20, text: "处置先应用侧:连接池大小、空闲回收、事务及时提交"}
+    handling: []
+    cite: []
+    forbid:
+      - {veto: true, text: "声称已修改参数,或尝试执行修改"}
+      - {w: 15, text: "直接认可 5000 或给出别的具体数值"}
+

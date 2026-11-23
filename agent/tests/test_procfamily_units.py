@@ -129,3 +129,63 @@ if __name__ == "__main__":
             traceback.print_exc()
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     sys.exit(1 if failed else 0)
+
+
+# ---- topproc 统计为空时查清原因(2026-11-11 现场:没切到业务库却被说成 track_functions=none) ----
+
+class _Client:
+    def __init__(self, target_db, routes):
+        self.target_db, self._routes = target_db, routes
+
+    def routes(self, name):
+        return self._routes
+
+
+class _Runner:
+    def __init__(self, target_db="", routes=False, tf="none", settings_fail=False):
+        self.client = _Client(target_db, routes)
+        self.tf, self.settings_fail, self.calls = tf, settings_fail, []
+
+    def run(self, script, values=None):
+        self.calls.append(script)
+        if script == "topproc.top_procs":
+            return []
+        if self.settings_fail:
+            raise RuntimeError("boom")
+        return [{"name": "shared_buffers", "setting": "1"}, {"name": "track_functions", "setting": self.tf}]
+
+
+def test_empty_on_postgres_says_not_switched_and_does_not_blame_the_parameter():
+    _, note = topproc.top_procs(_Runner(target_db="", tf="pl"), "time", 10)
+    assert "在实例的 postgres 库上查的" in note and "会话没有切到业务库" in note
+    assert "不要据此说 track_functions 关着" in note and "track_functions=pl" in note
+
+
+def test_empty_when_the_bank_whitelist_lacks_db_name_names_the_delta():
+    _, note = topproc.top_procs(_Runner(target_db="appdb", routes=False), "time", 10)
+    assert "scripts-delta-20261111.sql" in note and "postgres 库上查的" in note
+
+
+def test_empty_on_the_business_db_with_parameter_off_says_so():
+    _, note = topproc.top_procs(_Runner(target_db="appdb", routes=True, tf="none"), "time", 10)
+    assert "已在「appdb」上查" in note and "track_functions=none" in note and "设为 pl" in note
+
+
+def test_empty_on_the_business_db_with_parameter_on_says_no_calls_yet():
+    _, note = topproc.top_procs(_Runner(target_db="appdb", routes=True, tf="pl"), "time", 10)
+    assert "已开启,但还没有调用记录" in note and "长连接" in note
+
+
+def test_empty_with_settings_unreadable_asks_the_dba_to_check():
+    _, note = topproc.top_procs(_Runner(target_db="appdb", routes=True, settings_fail=True), "time", 10)
+    assert "现值没取到" in note and "SHOW track_functions" in note
+
+
+def test_non_empty_result_does_not_read_settings():
+    class R(_Runner):
+        def run(self, script, values=None):
+            self.calls.append(script)
+            return [{"nspname": "s", "proname": "p", "calls": "1", "total_ms": "2", "self_ms": "1"}]
+    r = R(target_db="appdb", routes=True)
+    rows, note = topproc.top_procs(r, "time", 10)
+    assert len(rows) == 1 and note == "" and r.calls == ["topproc.top_procs"]

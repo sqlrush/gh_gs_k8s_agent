@@ -1,0 +1,10 @@
+# Fuyao 运行模式(2026-11-17):base + 状态服务 + 凭据代理服务 + 网关切到 fuyao。
+# 沙箱组(k8s/fuyao/sandboxgroups.yaml)在平台命名空间,由平台管理员单独 apply;模板由 scripts/build-e2b-template.py 构建。
+# 用法: kubectl apply -k k8s/overlays/fuyao   (之后把模板名填进 gateway-config,重启网关)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - ../../fuyao
+patches:
+  - path: configmap-gateway-fuyao.yaml

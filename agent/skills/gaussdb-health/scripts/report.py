@@ -57,10 +57,11 @@ def kb_section(findings) -> tuple:
     """
     try:
         from common.kb import query as kbquery
+        from common.kbsection import current_alias
     except ImportError as exc:
         text = f"## 本行知识库参照\n> 知识库未接入(common/kb 未安装:{exc})\n\n"
         return text, {"status": {"attached": False, "reason": f"common/kb 未安装:{exc}"}, "items": []}
-    return kbquery.section_for(list(findings))
+    return kbquery.section_for(list(findings), alias=current_alias())
 
 
 def health_dict(ev: HealthEvidence, sub_results=()) -> dict:

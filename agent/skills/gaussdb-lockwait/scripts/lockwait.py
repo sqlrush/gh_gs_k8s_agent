@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -109,6 +110,83 @@ def _filter_conflicting(pairs: list) -> list:
     return kept
 
 
+# DDL:改表结构、建删索引、清表、整表重写这类要拿表级强锁的语句(按语句开头认)
+_DDL = re.compile(r"^\s*(ALTER\s+(TABLE|INDEX)|DROP\s+(TABLE|INDEX)|TRUNCATE|CREATE\s+(UNIQUE\s+)?INDEX|REINDEX|"
+                  r"VACUUM\s+FULL|CLUSTER|LOCK\s+TABLE)\b", re.I)
+
+
+def is_ddl(query) -> bool:
+    return bool(_DDL.match(str(query or "")))
+
+
+def _queued_behind(raw_pairs: list, kept: list) -> list:
+    """锁队列:排在「正在等锁的请求」(多是 DDL)后面的业务会话(2026-11-05 补)。
+
+    锁按先来后到排队:一个 AccessExclusive 请求(ALTER / TRUNCATE ……)在等时,后来的 AccessShare 请求即使与
+    已持锁者并不冲突,也得排在它后面等。lockwait.pairs 只把等待者与**已授予**的持锁者配对,这些排队的业务会话
+    与持锁者不冲突,被 _filter_conflicting 当旁观者滤掉 —— 报告里恰恰看不到被堵得最多的那一批业务会话。
+    这里用同一批原始行补回来:同一把锁上,另有一个与它冲突、等得更久的等锁请求,它就排在那个请求后面;
+    补回的一对以那个请求为「持有方」,标 queued_behind,渲染时写明「本身也在等锁」。
+    """
+    kept_waiters = {as_int(p.get("waiter_sessionid")) for p in kept}
+    by_tag: dict = {}
+    for p in raw_pairs:
+        by_tag.setdefault(p.get("locktag"), {})[as_int(p.get("waiter_sessionid"))] = p
+    out = []
+    for rows in by_tag.values():
+        for sid, w in rows.items():
+            if sid in kept_waiters:
+                continue
+            ahead = [d for dsid, d in rows.items()
+                     if dsid != sid and _mode_conflict(d.get("waiter_mode"), w.get("waiter_mode")) is not False
+                     and (_wait_seconds(d) or 0.0) >= (_wait_seconds(w) or 0.0)]
+            if not ahead:
+                continue
+            d = max(ahead, key=lambda r: _wait_seconds(r) or 0.0)
+            out.append(dict(w, holder_pid=d.get("waiter_pid"), holder_sessionid=d.get("waiter_sessionid"),
+                            holder_mode=d.get("waiter_mode"), holder_state="等锁中(排在它前面)",
+                            holder_user=d.get("waiter_user"), holder_app=d.get("waiter_app"),
+                            holder_xact_age_s="", holder_query=d.get("waiter_query"), queued_behind=True))
+    return out
+
+
+def _ddl_findings(pairs: list) -> list:
+    """DDL 引起的锁等待:等锁的 DDL 堵住后面的业务,或执行中的 DDL 长时间持锁(站在应用 / 运维 DBA 角度给处置)。"""
+    out = []
+    queued = [p for p in pairs if p.get("queued_behind")]
+    by_ddl: dict = {}
+    for p in queued:
+        if is_ddl(p.get("holder_query")):
+            by_ddl.setdefault(as_int(p.get("holder_sessionid")), []).append(p)
+    for sid, ps in by_ddl.items():
+        d = ps[0]
+        apps = sorted({str(p.get("waiter_app") or "").strip() for p in ps} - {""})
+        wait = next((p.get("waiter_wait_s") for p in pairs
+                     if as_int(p.get("waiter_sessionid")) == sid and not p.get("queued_behind")), "")
+        out.append(Finding(
+            DIM, "LOCK_QUEUE_BEHIND_DDL", Severity.WARN, "排在等锁 DDL 后面的会话数", str(len(ps)), ">0",
+            "%s 上的 DDL(会话 %s%s,%s)自己在等锁,后面排着 %d 个业务会话%s —— 它们与已持锁者并不冲突,"
+            "是被这条等锁的 DDL 挡在队列里。处置:先由 DBA 取消这条 DDL 的语句(会话 %s)即可放行后面的业务;"
+            "DDL 改到业务低峰执行,并在执行 DDL 的会话上设锁等待上限(会话级 lockwait_timeout),等不到锁就自己退出、不堵业务。"
+            % (d.get("lock_object") or d.get("locktype"), sid,
+               ("，应用 %s" % d.get("holder_app")) if d.get("holder_app") else "",
+               ("已等 %s 秒" % wait) if not is_null(wait) and wait != "" else "等待时长未知",
+               len(ps), ("(应用 %s)" % "、".join(apps[:5])) if apps else "", sid)))
+    held = {}
+    for p in pairs:
+        if not p.get("queued_behind") and is_ddl(p.get("holder_query")):
+            held.setdefault(as_int(p.get("holder_sessionid")), []).append(p)
+    for sid, ps in held.items():
+        p = ps[0]
+        out.append(Finding(
+            DIM, "LOCK_DDL_HOLDER", Severity.WARN, "执行中的 DDL 持锁挡住的会话数", str(len(ps)), ">0",
+            "会话 %s%s 正在执行 DDL(%s),持有 %s 挡住 %d 个会话。处置:DDL 改到业务低峰执行;"
+            "现在要放行业务的,由 DBA 评估后取消这条 DDL 的语句(会话 %s)。"
+            % (sid, ("（应用 %s）" % p.get("holder_app")) if p.get("holder_app") else "",
+               render.truncate(p.get("holder_query") or "", 60), p.get("holder_mode"), len(ps), sid)))
+    return out
+
+
 def collect(runner, limit: int) -> LockReport:
     # 注意：LIMIT 在 SQL 里先于这里的冲突过滤生效——lockwait.pairs 先按
     # limit 截断原始行，_filter_conflicting() 再从截断后的结果里剔除旁观
@@ -116,12 +194,13 @@ def collect(runner, limit: int) -> LockReport:
     # 原始行里如果混了旁观者，真冲突的名额被占掉了）。不是本次要改的行为。
     raw_pairs = runner.run(PAIRS_SCRIPT, {"limit": int(limit)})
     pairs = _filter_conflicting(raw_pairs)
+    pairs = pairs + _queued_behind(raw_pairs, pairs)
     raw_edges = runner.run(CHAIN_SCRIPT, {})
     edges = [(as_int(e["sessionid"]), as_int(e["block_sessionid"]))
              for e in raw_edges]
     roots = chain.roots(edges)
     deadlocks = chain.cycles(edges)
-    findings = _judge(pairs, deadlocks)
+    findings = _judge(pairs, deadlocks) + _ddl_findings(pairs)
     return LockReport(pairs=pairs, edges=edges, roots=roots,
                       deadlocks=deadlocks, findings=findings)
 
@@ -204,9 +283,10 @@ def kb_section(findings) -> str:
     """
     try:
         from common.kb import query as kbquery
+        from common.kbsection import current_alias
     except ImportError as exc:                       # 旧安装没有 common/kb
         return f"## 本行知识库参照\n> 知识库未接入(common/kb 未安装:{exc})\n\n"
-    return kbquery.section_for(list(findings))[0]
+    return kbquery.section_for(list(findings), alias=current_alias())[0]
 
 
 def render_markdown(rep: LockReport) -> str:
@@ -247,7 +327,8 @@ def render_markdown(rep: LockReport) -> str:
     body = []
     for p in rep.pairs:
         body.append([
-            str(p.get("waiter_sessionid")), str(p.get("holder_sessionid")),
+            str(p.get("waiter_sessionid")),
+            str(p.get("holder_sessionid")) + ("（本身也在等锁，排在它前面）" if p.get("queued_behind") else ""),
             "%s ← %s" % (p.get("waiter_mode"), p.get("holder_mode")),
             "%s %s" % (p.get("locktype"), p.get("lock_object") or ""),
             _wait_display(p),
@@ -282,6 +363,15 @@ def render_markdown(rep: LockReport) -> str:
                        % (root, len(blocked),
                           ", ".join(str(s) for s in blocked)))
     out.append("")
+
+    # DDL 引起的锁等待单列一节(2026-11-05):锁队列里被 DDL 挡住的业务会话,处置先取消等锁的 DDL ——
+    # 比处理根会话影响小(根会话常是业务的长事务),这一句要在恢复操作之前被看到。
+    ddl = [f for f in rep.findings if f.code in ("LOCK_QUEUE_BEHIND_DDL", "LOCK_DDL_HOLDER")]
+    if ddl:
+        out.append("## DDL 引起的锁等待\n")
+        for f in ddl:
+            out.append("- **%s**（%s）：%s" % (f.code, f.severity.label(), f.evidence))
+        out.append("")
 
     out.append("\n" + _render_recovery_section(rep))
     return "\n".join(out)

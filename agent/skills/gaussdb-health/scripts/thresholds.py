@@ -52,11 +52,16 @@ class Thresholds:
     lwlock_sessions: int = 5
     ckpt_req_notice: float = 30
     ckpt_req_warn: float = 50
+    # xlog 每秒生成量(WAL 维度,2026-11-05)。10 MB/s 持续一天约 840 GB 日志,已是要说一声的写入量;50 MB/s 归档与
+    # 备库同步都容易跟不上。采样 5 秒:够看出当前写入速度,又不让整个巡检多等太久。
+    wal_rate_notice_mb: float = 10
+    wal_rate_warn_mb: float = 50
+    wal_sample_s: float = 5
     slow_sql_avg_ms: int = 500
     # 慢 SQL 的 CPU/elapsed 低于此值 → 阻塞/锁/睡眠主导(非资源消耗)
     slow_sql_low_cpu_ratio: float = 0.10
     # 执行中、还没结束的 SQL 已经跑了多久。dbe_perf.statement 只记已完成的执行,
-    # 一条跑了 1000 多秒还没完的 SQL 在慢 SQL 表里一行都没有(faultlab S1)。
+    # 一条跑了 1000 多秒还没完的 SQL 在慢 SQL 表里一行都没有(故障演练 S1)。
     # 与长事务同一组档位:跑这么久的语句一样持着快照,5 分钟在 OLTP 里已经反常。
     running_sql_notice: int = 5 * _MIN
     running_sql_warn: int = 30 * _MIN
@@ -88,7 +93,7 @@ class Thresholds:
     index_unused_min_window_s: int = 3 * 86400
     stale_min_rows: int = 10000     # 统计新鲜度只看 >N 行的表
     # 或实时页数 >N 的表(8K 页,128 页 = 1 MB)。从没 ANALYZE 过的表冻结行数是 0,
-    # 只按行数开门它永远进不了候选(faultlab V7);页数取自文件大小,不靠统计收集器。
+    # 只按行数开门它永远进不了候选(故障演练 V7);页数取自文件大小,不靠统计收集器。
     stale_min_pages: int = 128
     # 冻结页数与实时页数偏离多少算陈旧。判据用页数而不是 last_analyze：
     # 后者会被 pg_stat_reset() 清掉，而 ANALYZE 的成果存在 pg_statistic 里

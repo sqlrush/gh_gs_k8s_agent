@@ -22,19 +22,17 @@ _POD_MANIFESTS = [
     _ROOT / "k8s" / "templates" / "runtime.yaml",
     _ROOT / "k8s" / "templates" / "kb-import.yaml",
     _ROOT / "k8s" / "base" / "gateway.yaml",
-    _ROOT / "k8s" / "base" / "frontend.example.yaml",
+    _ROOT / "k8s" / "base" / "frontend.yaml",
 ]
 
 
-def test_frontend_slot_is_isolated_and_reachable_only_from_gateway():
-    """前端由前端方自建,本仓库只给接入位:样例清单不进 kustomization(否则 apply 出一个拉不到镜像的 Pod);
-    Service 叫 frontend(网关默认把 /dash/* 代理到它);网络策略只让网关到前端 8080,前端出站全拒、不挂 NAS。
-    这些是前端「拿不到任何人报告」的物理保证,不是代码约定。"""
-    fe = (_ROOT / "k8s" / "base" / "frontend.example.yaml").read_text(encoding="utf-8")
-    assert "persistentVolumeClaim" not in fe and "hostPath" not in fe, "前端不该挂任何卷"
-    assert "runAsNonRoot: true" in fe and "app: gaussdb-frontend" in fe and "containerPort: 8080" in fe
-    assert re.search(r"name:\s*frontend\s*#", fe) or re.search(r"name:\s*frontend\s*\n\s*namespace", fe), \
-        "Service 必须叫 frontend(网关默认代理到它)"
+def test_frontend_is_isolated_and_reachable_only_from_gateway():
+    """大盘前端只端静态文件:不挂 NAS、只读根、不出网、只有网关能到。
+    这些是它「拿不到任何人报告」的物理保证,不是代码约定。"""
+    fe = (_ROOT / "k8s" / "base" / "frontend.yaml").read_text(encoding="utf-8")
+    assert "persistentVolumeClaim" not in fe and "hostPath" not in fe, "前端不该挂任何卷(除 emptyDir)"
+    assert "readOnlyRootFilesystem: true" in fe and "runAsNonRoot: true" in fe
+    assert re.search(r"name:\s*frontend\s*\n\s*namespace", fe), "Service 必须叫 frontend(网关默认代理到它)"
     for path in (_ROOT / "k8s" / "base" / "networkpolicy.yaml", _ROOT / "k8s" / "local" / "networkpolicy-local.yaml"):
         np = path.read_text(encoding="utf-8")
         gw = np[np.index("name: gateway-policy"):]
@@ -45,9 +43,7 @@ def test_frontend_slot_is_isolated_and_reachable_only_from_gateway():
     fp = np[np.index("name: frontend-policy"):]
     assert "egress: []" in fp, "前端出站要全拒(egress: [])"
     assert "agent-gateway" in fp.split("egress:")[0], "前端入站只放行网关"
-    kus = (_ROOT / "k8s" / "base" / "kustomization.yaml").read_text(encoding="utf-8")
-    assert "frontend" not in "\n".join(l for l in kus.splitlines() if l.startswith("  - ")), \
-        "前端样例不进 kustomization"
+    assert "frontend.yaml" in (_ROOT / "k8s" / "base" / "kustomization.yaml").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("path", _POD_MANIFESTS, ids=lambda p: p.name)
@@ -138,7 +134,7 @@ def test_nfs_address_lives_in_the_pv_example_not_in_the_pvc():
         "PV 与 PVC 的 storageClassName 必须一致,否则绑不上"
 
     # 凡是教读者填 nfs: 的手册,都必须指向真有 nfs: 的那个文件
-    for name in ("从源码构建到K8s运行-完整手册.md",):
+    for name in ("快速搭建-K8s.md", "部署手册-从零到上线.md", "命令卡-测试环境搭建.md"):
         doc = (_ROOT / "docs" / name).read_text(encoding="utf-8")
         if "nfs:" in doc:
             assert "nas-pv-nfs.example.yaml" in doc, \
@@ -181,17 +177,31 @@ def test_gateway_rbac_has_no_exec():
         assert forbidden not in body, "网关 RBAC 里出现了 %s" % forbidden
 
 
-def test_user_image_tag_matches_the_gateway_image():
-    """清单里两处版本必须是同一个:网关镜像、给用户建 Pod 的 USER_IMAGE_TAG。
+def test_user_image_tag_matches_the_gateway_and_frontend_images():
+    """清单里三处版本必须是同一个:网关镜像、前端镜像、给用户建 Pod 的 USER_IMAGE_TAG。
 
-    2026-09-24 现场:网关的标签每次发版都跟着改,USER_IMAGE_TAG 却一直停在 v0.9.3,
+    2026-09-24 现场:网关与前端的标签每次发版都跟着改,USER_IMAGE_TAG 却一直停在 v0.9.3,
     行方照清单部署,网关就在给用户建一个旧版本的 Pod。
     """
     import re
     base = _ROOT / "k8s" / "base"
     user = re.search(r'USER_IMAGE_TAG:\s*"([^"]+)"', (base / "configmap-gateway.yaml").read_text(encoding="utf-8")).group(1)
-    gw = re.search(r"image:\s*\S*gaussdb-agent-[a-z-]+:(\S+)", (base / "gateway.yaml").read_text(encoding="utf-8")).group(1)
-    assert gw == user, "USER_IMAGE_TAG=%s,网关镜像标签 %s —— 两处要一致" % (user, gw)
+    tags = {f: re.search(r"image:\s*\S*gaussdb-agent-[a-z-]+:(\S+)", (base / f).read_text(encoding="utf-8")).group(1)
+            for f in ("gateway.yaml", "frontend.yaml")}
+    assert set(tags.values()) == {user}, "USER_IMAGE_TAG=%s,镜像标签 %s —— 三处要一致" % (user, tags)
+
+
+def test_skill_package_version_matches_the_release():
+    """技能包里的 agent/common/VERSION 与 USER_IMAGE_TAG 同一版本(2026-11-08 加)。
+
+    行方 11-06 把新的技能包下载了却没装进正在用的技能目录,现场一直跑旧版、排查了一晚上;VERSION 让登录输出与
+    部署自检直接显示「现在跑的是哪一版技能」。它不跟着发版改的话,显示出来的版本就是错的,比不显示更糟。
+    """
+    import re
+    base = _ROOT / "k8s" / "base"
+    user = re.search(r'USER_IMAGE_TAG:\s*"([^"]+)"', (base / "configmap-gateway.yaml").read_text(encoding="utf-8")).group(1)
+    ver = (_ROOT / "agent" / "common" / "VERSION").read_text(encoding="utf-8").strip()
+    assert user.startswith(ver + "-oc"), "agent/common/VERSION=%s,USER_IMAGE_TAG=%s —— 要同一版本" % (ver, user)
 
 
 def test_import_container_exposes_the_clip_receiver_and_policies_allow_only_the_gateway():
@@ -247,3 +257,12 @@ def test_standard_kb_install_job_matches_the_release_and_has_no_network_or_api()
     np = (base / "networkpolicy.yaml").read_text(encoding="utf-8")
     pol = np[np.index("name: kbstd-policy"):]
     assert "app: gaussdb-kbstd" in pol and "ingress: []" in pol and "egress: []" in pol, "安装 Job 不该有任何网络"
+
+
+def test_standard_kb_unpack_has_room_on_a_64k_page_kernel():
+    """**2026-11-17 鲲鹏抓到。** 64K 页内核下 `cp` 标准知识库包时页缓存按 64K 记账,初始化容器 64Mi 上限被 OOM 杀,
+    官方文档集装不上。上限至少 512Mi(实测够用);它只跑几秒,预留不用跟着涨。"""
+    job = (_ROOT / "k8s" / "base" / "kbstd-install.yaml").read_text(encoding="utf-8")
+    unpack = job[job.index("- name: unpack"):job.index("containers:", job.index("- name: unpack"))]
+    m = re.search(r"limits:\s*\{cpu:\s*\S+,\s*memory:\s*(\d+)Mi\}", unpack)
+    assert m and int(m.group(1)) >= 512, "unpack 的内存上限要 ≥512Mi(64K 页内核)"

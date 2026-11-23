@@ -9,7 +9,7 @@
 # 节点故障、--force 删 Pod —— 那三种没有 trap 的机会,是架构性代价。细节见 statesync.py。
 set -euo pipefail
 
-# ---- 固定池化的槽位(2026-10-23)---------------------
+# ---- 固定池化的槽位(2026-10-23,docs/plans/2026-10-23-fixed-pool-spikes.md)---------------------
 # 槽位容器重启后 /data、/tmp、/dev/shm 里上一个使用者的文件都还在。这里**什么都不碰**,直接把 1 号进程
 # 交给 slotrun:它先清盘,再拷配置、渲染、等管家的指令。-E -s:不读 PYTHON* 环境变量与用户 site-packages;
 # -E 也让 PYTHONUNBUFFERED 失效,所以另加 -u,日志才实时进 kubectl logs。
@@ -21,6 +21,11 @@ if [ "${POOL_MODE:-0}" = "steward" ]; then
   exec python3 -u /opt/agent/podctl.py pool-steward
 fi
 
+# ---- Fuyao 运行模式(2026-11-17):沙箱里由 root 的启动器(podctl fuyao-start)起本脚本,身份 agent ----------
+# 独占、载入、定期回写、收尾都由 root 那一侧(启动器 / gsdb-statesync / fuyao-stop)经状态服务做 —— 沙箱挂不了 NAS。
+# 这里只跑 opencode、报告端口、剪藏接收,外加以 agent 身份定期合并 WAL(root 去合会建出 agent 写不了的 -shm)。
+# $NAS_ME / $NAS_KB / $STATE_LOCAL 由启动器指向本地盘(/data/me、/data/kb)。
+FUYAO=${FUYAO:-0}
 NAS_ME=${NAS_ME:-/nas/me}
 NAS_KB=${NAS_KB:-/nas/kb}
 POD_NAME=${POD_NAME:-$(hostname)}
@@ -64,14 +69,17 @@ $PODCTL render-opencode-config --out "$OPENCODE_CONFIG"
 $PODCTL render-gdaa-config --out "$GSDB_HOME/config.yaml"
 
 # ---- 独占:同一用户目录同一时刻只许一个 Pod 打开 db --------------------------------
-$PODCTL owner-acquire --dir "$NAS_ME" --pod "$POD_NAME"
-( while sleep 30; do $PODCTL owner-refresh --dir "$NAS_ME" --pod "$POD_NAME" || exit 0; done ) &
-REFRESHER=$!
+REFRESHER=""
+if [ "$FUYAO" != "1" ]; then
+  $PODCTL owner-acquire --dir "$NAS_ME" --pod "$POD_NAME"
+  ( while sleep 30; do $PODCTL owner-refresh --dir "$NAS_ME" --pod "$POD_NAME" || exit 0; done ) &
+  REFRESHER=$!
+fi
 
 # ---- 状态:NAS → 本地。**必须在 .owner 之后** ---------------------------------
 # 独占没拿到就不该碰状态:两个 Pod 各拷一份本地副本再各自回写,是整份互相覆盖。
 # state-load 内部会检查上次是否非优雅退出(dirty 标记),是就先给 NAS 留一份快照并记一行。
-$PODCTL state-load --nas "$NAS_ME" --local "$STATE_LOCAL"
+[ "$FUYAO" = "1" ] || $PODCTL state-load --nas "$NAS_ME" --local "$STATE_LOCAL"
 mkdir -p "$XDG_DATA_HOME/opencode" "$XDG_STATE_HOME/opencode" "$WORKSPACE"
 
 # ---- 自检与清理 -------------------------------------------------------------
@@ -103,7 +111,7 @@ fi
 # 每轮先 checkpoint 把 WAL 合回主库,免得回写出去的那份把最近的提交落在 -wal 里。
 ( while sleep "$STATE_SYNC_SECONDS"; do
     $PODCTL db-checkpoint --db "$DB" >/dev/null 2>&1 || true
-    $PODCTL state-sync --nas "$NAS_ME" --local "$STATE_LOCAL" >/dev/null 2>&1 || true
+    [ "$FUYAO" = "1" ] || $PODCTL state-sync --nas "$NAS_ME" --local "$STATE_LOCAL" >/dev/null 2>&1 || true
   done ) &
 SYNCER=$!
 term() { kill -TERM "$OC" 2>/dev/null || true; }
@@ -115,6 +123,10 @@ kill "$REFRESHER" "$SYNCER" "$REPORTS" $CLIPD 2>/dev/null || true
 # 收尾顺序不能改:合 WAL → 完整回写并清 dirty → 备份 → 释放独占。
 # 先释放独占的话,另一个 Pod 可能在我们还没写完时就开始加载。
 $PODCTL db-checkpoint --db "$DB"
+if [ "$FUYAO" = "1" ]; then
+  echo "opencode 已退出(rc=$RC);收尾同步由 root 侧的 fuyao-stop 经状态服务做"
+  exit "$RC"
+fi
 $PODCTL state-finish --nas "$NAS_ME" --local "$STATE_LOCAL"
 $PODCTL db-backup --db "$NAS_ME/xdg-data/opencode/opencode.db" --backup-dir "$BACKUP" --keep 3
 $PODCTL owner-release --dir "$NAS_ME" --pod "$POD_NAME"

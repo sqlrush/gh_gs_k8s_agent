@@ -17,12 +17,14 @@ from . import envelope, executor, pagination
 from .executor import (
     DEFAULT_MAX_RESULT_ROWS,
     DEFAULT_STATEMENT_TIMEOUT_SECONDS,
+    DbMissingError,
     ExecError,
 )
 from .instances import InstanceMap
 from .signature import SignaturePolicy
 from common.grmp import paths as grmp_paths
 from common.grmp.placeholder import ParamError
+from common.grmp.statement import split_statements
 from common.grmp.settings import Settings
 from .store import ScriptStore
 
@@ -51,11 +53,11 @@ _INVOKE_KEYS = frozenset({"dataIp", "id", "param"})
 _OPERATION_VALUE_KEYS = frozenset({"param_name", "param_value"})
 
 
-def _default_open_db(name: str, read_only: bool = True):
-    """默认连接方式：复用仓库既有的凭据与驱动兜底，不新增凭据存储。"""
+def _default_open_db(name: str, read_only: bool = True, database: str = ""):
+    """默认连接方式：复用仓库既有的凭据与驱动兜底，不新增凭据存储。database:切到同一实例上的这个库(dbName)。"""
     from common.db import Database
 
-    return Database.connect(name, read_only=read_only)
+    return Database.connect(name, read_only=read_only, database=database)
 
 
 class App:
@@ -73,6 +75,10 @@ class App:
         standby: bool = False,
         signature: Optional[SignaturePolicy] = None,
         path_prefix: Optional[str] = None,
+        single_statement: bool = False,
+        opaque_errors: bool = False,
+        dbname_missing: str = "reject",
+        dbname_on_postgres: str = "ignore",
     ):
         prefix = grmp_paths.normalize(path_prefix) if path_prefix is not None else grmp_paths.from_env()
         self.path_prefix = prefix or DEFAULT_PATH_PREFIX
@@ -93,6 +99,15 @@ class App:
         # 模拟备机:读 statement_history(unlogged 表)的脚本按真实 GRMP 的形态回 HTTP 400,
         # health.overview 的 in_recovery 置 t。复现现场 2026-09-01 的 400,让 skill 的降级路径可测。
         self._standby = standby
+        # 行方模式(2026-11-08 测试报告后加):我们的模拟中间件原先能跑一条脚本里的多条语句、出错原样回数据库报错,
+        # 和行方真实 GRMP 不一样 —— explain / sqltune 的「补全表名」退路在我们这里从没被执行过,Bug 1 因此漏到现场。
+        #   single_statement:脚本含多条语句时按行方的形态回 HTTP 400「agent诊断脚本执行失败」
+        #   opaque_errors:   执行失败一律只回「agent诊断脚本执行失败」(原始报错只记在本进程 stderr)
+        self._single_statement = single_statement
+        self._opaque_errors = opaque_errors
+        # 切库(dbName)行方没说清的两种情况,见 executor.route
+        self._dbname_missing = dbname_missing
+        self._dbname_on_postgres = dbname_on_postgres
 
     # -- 入口 -------------------------------------------------------------
 
@@ -252,6 +267,10 @@ class App:
             print("[GRMP] FAIL %s :: standby(unlogged)" % record.script_name, file=sys.stderr, flush=True)
             return 400, envelope.fail_invoke(STANDBY_ERROR, task_id)
 
+        if self._single_statement and len(split_statements(record.script_content)) > 1:
+            print("[GRMP] FAIL %s :: 行方模式:一条脚本里有多条语句" % record.script_name, file=sys.stderr, flush=True)
+            return 400, envelope.fail_invoke(BANK_EXEC_FAILED, task_id)
+
         try:
             result = executor.execute(
                 record,
@@ -261,10 +280,20 @@ class App:
                 self._open_db,
                 max_rows=self._max_result_rows,
                 timeout=self._statement_timeout,
+                dbname_missing=self._dbname_missing,
+                dbname_on_postgres=self._dbname_on_postgres,
             )
+        except DbMissingError as exc:
+            # 行方的形态:不是接口二的 status/msg 信封,而是 {"error_msg", "error_code"}
+            print("[GRMP] FAIL %s :: %s" % (record.script_name, exc), file=sys.stderr, flush=True)
+            return 400, {"error_msg": "%s, instanceId: mock-%s" % (exc, conn_name), "error_code": 400}
         except (ParamError, ExecError) as exc:
             return fail(str(exc))
         except Exception as exc:  # 数据库错误等
+            if self._opaque_errors:
+                print("[GRMP] FAIL %s :: 行方模式,原始报错不回给调用方:%s" % (record.script_name, str(exc)[:200]),
+                      file=sys.stderr, flush=True)
+                return 400, envelope.fail_invoke(BANK_EXEC_FAILED, task_id)
             return fail(str(exc))
 
         if self._standby:
@@ -273,6 +302,9 @@ class App:
               file=sys.stderr, flush=True)
         return 200, envelope.ok_invoke(result, task_id)
 
+
+# 行方真实 GRMP 执行失败时回给调用方的全部内容(2026-11 现场多张截图):数据库的原始报错不带回来
+BANK_EXEC_FAILED = "agent诊断脚本执行失败"
 
 # 现场 provider.core.log 里 JDBC 报错的原文形态(实例 id / 地址已换成占位)
 STANDBY_ERROR = ("SQL execution failed via JDBC on instance standby-mock: "

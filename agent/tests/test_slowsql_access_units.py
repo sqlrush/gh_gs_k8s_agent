@@ -74,7 +74,7 @@ def test_fetch_rows_passes_the_declared_parameter_names():
 def test_fetch_rows_flattens_dict_rows_into_column_order():
     """下游按 r[0]..r[6] 取值，列序必须与脚本 SELECT 的列序一致。"""
     rows = slowsql.fetch_rows(FakeRunner([ROW]), 100, 20, "2020-01-01 00:00:00")
-    assert rows == [("550595269", "select 1", "3", "25.34", "0.08", "0.07", "1")]
+    assert rows == [("550595269", "select 1", "3", "25.34", "0.08", "0.07", "1", "")]   # 末位是执行账号(可选列,老白名单没有)
 
 
 def test_missing_column_is_reported_rather_than_silently_dropped():

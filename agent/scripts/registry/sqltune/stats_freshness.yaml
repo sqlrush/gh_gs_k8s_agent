@@ -20,6 +20,7 @@
 # 这里格式写死，并把 NULL 显式转成 'never'（从未 ANALYZE 过）—— 让「没查到」
 # 和「查到了，是从来没做过」在取值代码里分得开。取到空串就是协议层出了问题。
 name: sqltune.stats_freshness
+database_type: appbusiness
 description: SQL 涉及的表的统计信息新鲜度（推演前置门，不新鲜则不出代价结论）
 sql: |
   SELECT schemaname, relname,

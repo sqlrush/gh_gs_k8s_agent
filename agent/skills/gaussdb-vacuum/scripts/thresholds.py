@@ -14,6 +14,8 @@ class Thresholds:
     dead_ratio_warn: float = 0.20
     dead_ratio_crit: float = 0.40
     min_table_bytes: int = 100 * MB
+    # 持有 xmin 的事务持续多久才算「卡住回收」:任何时刻都有正常的短事务持有 xmin,不到 60 秒的是正常并发
+    xmin_hold_s: float = 60.0
 
 
 def default_thresholds() -> Thresholds:

@@ -26,9 +26,9 @@
 #                        tools/matrix_vacuum.py 的「gsql 不自证阻塞源」用例。
 #
 #                        **只认客户端会话的条件是 client_port IS NOT NULL，不是
-#                        connection_info 非空（2026-10-24 faultlab 改）。** 原条件
+#                        connection_info 非空（2026-10-24 故障演练改）。** 原条件
 #                        沿用 health.long_xact，意在排除内核后台线程；但上面说了，
-#                        psycopg2 不填 connection_info —— faultlab 里 V2 的 1118 秒
+#                        psycopg2 不填 connection_info —— 故障演练里 V2 的 1118 秒
 #                        可重复读长事务因此整类漏掉，R4 只列出两笔两阶段事务。
 #                        后台线程（workload、WDRSnapshot、Asp 等）的 client_port 都是
 #                        NULL；客户端 TCP 是端口号、本地 Unix socket 是 -1（og5 核对过）。

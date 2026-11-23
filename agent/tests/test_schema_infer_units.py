@@ -42,7 +42,7 @@ def test_unqualified_tables_are_the_lookup_keys():
 def test_unique_schema_is_inferred():
     r = FakeRunner([("gmag", "batch_job_status")])
     inf = si.infer(r, SCRIPT, "SELECT COUNT(1) FROM batch_job_status WHERE x = 1")
-    assert inf.schema == "gmag" and not inf.ambiguous
+    assert inf.schema == "gmag" and not inf.picked
     assert inf.tables == ("batch_job_status",)
     assert r.calls == [(SCRIPT, {"names": "'batch_job_status'"})]
     assert "唯一" in inf.reason
@@ -51,40 +51,40 @@ def test_unique_schema_is_inferred():
 def test_several_tables_in_the_same_schema():
     r = FakeRunner([("gmag", "t1"), ("gmag", "t2"), ("public", "t2")])
     inf = si.infer(r, SCRIPT, "select * from t1 join t2 on t1.id = t2.id")
-    assert inf.schema == "gmag" and not inf.ambiguous          # 只有 gmag 同时有两张表
+    assert inf.schema == "gmag" and not inf.picked          # 只有 gmag 同时有两张表
 
 
-def test_same_name_in_two_schemas_is_ambiguous_not_guessed():
+def test_same_name_in_two_schemas_picks_one_and_says_so():
+    """2026-11-06 行方:技能不要做跨 schema 的限制 —— 不再停下来问,按名字顺序取第一个并写明候选。"""
     r = FakeRunner([("gbatch", "t_lmpcdtl"), ("dsc_ora_public", "t_lmpcdtl")])
     inf = si.infer(r, SCRIPT, "select * from t_lmpcdtl")
-    assert inf.schema == "" and inf.ambiguous
+    assert inf.schema == "dsc_ora_public" and inf.picked
     assert inf.candidates == {"t_lmpcdtl": ("dsc_ora_public", "gbatch")}
-    text = si.describe(inf)
-    assert "gbatch" in text and "dsc_ora_public" in text and "--schema" in text and "不猜" in text
+    assert "gbatch" in inf.reason and "dsc_ora_public" in inf.reason and "--schema" in inf.reason
 
 
-def test_tables_spread_over_different_schemas_is_ambiguous():
+def test_tables_spread_over_different_schemas_become_one_search_path():
     r = FakeRunner([("a", "t1"), ("b", "t2")])
     inf = si.infer(r, SCRIPT, "select * from t1, t2")
-    assert inf.schema == "" and inf.ambiguous and "同一个 schema" in inf.reason
+    assert inf.schema == "a, b" and inf.picked and "分属不同 schema" in inf.reason
 
 
 def test_guess_breaks_a_tie_only_when_it_is_a_candidate():
     r = FakeRunner([("gbatch", "t"), ("dsc_ora_public", "t")])
     assert si.infer(r, SCRIPT, "select * from t", guess="gbatch").schema == "gbatch"
-    assert si.infer(r, SCRIPT, "select * from t", guess="nowhere").ambiguous
+    assert si.infer(r, SCRIPT, "select * from t", guess="nowhere").picked      # 推测值不在候选里:照常按规则取
 
 
 def test_missing_table_means_no_inference():
     r = FakeRunner([("gmag", "t1")])
     inf = si.infer(r, SCRIPT, "select * from t1 join t9 on true")
-    assert inf.schema == "" and not inf.ambiguous and "t9" in inf.reason
+    assert inf.schema == "" and not inf.picked and "t9" in inf.reason
 
 
 def test_qualified_only_sql_needs_nothing():
     r = FakeRunner([("gmag", "t")])
     inf = si.infer(r, SCRIPT, "select * from gmag.t")
-    assert inf.schema == "" and not inf.ambiguous and r.calls == []
+    assert inf.schema == "" and not inf.picked and r.calls == []
 
 
 def test_system_and_hidden_schemas_are_ignored():
@@ -101,4 +101,4 @@ def test_quoted_identifiers_are_looked_up_verbatim():
 def test_catalog_failure_is_reported_not_raised():
     r = FakeRunner([], boom=RuntimeError("中间件未注册脚本 sqltune.tables"))
     inf = si.infer(r, SCRIPT, "select * from t")
-    assert inf.schema == "" and not inf.ambiguous and "未注册" in inf.reason
+    assert inf.schema == "" and not inf.picked and "未注册" in inf.reason

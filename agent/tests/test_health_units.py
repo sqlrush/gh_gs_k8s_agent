@@ -34,9 +34,10 @@ def test_registry_has_the_local_collectors_in_order():
 
     storage 是 2026-10-17 新增的一维（库/表空间占用量）。它排在 schema 之后、
     concurrency 之前：对象体检完接着看这些对象占了多少地方，是读报告的自然顺序。
+    wal 是 2026-11-05 新增的一维(xlog 生成速度与写入来源),紧跟 logs:先看 checkpoint 压力,再看是谁在写。
     """
     keys = [k for k, _ in collectors.registry()]
-    assert keys == ["overview", "slowsql", "xact", "conn", "logs", "repl",
+    assert keys == ["overview", "slowsql", "xact", "conn", "logs", "wal", "repl",
                     "schema", "storage", "concurrency"]
 
 

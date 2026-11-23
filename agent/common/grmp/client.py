@@ -15,16 +15,61 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
+import re
+import secrets
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Mapping, Optional
 
-from . import paths, proxy, userid
+from . import paths, proxy, routing, timing, userid
 from .errors import QueryError
 from .hints import with_hint
 from .params import to_param_value
+from ..config import state_dir
+from ..reports import redact
 
 _ERROR_BODY_MAX = 4000   # 4xx/5xx 响应体最多读这么多字节:够装一条 JDBC 报错,不够装一个页面
+
+# 给用户看的报错不带中间件地址、接口路径前缀与实例 ID(红线第 5 条;2026-11-12 行方要求界面上不出现报错原文)。
+# 原文照旧有用 —— 09-14 现场「中间件换地址后老会话打旧地址」排查第一眼要看地址 —— 所以原文写进本机诊断日志,
+# 报错末尾带「详情编号」,按编号在日志里查。
+ERROR_LOG = os.path.join("logs", "grmp-errors.log")
+_ERROR_LOG_MAX = 1 << 20
+_INSTANCE_ID = re.compile(r"[,，]?\s*instanceId\s*[:：=]\s*[\w-]+", re.I)
+
+
+def _log_raw(raw: str) -> str:
+    """原文进本机诊断日志,返回详情编号;写不了(只读盘、权限)就返回空串,不影响取数主流程。
+    设了状态目录(GSDB_HOME / GDAA_HOME,容器里都设)时写;没设时看默认状态目录(技能目录下的 common/)在不在 ——
+    行方技能包不设 GSDB_HOME,状态就在那里(2026-11-12 回归:原先这时不写,详情编号与原文都没了);
+    开发机与单测上默认目录不存在,不往别处落文件。"""
+    if not (os.environ.get("GSDB_HOME") or os.environ.get("GDAA_HOME") or state_dir().is_dir()):
+        return ""
+    eid = "E-" + secrets.token_hex(3).upper()
+    try:
+        path = state_dir() / ERROR_LOG
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size > _ERROR_LOG_MAX:
+            path.replace(path.with_name(path.name + ".1"))
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("%s %s %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S"), eid, raw.replace("\n", " | ")))
+        os.chmod(path, 0o600)
+    except OSError:
+        return ""
+    return eid
+
+
+def user_error(shown: str, raw: Optional[str] = None) -> str:
+    """给用户看的报错:按原文配人话提示(提示认的是原文),再隐去地址 / 接口路径 / 实例 ID,原文进日志带编号。
+
+    shown 是给用户看的那句(不含地址与路径);raw 是完整原文(默认同 shown)。"""
+    raw = shown if raw is None else raw
+    hinted = with_hint(shown)
+    text = _INSTANCE_ID.sub("", redact(hinted))
+    eid = _log_raw(raw)
+    return text + ("(详情编号 %s,完整原文见本机日志 %s)" % (eid, state_dir() / ERROR_LOG) if eid else "")
 
 DEFAULT_TIMEOUT = 120
 LIST_PAGE_SIZE = 1000  # 协议上限；脚本数不多，一次拉完
@@ -55,7 +100,7 @@ def _error_detail(raw: str) -> str:
     try:
         parsed = json.loads(raw)
         if isinstance(parsed, dict):
-            for key in ("msg", "message", "error", "detail"):
+            for key in ("msg", "message", "error_msg", "error", "detail"):   # error_msg:行方切库报错的形态
                 if parsed.get(key):
                     detail = str(parsed[key])
                     break
@@ -77,6 +122,7 @@ class GrmpClient:
         user_id: Optional[Any] = None,
         proxy_socket: str = "",
         path_prefix: Optional[str] = None,
+        target_db: str = "",
     ):
         # 经凭据代理时本进程里没有令牌:令牌、签名、工号都由代理加(common/grmp/proxy.py)
         if not token and not proxy_socket:
@@ -98,6 +144,11 @@ class GrmpClient:
         self._signer = signer          # common.grmp.signing.RequestSigner;None = 中间件未开签名校验
         self._user_id = user_id        # common.grmp.userid.UserIdSettings;None = 中间件不收工号
         self._ids: Optional[Dict[str, str]] = None
+        self._declared: Dict[str, set] = {}
+        # 切到业务库(common/grmp/routing.py):登录时核实过中间件真的会切,会话才带上这个库名;空 = 一律连 postgres
+        self.target_db = target_db
+        # 接口一没列出 dbName、执行时却报「数据库[]不存在」的脚本:本进程里之后直接带 postgres,不再撞一次
+        self._needs_db: set = set()
 
     @property
     def signer(self) -> Optional[Any]:
@@ -137,14 +188,17 @@ class GrmpClient:
             # HTTPError 是 URLError 的子类,必须先接:4xx/5xx 的响应体里才有中间件说的失败原因。
             # 现场 SQL 在备机上执行失败被包成 HTTP 400,只 catch URLError 时用户看到的是
             # 「HTTP Error 400: 」后面一片空白,排查被带到参数名方向去了两天。
-            raise GrmpError(with_hint(
-                "请求 %s 失败：HTTP %s %s%s（中间件 %s）"
-                % (path, exc.code, exc.reason, _error_body(exc), self.base_url)
+            detail = _error_body(exc)
+            raise GrmpError(user_error(
+                "调用中间件失败：HTTP %s %s%s" % (exc.code, exc.reason, detail),
+                "请求 %s 失败：HTTP %s %s%s（中间件 %s）" % (path, exc.code, exc.reason, detail, self.base_url),
             )) from exc
         except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
-            # 连不上、被对端断开、超时、DNS 解析失败——都在这里变成带地址的一句话。
-            # 地址必须写出来:中间件换地址后老会话打旧地址(09-14 现场),排查第一眼要看的就是它。
-            raise GrmpError("请求 %s 失败：%s（中间件 %s）" % (path, exc, self.base_url)) from exc
+            # 连不上、被对端断开、超时、DNS 解析失败。地址照旧要能查到(中间件换地址后老会话打旧地址,
+            # 09-14 现场),但只进本机诊断日志,给用户看的那句不带(见 user_error)。
+            raise GrmpError(user_error(
+                "调用中间件失败：%s" % exc, "请求 %s 失败：%s（中间件 %s）" % (path, exc, self.base_url),
+            )) from exc
         return self._parse(body)
 
     @staticmethod
@@ -163,12 +217,17 @@ class GrmpClient:
         try:
             status, reason, raw = proxy.post(self._proxy, path, data, self._headers(path), self._timeout)
         except (OSError, http.client.HTTPException) as exc:
-            raise GrmpError("请求 %s 失败：凭据代理不可用（%s：%s）。容器刚启动时稍等几秒重试；一直这样请联系管理员"
-                            % (path, self._proxy, exc)) from exc
+            raise GrmpError(user_error(
+                "调用中间件失败：凭据代理不可用（%s）。容器刚启动时稍等几秒重试；一直这样请联系管理员" % exc,
+                "请求 %s 失败：凭据代理不可用（%s：%s）" % (path, self._proxy, exc),
+            )) from exc
         body = raw.decode("utf-8", errors="replace")
         if status >= 400:
-            raise GrmpError(with_hint("请求 %s 失败：HTTP %s %s%s（经凭据代理）"
-                                      % (path, status, reason, _error_detail(body[:_ERROR_BODY_MAX]))))
+            detail = _error_detail(body[:_ERROR_BODY_MAX])
+            raise GrmpError(user_error(
+                "调用中间件失败（经凭据代理）：HTTP %s %s%s" % (status, reason, detail),
+                "请求 %s 失败：HTTP %s %s%s（经凭据代理）" % (path, status, reason, detail),
+            ))
         return self._parse(body)
 
     # -- 接口一 -----------------------------------------------------------
@@ -178,15 +237,13 @@ class GrmpClient:
         details: List[Dict[str, Any]] = []
         page = 1
         while True:
-            body = self._post(
+            body = timing.call(lambda: self._post(          # 耗时进 logs/grmp-timing.log(交互耗时报告用)
                 self.list_path,
                 {"dataIp": self.data_ip, "offset": page, "limit": LIST_PAGE_SIZE},
-            )
+            ), timing.LIST, "接口一 · 取命令清单")
             # 接口一判成功只能看 code —— 业务错误也是 HTTP 200
             if body.get("code") != "0":
-                raise GrmpError(
-                    "查询命令清单失败：%s" % body.get("msg", body)
-                )
+                raise GrmpError(user_error("查询命令清单失败：%s" % body.get("msg", body)))
             result = body.get("result") or {}
             details.extend(result.get("list") or [])
             if not result.get("hasNextPage"):
@@ -196,12 +253,45 @@ class GrmpClient:
 
     def _id_map(self) -> Dict[str, str]:
         if self._ids is None:
-            self._ids = {
-                d.get("cmd_name"): d.get("id")
-                for d in self.list_operations()
-                if d.get("cmd_name")
-            }
+            details = [d for d in self.list_operations() if d.get("cmd_name")]
+            self._ids = {d.get("cmd_name"): d.get("id") for d in details}
+            # 接口一给的参数定义:行方配好切库的脚本,这里会有 dbName
+            self._declared = {d.get("cmd_name"): {str(p.get("param_name")) for p in (d.get("param") or [])
+                                                  if isinstance(p, dict)} for d in details}
         return self._ids
+
+    def names(self) -> set:
+        """行方白名单(接口一)里登记的全部脚本名。"""
+        return set(self._id_map())
+
+    def registered(self, script_name: str) -> bool:
+        """行方白名单(接口一)里有没有这条脚本。"""
+        return script_name in self._id_map()
+
+    def declares(self, script_name: str, param: str) -> bool:
+        """行方登记的这条脚本是否声明了某个参数(接口一)。"""
+        self._id_map()
+        return param in self._declared.get(script_name, set())
+
+    def routes(self, script_name: str) -> bool:
+        """这次调用会不会带 dbName 切到业务库。三条同时满足才带:
+        会话里有核实过的目标库;我们把这条脚本划为业务库类(只给读按库对象的脚本,读 SQL 历史 / WDR 快照的绝不切);
+        行方接口一里这条脚本声明了 dbName(说明行方已配好,没配好时多传参数会被拒)。"""
+        return bool(self.target_db) and routing.is_business(script_name) and self.declares(script_name, routing.PARAM)
+
+    def db_name_for(self, script_name: str) -> str:
+        """这次调用带的 dbName;空串 = 不带。
+
+        - routes() 成立 → 目标业务库;
+        - 行方声明了 dbName、但我们不切(读 SQL 历史 / WDR 快照 / 实例级视图的脚本,或会话没切过去)→ 明确带 postgres:
+          行方中间件对声明了 dbName 的脚本不带就报「数据库[]在目标高斯实例中不存在」,不会退回 postgres(11-11 现场);
+          所以本版不再依赖行方白名单的执行库标注与我们一致;
+        - 行方没声明 → 不带(没声明时多传参数会不会被拒,行方未答复)。"""
+        if self.routes(script_name):
+            return self.target_db
+        if script_name in self._needs_db or self.declares(script_name, routing.PARAM):
+            return routing.POSTGRES
+        return ""
 
     def resolve_id(self, script_name: str) -> str:
         ids = self._id_map()
@@ -221,6 +311,22 @@ class GrmpClient:
     def invoke(
         self, script_name: str, values: Mapping[str, Any] = None
     ) -> List[Dict[str, str]]:
+        values = dict(values or {})
+        if routing.PARAM not in values:
+            db = self.db_name_for(script_name)
+            if db:
+                values = {routing.PARAM: db, **values}
+        try:
+            return self._invoke_once(script_name, values)
+        except GrmpError as exc:
+            # 兜底:接口一没列出 dbName(或清单是旧的),中间件却要库名 —— 按 postgres 重试一次并记住。
+            # 只认「库名为空」这一种报错;带了库名还报不存在是真的库名错了,不重试
+            if routing.PARAM in values or not routing.is_empty_db_error(str(exc)):
+                raise
+        self._needs_db.add(script_name)
+        return self._invoke_once(script_name, {routing.PARAM: routing.POSTGRES, **values})
+
+    def _invoke_once(self, script_name: str, values: Dict[str, Any]) -> List[Dict[str, str]]:
         payload: Dict[str, Any] = {
             "dataIp": self.data_ip,
             "id": self.resolve_id(script_name),
@@ -231,13 +337,14 @@ class GrmpClient:
                 for key, val in values.items()
             ]
 
-        body = self._post(self.invoke_path, payload)
+        body = timing.call(lambda: self._post(self.invoke_path, payload),   # 耗时进 logs/grmp-timing.log
+                           timing.INVOKE, script_name, values.get(routing.PARAM))
 
         # 两者缺一即按失败处理。只取 result.data 会把执行失败读成
         # 「查询结果为空」——「慢 SQL 返回 0 条」被读成「当前没有慢 SQL」。
         status = body.get("status")
         if status != "finished" or "result" not in body:
-            raise GrmpError(with_hint(
+            raise GrmpError(user_error(
                 "执行 %s 失败（status=%r，task_id=%s）：%s"
                 % (script_name, status, body.get("task_id"), body.get("msg", ""))
             ))

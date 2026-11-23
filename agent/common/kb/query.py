@@ -731,10 +731,11 @@ class SimpleFinding:
 def section_for(findings: Sequence[Any], kb_dir: Optional[pathlib.Path] = None,
                 alias: str = "") -> Tuple[str, Dict[str, Any]]:
     """skill 脚本一行接入:返回 (markdown 小节, JSON 字典)。永不抛——知识库出任何问题都是「未接入(原因)」。
-    alias:当前连接别名(不传就从本进程的登录会话里取),用来匹配环境画像。"""
+    alias:当前连接别名,用来匹配环境画像;由调用方给(诊断技能用 common.kbsection.current_alias())。
+    知识库这一层不读登录会话 —— 它两个包都带,而导入环境不连库(delivery/manifest.py 的归属清单与守卫测试)。"""
     from . import render as kbrender
     try:
-        result = from_findings(findings, kb_dir=kb_dir, alias=alias or current_alias())
+        result = from_findings(findings, kb_dir=kb_dir, alias=alias)
     except Exception as exc:                           # 兜底,理论上 from_findings 已不抛
         result = QueryResult(status=KbStatus(attached=False, reason=f"知识库检索异常:{exc}"))
     return kbrender.render_section(result), result_to_dict(result)
@@ -756,25 +757,6 @@ def finding_label(f: Any) -> str:
     value = str(getattr(f, "value", "") or "")
     detail = f"{metric} = {value}" if metric and value else metric or value
     return f"{label} {getattr(f, 'code', '')}" + (f"({detail})" if detail else "")
-
-
-def current_alias() -> str:
-    """本进程登录会话的连接别名(skill 脚本里 --session 选中的那个);取不到就空串,永不抛。"""
-    try:
-        from .. import session as gsession
-        conn = gsession.current()
-        if conn is None:
-            return ""
-        # api(中间件)模式下会话里的连接名是按实例地址生成的(10-0-0-9-postgres),用户、画像认的是登录时的
-        # 别名(og5)——按部署时登记的别名表反查回去(2026-10-24 测试环境:画像登记了 og5,诊断时没匹配上)
-        if getattr(conn, "data_ip", ""):
-            from .. import config as gconfig
-            for a in gconfig.instance_aliases():
-                if a.ip == conn.data_ip and (not conn.database or a.database == conn.database):
-                    return a.name
-        return str(getattr(conn, "name", "") or "")
-    except Exception:                                  # noqa: BLE001  没登录、旧安装都不影响知识库
-        return ""
 
 
 def from_findings(findings: Sequence[Any], kb_dir: Optional[pathlib.Path] = None,

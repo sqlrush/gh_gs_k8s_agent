@@ -1,0 +1,28 @@
+# 写入行数最多的语句(2026-11-05 加):dbe_perf.statement 按 sql_id 聚合插入 + 更新 + 删除的行数(统计重置以来的累计值)。
+# GaussDB 没有按语句记的 xlog / redo 字节数(官方文档逐列核对过),写入行数是能拿到的最接近的口径;
+# 结论里如实写「按写入行数」,不说成「这条 SQL 产生了多少 xlog」。query 剥开头注释再截 80 字,同 topsql.top_sql。
+# 非业务 SQL(数据字典、会话设置……)由脚本按 common/syssql.py 排除。
+name: health.write_sql
+description: 写入行数（插入 + 更新 + 删除）最多的语句
+readonly: true
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限
+sql: |
+  SELECT unique_sql_id::text,
+         LEFT(REGEXP_REPLACE(COALESCE(NULLIF(REGEXP_REPLACE(query, '^(\s*(--[^\n]*(\n|$)|/\*([^*]|\*+[^*/])*\*+/))+\s*', ''), ''), query),
+                            '\s+', ' ', 'g'), 80) AS query,
+         n_calls AS calls,
+         n_tuples_written AS rows_written,
+         ROUND(total_elapse_time/1000000::numeric, 2) AS total_sec
+    FROM (SELECT unique_sql_id,
+                 max(query) AS query,
+                 sum(n_calls) AS n_calls,
+                 sum(n_tuples_inserted + n_tuples_updated + n_tuples_deleted) AS n_tuples_written,
+                 sum(total_elapse_time) AS total_elapse_time
+            FROM dbe_perf.statement
+           GROUP BY unique_sql_id) s
+   WHERE n_tuples_written > 0
+   ORDER BY n_tuples_written DESC
+   LIMIT {{limit}};

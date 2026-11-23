@@ -19,7 +19,7 @@ from typing import List, Optional, Sequence, Set, Tuple
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC = ROOT / "docs" / "智能体验收方案.md"
 OUT = ROOT / "docs" / "acceptance" / "index.html"
-REPO = "https://github.com/sqlrush/gh_gs_k8s_agent"
+REPO = "https://github.com/sqlrush/gh_gs_k8s_agent"   # 联合仓库:面向客户的发布出口,跑题与评分代码随每个发布标签同步(2026-11-23 起)
 
 CSS = """
 :root{--fg:#1b2430;--muted:#5a6475;--bd:#d9dfe8;--bg-code:#f5f7fa;--accent:#2f6fdb;--navy:#123a73}

@@ -1,0 +1,29 @@
+# Fuyao 运行模式(2026-11-17):诊断与导入两个沙箱组。**建在平台的命名空间(flux-system)里,由平台管理员 apply**。
+# 注意(平台实测):虚拟机的 vCPU / 内存 / 磁盘由 E2B 模板决定(scripts/build-e2b-template.py 的 --cpu / --memory),
+# 这里的 sandboxResources 只是 K8s 侧给 Agent Pod 预留的量 —— 两边要配一致,否则预留与实际对不上。
+# capacity:agentPodMin / agentPodMax 是 Agent Pod(承载 Pod)个数,maxSandboxesPerPod 是每个 Agent Pod 同时运行的沙箱上限。
+# 2026-11-18 鲲鹏实测:① 暂停的沙箱不占名额,同时运行的上限 = 承载 Pod 数 × maxSandboxesPerPod,按同时在用的人数定;
+# ② 平台不会按需自动扩到 agentPodMax(调 max 没有新起 Pod,调 min 才多起一个)—— 要多少个承载 Pod 就把 agentPodMin 设成多少。
+apiVersion: sandbox.flux.io/v1alpha1
+kind: SandboxGroup
+metadata:
+  name: sg-gsdb-runtime
+  namespace: flux-system
+  labels: {app.kubernetes.io/part-of: gaussdb-agent}
+spec:
+  capacity: {agentPodMin: 4, agentPodMax: 4, maxSandboxesPerPod: 8, sandboxBufferMin: 1}   # 承载 Pod 数跟着 min 走
+  sandboxResources:
+    requests: {cpu: "2", memory: 4Gi}
+    limits: {cpu: "2", memory: 4Gi}
+---
+apiVersion: sandbox.flux.io/v1alpha1
+kind: SandboxGroup
+metadata:
+  name: sg-gsdb-import
+  namespace: flux-system
+  labels: {app.kubernetes.io/part-of: gaussdb-agent}
+spec:
+  capacity: {agentPodMin: 1, agentPodMax: 1, maxSandboxesPerPod: 4, sandboxBufferMin: 0}
+  sandboxResources:
+    requests: {cpu: "2", memory: 4Gi}
+    limits: {cpu: "2", memory: 4Gi}

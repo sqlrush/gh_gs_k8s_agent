@@ -36,7 +36,7 @@ evidence: [evidence/20250224-慢日志.png]   # 可选:照片、日志等原始�
 ## 判断
 autovacuum 检测到表尾部空页时触发 page 回收,持 8 级锁;正常 DML 进来会 cancel 掉 autovacuum…
 ## 处置
-针对 cbst.cosp_asyn_task_dtl 小表,调大 autovacuum_vacuum_threshold 减少 vacuum 频率。
+针对 cbst.cosp_asyn_task_dtl 小表,表级调大 autovacuum_vacuum_threshold 减少 vacuum 频率。
 ## 最终验证
 调大阈值后一周内该表 autovacuum 次数下降 90%,未再出现 3s update。
 ## 复发标志

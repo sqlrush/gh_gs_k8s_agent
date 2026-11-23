@@ -20,7 +20,7 @@
 # 返回所有够大的表（不只是判定为陈旧的），判定放在 collectors.py —— 这样
 # 报告能把「查了哪些、各自什么状况」一并摆出来，而不是只给一份结论名单。
 #
-# **候选怎么取（2026-10-24 faultlab 改）。** 原先 `reltuples > min_rows ORDER BY relpages DESC
+# **候选怎么取（2026-10-24 故障演练改）。** 原先 `reltuples > min_rows ORDER BY relpages DESC
 # LIMIT n`：从没 ANALYZE 过的表 reltuples、relpages 都是 0 —— 门槛就过不去，排序也在最后，
 # **最该报的表恰好进不了候选**（V7 的 fl.import_stage：导入 50 万行、没做 ANALYZE，不在表里）。
 # og5 这种大表多的库，前 n 张全是统计完好的大表。现在：
@@ -29,13 +29,16 @@
 #   排序  ① 没有统计列、或冻结页数为 0 的表（判定会报的两类）排最前；
 #         ② 冻结页数与实时页数偏离比例（判定用的同一个量）从高到低；③ 实时页数从大到小。
 # pg_stats 的列数要参与排序，所以挪进了子查询，对每张候选表都数一次（og5 36 张候选 36 毫秒）。
+# 拼接一律 concat(…),不用 ||(2026-11-17 现场):本脚本切到业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、
+# 不是字符串拼接,整条报「argument … not type name」。concat 在 A / M 两种兼容模式下都是拼接。守卫:test_registry_m_compat_units.py。
 name: health.stale_stats
+database_type: appbusiness
 description: 表的统计信息新鲜度证据（页数漂移 + 统计列数 + 上次 ANALYZE）
 sql: |
   SELECT tbl_name, frozen_pages, cur_pages, frozen_tuples, live_tuples,
          stat_columns, last_analyze, last_autoanalyze
   FROM (
-    SELECT n.nspname || '.' || c.relname AS tbl_name,
+    SELECT concat(n.nspname, '.', c.relname) AS tbl_name,
            c.relpages AS frozen_pages,
            pg_relation_size(c.oid) / current_setting('block_size')::bigint AS cur_pages,
            c.reltuples::bigint AS frozen_tuples,

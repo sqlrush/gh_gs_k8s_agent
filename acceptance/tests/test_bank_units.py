@@ -66,7 +66,7 @@ def _variant(**changes):
 def test_current_bank_passes():
     questions, problems = cb.check_bank(cb.BANK_DIR / "v1", CTX)
     assert not problems, "\n".join("%s:%s" % (p.where, p.msg) for p in problems)
-    assert len(questions) == 48
+    assert len(questions) == 53   # 2026-11-05 加 B9–B11、H7–H8(应用 / 运维 DBA 视角)
     assert sum(1 for q in questions if q["smoke"]) == 15
     assert {q["aspect"] for q in questions} == set(cb.ASPECTS)
     assert not cb.check_fixture_truth(CTX)

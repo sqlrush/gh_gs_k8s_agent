@@ -95,8 +95,8 @@ _SESSION_REQUIRED = (
 )
 
 
-_RUNTIME_NOTE = ("运行时归因（embedded SQL 的真实 calls/avg/total）需实例开启 "
-                 "track_stmt_stat_level 捕获嵌套语句；当前按纯静态分析。见 references/proc-setup.md。")
+_RUNTIME_NOTE = ("运行时归因（embedded SQL 的真实 calls/avg/total）需运维开启 "
+                 "track_stmt_stat_level 捕获嵌套语句后才能取到；当前按纯静态分析。见 references/proc-setup.md。")
 
 
 @dataclass(frozen=True)

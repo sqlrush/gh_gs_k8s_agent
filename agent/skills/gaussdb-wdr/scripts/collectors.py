@@ -11,7 +11,7 @@ import dataclasses
 
 from model import (
     DIM_CACHE, DIM_CHECKPOINT, DIM_DBSTAT, DIM_FILEIO, DIM_LOADPROFILE,
-    DIM_TOPSQL, DIM_WAITS, DimResult, Evidence, Finding, Options, Severity,
+    DIM_TOPSQL, DIM_WAITS, DIM_WRITES, DimResult, Evidence, Finding, Options, Severity,
     degraded, worst,
 )
 from native import generate_native, load_window
@@ -158,7 +158,7 @@ def collect_loadprofile(runner, opt: Options) -> DimResult:
 # 死锁证据的措辞。**次数是硬数据,「哪几条语句成环」不是** ——
 # WDR 快照里只有一个计数器,没有任何关于环的信息。而 methodology 的归因表
 # 让模型去 Top SQL 里挑「cpu≈0 的同表 DML」当死锁对,那是**推断**:
-# 2026-10-17 压测那次推对了,只因为 faultlab 只让 fl.acct 上的 UPDATE 互相打架、
+# 2026-10-17 压测那次推对了,只因为故障演练只让 fl.acct 上的 UPDATE 互相打架、
 # 候选只有一条;日志里实际还有**三方环**(id=20 → 21 → 22),按 Top SQL 推只会
 # 得出「两条 UPDATE 在抢」。真实生产库上几十个 DML 混着跑,这种推断很不可靠 ——
 # 而输出看起来和推对时一模一样。
@@ -286,7 +286,7 @@ def _clip_sql(text: str) -> str:
     """存档用的全文:**保留换行**,只压每行里多余的空白、去掉空行。
 
     原来把整段压成一行(`" ".join(text.split())`)—— 带 `--` 行注释的 SQL 就整条变成了注释,
-    存档里的「全文」拿去 --sql-stdin 根本跑不起来(2026-10-19 测试发现,faultlab 的语句都带行注释)。
+    存档里的「全文」拿去 --sql-stdin 根本跑不起来(2026-10-19 测试发现,故障演练的语句都带行注释)。
     """
     lines = [" ".join(ln.split()) for ln in str(text or "").splitlines()]
     t = "\n".join(ln for ln in lines if ln)
@@ -469,7 +469,7 @@ def _off_list(champs: dict, shown: set) -> list:
 
 # --- Wait Events / Classes ---------------------------------------------------
 #
-# 等待类之外还要给出**事件名**。faultlab L1(2026-10-24,3149→3150):提交风暴造出的是 WALFlushWait,
+# 等待类之外还要给出**事件名**。故障演练 L1(2026-10-24,3149→3150):提交风暴造出的是 WALFlushWait,
 # 这一维只给了「LWLOCK_EVENT 50%」一行,看不出是 WAL 相关,只能另跑 waitevent 才知道。
 # 事件级增量取 waitevent.events:与 wdr.waits 同源(snap_global_wait_events 两端快照相减)、
 # 排除 STATUS/NONE 的谓词逐字一致,两边的总量对得上;它早就在白名单里(gaussdb-waitevent 用),
@@ -558,12 +558,103 @@ def collect_checkpoint(runner, opt: Options) -> DimResult:
         if req_pct > th.ckpt_req_warn:
             d.findings.append(Finding(DIM_CHECKPOINT, "WDR_CKPT_REQ_HIGH", Severity.WARN,
                                       "强制 checkpoint 占比", f2(req_pct) + "%", f">{th.ckpt_req_warn:.0f}%",
-                                      "snap_global_bgwriter_stat checkpoints_req/timed"))
+                                      "snap_global_bgwriter_stat checkpoints_req/timed。强制 checkpoint 多 = 这段时间 xlog 涨得快,"
+                                      "多是业务写入引起的:写入最多的表见 Write Sources 一节,写入最多的 SQL 见 Top SQL"))
         elif req_pct > th.ckpt_req_notice:
             d.findings.append(Finding(DIM_CHECKPOINT, "WDR_CKPT_REQ_HIGH", Severity.NOTICE,
                                       "强制 checkpoint 占比", f2(req_pct) + "%", f">{th.ckpt_req_notice:.0f}%",
-                                      "snap_global_bgwriter_stat checkpoints_req/timed"))
+                                      "snap_global_bgwriter_stat checkpoints_req/timed。强制 checkpoint 多 = 这段时间 xlog 涨得快,"
+                                      "多是业务写入引起的:写入最多的表见 Write Sources 一节,写入最多的 SQL 见 Top SQL"))
     d.headline = f"checkpoint timed {timed} / req {req}（req 占 {req_pct:.0f}%）"
+    return d
+
+
+# --- Write Sources(2026-11-05) -----------------------------------------------
+# 窗口内是谁在写:checkpoint 被频繁强制触发、xlog 涨得快时,追到写入最多的表(大字段写入折回所属业务表)与 redo 量。
+# 站在应用 DBA 角度:强制 checkpoint 是业务写入的结果,不是 checkpoint 参数的问题。写入最多的 SQL 在 Top SQL 里看。
+
+_REDO_BLOCK = 8192        # redo 块按 8KB 折算(官方 WDR「Redo size(blocks)」的块)
+
+
+LIVE_TABLE_WRITES = "health.table_writes"   # 实时 pg_stat_all_tables(已在白名单里,健康检查同一份)
+LIVE_REDO = "wdr.redo_io_live"               # 实时 dbe_perf.file_redo_iostat
+_LIVE_NOTE = ("这个时间段的快照里没有%s记录(快照没采到这一类,或这段时间确实没有写入),下面改用实时累计值:"
+              "自实例启动或统计重置以来的总量,**不是所选时间段**。")
+
+
+def _live_table_writes(runner, top: int) -> list:
+    """快照取不到时的退路(2026-11-12 行方:生产权限与参数固定,能调的只有 SQL):实时累计的表级写入,列名对齐快照那份。"""
+    try:
+        rows = runner.run(LIVE_TABLE_WRITES, {"limit": top * 4})
+    except access.QueryError:
+        return []
+    return [{"schema": r.get("schema"), "table": r.get("table"), "is_toast": r.get("is_toast"),
+             "ins": r.get("n_tup_ins"), "upd": r.get("n_tup_upd"), "del": r.get("n_tup_del")} for r in rows or []]
+
+
+def _live_redo(runner) -> list:
+    try:
+        rows = runner.run(LIVE_REDO, {})
+    except access.QueryError:
+        return []
+    return rows if rows and (_i(rows[0].get("blocks")) or _i(rows[0].get("writes"))) else []
+
+
+def collect_writes(runner, opt: Options) -> DimResult:
+    b, e, top = int(opt.begin), int(opt.end), int(opt.top)
+    snap_err = ""
+    try:
+        rows = runner.run("wdr.table_writes", {"b": b, "e": e, "top": top * 2})
+    except access.QueryError as exc:
+        rows, snap_err = [], summarize_err(exc)
+    live_tables = False
+    if not rows:
+        live = _live_table_writes(runner, top)
+        if live:
+            rows, live_tables = live, True
+        elif snap_err:
+            return degraded(DIM_WRITES, snap_err.rstrip("。") + "。这一项无法查询,不影响其余部分的结论与报告")
+    try:
+        redo = runner.run("wdr.redo_io", {"b": b, "e": e})
+    except access.QueryError:
+        redo = []
+    live_redo = False
+    if not redo or (_i(redo[0].get("blocks")) == 0 and _i(redo[0].get("writes")) == 0):
+        live = _live_redo(runner)
+        if live:
+            redo, live_redo = live, True
+    tables: dict = {}
+    for r in rows:
+        k = (str(r["schema"]), str(r["table"]))
+        t = tables.setdefault(k, {"ins": 0, "upd": 0, "del": 0, "toast": 0})
+        if str(r.get("is_toast") or "").lower() in ("t", "true", "1"):
+            t["toast"] += _i(r["ins"]) + _i(r["upd"])
+        else:
+            t["ins"] += _i(r["ins"]); t["upd"] += _i(r["upd"]); t["del"] += _i(r["del"])
+    ordered = sorted(tables.items(), key=lambda kv: sum(kv[1].values()), reverse=True)[:top]
+    d = DimResult(dimension=DIM_WRITES, available=True, headers=["表", "插入", "更新", "删除", "大字段(TOAST)写入"])
+    for (sch, tbl), t in ordered:
+        d.rows.append(["%s.%s" % (sch, tbl), i64(t["ins"]), i64(t["upd"]), i64(t["del"]), i64(t["toast"]) if t["toast"] else ""])
+    redo_txt = ""
+    if redo:
+        blocks = _i(redo[0].get("blocks"))
+        redo_txt = ("redo 写入 %s 块(约 %s)" % (i64(blocks), mib(blocks * _REDO_BLOCK)) if blocks >= 0
+                    else "redo 写入量算不出(窗口跨了实例重启,计数器归零)")
+        if live_redo:
+            redo_txt = "快照里没有这段时间的 redo 写入记录,实时累计(自实例启动以来,不是所选时间段)" + redo_txt
+    if ordered:
+        (sch, tbl), t = ordered[0]
+        lob = ("，其中大字段写入 %s 行" % i64(t["toast"])) if t["toast"] else ""
+        d.headline = "%s写入最多的表 %s.%s(插入 %s、更新 %s、删除 %s%s)" % (
+            "快照里没有这段时间的表级写入记录,实时累计(自统计重置以来,不是所选时间段)" if live_tables else "",
+            sch, tbl, i64(t["ins"]), i64(t["upd"]), i64(t["del"]), lob)
+    else:
+        d.headline = "窗口内没有表级写入"
+    if redo_txt:
+        d.headline += ";" + redo_txt
+    notes = [_LIVE_NOTE % w for w, used in (("表级写入", live_tables), ("redo 写入", live_redo)) if used]
+    if notes:
+        d.note = "".join(notes)
     return d
 
 
@@ -610,7 +701,7 @@ def collect_fileio(runner, opt: Options) -> DimResult:
 def registry():
     """Collectors in evidence-pack display order (= report section order)."""
     return [collect_loadprofile, collect_dbstat, collect_topsql, collect_waits,
-            collect_checkpoint, collect_cache, collect_fileio]
+            collect_checkpoint, collect_writes, collect_cache, collect_fileio]
 
 
 # 等待时长超过 DB time 这么多倍,就认定 DB time 不可信(留足余量:两个计数器的

@@ -50,7 +50,8 @@ GRMP_TIMEOUT = 150                      # 客户端默认 120 秒,这里略长,�
 MODEL_CONNECT_TIMEOUT = 15
 MODEL_READ_TIMEOUT = 900                # 模型的流式应答可能很久才出第一个字
 _HOP = frozenset({"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
-                  "transfer-encoding", "upgrade", "content-length", "host", "authorization"})
+                  "transfer-encoding", "upgrade", "content-length", "host", "authorization",
+                  "x-gsdb-sandbox-token"})     # Fuyao 模式的沙箱令牌:只在沙箱中继 → 集群凭据代理这一段,不往上游带
 
 # 直连中间件,不认环境变量里的 HTTP_PROXY:带着令牌与签名的请求只去配置的地址
 _DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -403,5 +404,198 @@ def main(env: Mapping[str, str] = os.environ) -> int:
     print("凭据代理就绪:工号 %s,中间件 %s,模型 %s(127.0.0.1:%d)"
           % (user or "(未绑定)", "已配置" if ups.grmp_base else "未配置", "已配置" if ups.model_base else "未配置", port),
           flush=True)
+    threading.Event().wait()
+    return 0
+
+
+# --- Fuyao 运行模式(2026-11-17):集群里的网络形态 + 沙箱里的中继 ------------------------------------------
+#
+#   技能脚本 ─Unix 套接字─▶ ┐                                       ┌─▶ GRMP
+#                           ├ 沙箱中继(root,加沙箱令牌)─HTTP─▶ 凭据代理服务 ┤
+#   opencode ─127.0.0.1:4099─▶ ┘      (令牌只给 root 可读)          (集群里)  └─▶ 模型服务
+#
+# 沙箱(E2B 微型虚拟机)里没有「同一个 Pod 的另一个容器」可放密钥,于是:
+# - 沙箱里照旧提供 credproxy.sock 与模型端口(技能与 opencode 一行不改),由 root 运行的中继接住,加上本沙箱的令牌
+#   (网关签发、控制密钥签名,见 sbxtoken.py)转给集群里的凭据代理服务;跑 opencode 的 agent 用户读不到令牌;
+# - 集群里的凭据代理服务按令牌认人:工号取自令牌,GRMP 令牌按工号读 Secret grmp-token-<工号>(只 get,带缓存),
+#   模型 Key、SM2 私钥只在它自己的环境变量里;导入环境(kb-import)的令牌只放行模型。
+
+SANDBOX_TOKEN_HEADER = "X-Gsdb-Sandbox-Token"
+NETWORK_PORT = 8091
+GRMP_TOKEN_TTL_S = 60
+_SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
+
+
+class SecretLookup:
+    """按工号取 GRMP 令牌:读 Secret grmp-token-<工号> 的 GRMP_AUTH_TOKEN(只 get,不 list),缓存 ttl 秒。
+    没有这个 Secret 返回空串(代理据此回「没有拿到本人的中间件令牌」)。fetch 可替换(测试用)。"""
+
+    def __init__(self, namespace: str, ttl_s: int = GRMP_TOKEN_TTL_S, fetch: Optional[Callable[[str], str]] = None,
+                 clock: Callable[[], float] = None):
+        import time as _time
+        self.namespace, self.ttl_s = namespace, ttl_s
+        self.fetch = fetch or self._fetch
+        self.clock = clock or _time.time
+        self._cache: Dict[str, Tuple[float, str]] = {}
+        self._lock = threading.Lock()
+
+    def __call__(self, user: str) -> str:
+        now = self.clock()
+        with self._lock:
+            hit = self._cache.get(user)
+            if hit is not None and now - hit[0] < self.ttl_s:
+                return hit[1]
+        try:
+            tok = self.fetch(user)
+        except Exception:                           # noqa: BLE001 —— 取不到当成没有,由代理回清楚的错误
+            tok = ""
+        with self._lock:
+            self._cache[user] = (now, tok)
+        return tok
+
+    def _fetch(self, user: str) -> str:
+        import base64
+        token = pathlib.Path(_SA_DIR, "token").read_text().strip()
+        ctx = ssl.create_default_context(cafile=str(pathlib.Path(_SA_DIR, "ca.crt")))
+        host = os.environ.get("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
+        port = os.environ.get("KUBERNETES_SERVICE_PORT", "443")
+        conn = http.client.HTTPSConnection(host, int(port), timeout=10, context=ctx)
+        try:
+            conn.request("GET", "/api/v1/namespaces/%s/secrets/grmp-token-%s" % (self.namespace, user),
+                         headers={"Authorization": "Bearer " + token, "Accept": "application/json"})
+            r = conn.getresponse()
+            data = r.read()
+            if r.status == 404:
+                return ""
+            if r.status != 200:
+                raise OSError("读 Secret grmp-token-%s 回了 %d" % (user, r.status))
+            raw = (json.loads(data).get("data") or {}).get("GRMP_AUTH_TOKEN") or ""
+            return base64.b64decode(raw).decode("utf-8") if raw else ""
+        finally:
+            conn.close()
+
+
+def make_network_handler(proxy: Proxy, key: bytes, lookup: Callable[[str], str], local: threading.local):
+    """集群凭据代理服务的处理器:先核对沙箱令牌,再按原样走 make_handler 的转发(绑定按请求线程设)。"""
+    import sbxtoken
+    base = make_handler(proxy, grmp=True, model=True)
+
+    class N(base):
+        def _dispatch(self) -> None:
+            claims = sbxtoken.verify(key, self.headers.get(SANDBOX_TOKEN_HEADER) or "")
+            is_model = self.path == MODEL_PREFIX or self.path.startswith(MODEL_PREFIX + "/")
+            if claims is None or (not is_model and claims.kind != "runtime"):
+                self._body()                        # 读掉请求体再回(对端整个发完才读应答)
+                self.close_connection = True
+                if claims is None:
+                    return self._send(401, b'{"msg": "sandbox token required"}')
+                return self._send(403, json.dumps({"msg": "导入环境不转发中间件"}, ensure_ascii=False).encode("utf-8"))
+            local.bound = (claims.user_id, "" if is_model else lookup(claims.user_id))
+            try:
+                return super()._dispatch()
+            finally:
+                local.bound = None
+
+        do_GET = do_POST = _dispatch
+
+    return N
+
+
+def serve_network(port: int, proxy: Proxy, key: bytes, lookup: Callable[[str], str], local: threading.local,
+                  host: str = "0.0.0.0"):
+    srv = _TCPServer((host, port), make_network_handler(proxy, key, lookup, local))
+    threading.Thread(target=srv.serve_forever, name="credproxy-net", daemon=True).start()
+    return srv
+
+
+def network_proxy(env: Mapping[str, str], log: Callable[[str], None] = print) -> Tuple[Proxy, threading.local]:
+    local = threading.local()
+    proxy = Proxy(Upstreams.from_env(env), lambda: getattr(local, "bound", None), log=log)
+    return proxy, local
+
+
+def main_network(env: Mapping[str, str] = os.environ) -> int:
+    """`podctl serve-credproxy-net`:Fuyao 模式的集群凭据代理服务。"""
+    key = (env.get("GSDB_CONTROL_KEY") or "").encode("utf-8")
+    if len(key) < 16:
+        print("缺 GSDB_CONTROL_KEY(Secret sandbox-control 的 KEY,与网关同一把),或不足 16 个字符", flush=True)
+        return 2
+    try:
+        proxy, local = network_proxy(env, log=lambda m: print(m, flush=True))
+    except ConfigError as exc:
+        print("凭据代理配置错误:%s" % exc, flush=True)
+        return 2
+    ns = (env.get("POD_NAMESPACE") or "gaussdb-agent").strip()
+    port = int(env.get("CREDPROXY_NETWORK_PORT") or NETWORK_PORT)
+    serve_network(port, proxy, key, SecretLookup(ns), local)
+    print("凭据代理服务就绪(Fuyao):0.0.0.0:%d,中间件 %s,模型 %s"
+          % (port, "已配置" if proxy.ups.grmp_base else "未配置", "已配置" if proxy.ups.model_base else "未配置"), flush=True)
+    threading.Event().wait()
+    return 0
+
+
+class RelayProxy:
+    """沙箱里的中继:与 Proxy 同一接口(make_handler 只用 ups.model_base / grmp() / model_request()),
+    转发到集群凭据代理服务并加上本沙箱的令牌。中继自己不持有任何凭据。"""
+
+    class _Ups:
+        def __init__(self, base: str):
+            self.model_base = self.grmp_base = base
+
+    def __init__(self, base_url: str, token: str):
+        u = urllib.parse.urlsplit(base_url)
+        if u.scheme != "http" or not u.hostname:
+            raise ConfigError("凭据代理服务地址要写成 http://主机:端口(沙箱里解析不了集群域名,写 ClusterIP)")
+        self.host, self.port = u.hostname, u.port or 80
+        self.ups = self._Ups(base_url.rstrip("/"))
+        self.token = token
+
+    def _conn(self, timeout: float) -> http.client.HTTPConnection:
+        return http.client.HTTPConnection(self.host, self.port, timeout=timeout)
+
+    def grmp(self, path: str, body: bytes) -> Tuple[int, bytes]:
+        conn = self._conn(GRMP_TIMEOUT + 10)
+        try:
+            conn.request("POST", path, body=body, headers={"Content-Type": "application/json",
+                                                           SANDBOX_TOKEN_HEADER: self.token})
+            r = conn.getresponse()
+            return r.status, r.read()
+        except (OSError, http.client.HTTPException) as exc:
+            return 502, json.dumps({"code": "502", "msg": "沙箱连不上凭据代理服务:%s" % exc}, ensure_ascii=False).encode()
+        finally:
+            conn.close()
+
+    def model_request(self, method: str, sub: str, headers, body: bytes):
+        conn = self._conn(MODEL_CONNECT_TIMEOUT)
+        out = {k: v for k, v in headers if k.lower() not in _HOP}
+        out[SANDBOX_TOKEN_HEADER] = self.token
+        out["Content-Length"] = str(len(body))
+        conn.connect()
+        if conn.sock is not None:
+            conn.sock.settimeout(MODEL_READ_TIMEOUT)
+        conn.request(method, MODEL_PREFIX + sub, body=body or None, headers=out)
+        return conn, conn.getresponse()
+
+
+def main_relay(env: Mapping[str, str] = os.environ) -> int:
+    """`podctl serve-credrelay`(沙箱里,root):开 credproxy.sock(只转中间件,属组 agent 可连)与模型端口(只转模型)。"""
+    token_file = env.get("GSDB_SANDBOX_TOKEN_FILE") or "/run/gsdb/sandbox-token"
+    try:
+        token = pathlib.Path(token_file).read_text(encoding="utf-8").strip()
+        relay_proxy = RelayProxy(env.get("GSDB_CREDPROXY_URL") or "", token)
+    except (OSError, ConfigError) as exc:
+        print("沙箱中继起不来:%s" % exc, flush=True)
+        return 2
+    sock_dir = pathlib.Path(env.get("CREDPROXY_DIR") or "/run/credproxy")
+    sock_dir.mkdir(parents=True, exist_ok=True)
+    gid = int(env.get("GSDB_AGENT_GID") or 1000)
+    os.chown(str(sock_dir), 0, gid)
+    os.chmod(str(sock_dir), 0o750)
+    path = sock_dir / SOCKET_NAME
+    serve_unix(path, relay_proxy)                  # type: ignore[arg-type]
+    os.chown(str(path), 0, gid)
+    port = int(env.get("CREDPROXY_MODEL_PORT") or MODEL_PORT)
+    serve_tcp(port, relay_proxy)                   # type: ignore[arg-type]
+    print("沙箱中继就绪:%s(中间件)、127.0.0.1:%d(模型)→ %s" % (path, port, relay_proxy.ups.model_base), flush=True)
     threading.Event().wait()
     return 0

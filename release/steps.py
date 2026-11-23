@@ -1,6 +1,7 @@
-"""各步骤的实现:把 package / registry / render / whitelist / pool / smoke 串起来。每一步都要幂等(续跑会重跑整步)。
+"""各步骤的实现:把 package / registry / render / whitelist / pool / e2b / smoke 串起来。每一步都要幂等(续跑会重跑整步)。
 
-run 的 meta(引擎在开始时存下):kind、from_v、to_v、to_tag、pool_mode、required、special、whitelist_files、notes、arch。
+run 的 meta(引擎在开始时存下):kind、from_v、to_v、to_tag、pool_mode、mode、required、special、whitelist_files、notes、arch。
+mode 是集群的运行模式(gateway-config 的 RUNTIME_MODE);fuyao 时步骤表见 plan.step_table,两步新步骤在 e2b.py。
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 
-from . import oci, package, plan as planmod, pool, registry, render, smoke, whitelist, wldb
+from . import e2b, oci, package, plan as planmod, pool, registry, render, smoke, whitelist, wldb
 from .engine import Ctx, StepFailed
 from .kube import Kube
 from .store import Store
@@ -93,10 +94,16 @@ def step_plan(ctx: Ctx) -> None:
     want = ctx.plan.get("from_v") or ""
     if ctx.plan["kind"] in ("upgrade", "rollback") and cur.version != want:
         raise StepFailed("集群现在是 %s,生成计划时是 %s:集群被别人改过,请回到发布页重新生成计划" % (cur.version or "未部署", want))
+    mode = ctx.plan.get("mode") or ""
+    if ctx.plan["kind"] != "deploy" and (cur.mode == planmod.FUYAO) != (mode == planmod.FUYAO):
+        raise StepFailed("集群的运行模式现在是「%s」,生成计划时是「%s」:步骤表不一样,请回到发布页重新生成计划"
+                         % (cur.mode or "按需", mode or "按需"))
     ctx.sub(1, "done")
     for n in ctx.plan.get("notes") or []:
         ctx.log("提醒:" + n, "w")
-    ctx.sub(2, "done", "%s · 池子%s" % (ctx.plan["kind"], {"slot": "按槽位在线", "pod": "按 Pod", "fresh": "新建"}[ctx.plan["pool_mode"]]))
+    how = ("Fuyao 沙箱 · 换模板" if mode == planmod.FUYAO else
+           "池子" + {"slot": "按槽位在线", "pod": "按 Pod", "fresh": "新建"}[ctx.plan["pool_mode"]])
+    ctx.sub(2, "done", "%s · %s" % (ctx.plan["kind"], how))
     ctx.detail("%s → %s" % (want or "未部署", ctx.plan["to_v"]))
 
 
@@ -197,7 +204,15 @@ def step_config(ctx: Ctx) -> None:
     cms, nps, existing = _cluster_state(kube)
     ctx.sub(0, "done", "%d 个 ConfigMap、%d 条网络策略" % (len(cms), len(nps)))
     pins = pinned_digests(ctx, cfg)
-    out = render.render(k8s_root, cfg, ctx.plan["to_tag"], cms, nps, existing, ctx.plan.get("required") or [], pins)
+    mode = ctx.plan.get("mode") or ""
+    templates = e2b.templates_for(ctx.plan["to_tag"]) if mode == planmod.FUYAO else None
+    try:
+        out = render.render(k8s_root, cfg, ctx.plan["to_tag"], cms, nps, existing, ctx.plan.get("required") or [], pins,
+                            mode=mode, templates=templates)
+    except render.RenderError as exc:
+        raise StepFailed(str(exc))
+    if templates:
+        ctx.log("Fuyao 模式:清单取 k8s/overlays/fuyao;模板名 %s" % " / ".join(templates[k] for k in e2b.KINDS))
     ctx.sub(1, "done", "%d 项变化" % len(out.changes))
     for c in out.changes:
         s = c.show()
@@ -308,15 +323,21 @@ def step_whitelist(ctx: Ctx) -> None:
     if not expected:
         raise StepFailed("目标包的 release.yaml 里没有白名单清单")
     ctx.sub(0, "done", "%d 条" % len(expected))
+    deltas = (pkg.release or {}).get("whitelist", {}).get("deltas") or []
     while True:
         ctx.sub(1, "running")
-        rep = whitelist.compare(expected, registered_scripts(svc, svc.cfg()))
+        got = registered_scripts(svc, svc.cfg())
+        rep = whitelist.compare(expected, got)
         ctx.sub(1, "done", "已读取")
         counts = rep.counts()
         ctx.sub(2, "done", "%d 条一致" % counts[whitelist.OK])
+        # 要导哪几份:按白名单本身推断导到了哪里(白名单常常落后于集群版本);推断不出就不猜,请现场导出交给我方核对
+        files, why = whitelist.suggest(deltas, rep.problems, got) if not rep.passed else ([], "")
         ctx.share(whitelist={"expected": rep.expected, "counts": counts, "extra": rep.extra,
                              "problems": [{"name": f.name, "status": f.status, "label": whitelist.LABELS[f.status],
-                                           "detail": f.detail} for f in rep.problems]})
+                                           "detail": f.detail} for f in rep.problems],
+                             "suggest": files, "suggest_reason": why,
+                             "span_files": ctx.plan.get("whitelist_files") or []})
         if rep.passed:
             ctx.sub(3, "done", "%d/%d" % (rep.expected, rep.expected))
             ctx.log("核对通过:%d 条全部已登记且一致" % rep.expected, "g")
@@ -324,9 +345,14 @@ def step_whitelist(ctx: Ctx) -> None:
             return
         msg = "、".join("%s %d 条" % (whitelist.LABELS[k], v) for k, v in counts.items() if v and k != whitelist.OK)
         ctx.log("核对未通过:%s" % msg, "w")
+        if files:
+            ctx.log("按核对结果推断,白名单团队要从 %s 起按顺序导完:%s(一份都不能跳;已经导过的不要重导)"
+                    % (files[0], "、".join(files)), "w")
+        elif files is None:
+            ctx.log("推断不出白名单导到了哪一份(%s):请把白名单导出交给我方核对,不要猜着导" % why, "w")
         ctx.sub(3, "waiting", msg)
         ctx.detail("未通过:" + msg)
-        ctx.gate("whitelist", {"counts": counts, "files": ctx.plan.get("whitelist_files") or []})
+        ctx.gate("whitelist", {"counts": counts, "files": files if files is not None else [], "reason": why})
         ctx.log("运维确认已补登记,重新核对")
 
 
@@ -502,10 +528,11 @@ def step_smoke(ctx: Ctx) -> None:
         raise StepFailed("资源配置里没填冒烟工号")
     gwcfg = (kube.get("configmap", "gateway-config") or {}).get("data") or {}
     names = ["模拟登录", "真实对话", "诊断报告", "知识库检索"]
+    waits = fuyao_smoke_waits(ctx, svc, user, gwcfg) if ctx.plan.get("mode") == planmod.FUYAO else {}
     with kube.port_forward("svc/gateway", 80) as port:
         s = smoke.Smoke(host="127.0.0.1", port=port, user=user, trust=trust,
                         user_header=gwcfg.get("USER_HEADER") or "X-Agent-User", instance=str(cfg.get("smoke.instance") or ""),
-                        log=lambda m: ctx.log(m, "g" if m.startswith("✓") else "e"))
+                        log=lambda m: ctx.log(m, "g" if m.startswith("✓") else "e"), **waits)
         ok = s.run(ctx.plan["to_v"])
     by = {c.name: c for c in s.results}
     for k, n in enumerate(names):
@@ -518,6 +545,25 @@ def step_smoke(ctx: Ctx) -> None:
     ctx.detail("%d 项全部通过" % len(s.results))
 
 
+FUYAO_SMOKE_READY_S = 300          # Fuyao:首次进入要建沙箱、载入状态、起 opencode,几秒到几十秒;网关一次最多挂住 FUYAO_WAIT_SECONDS
+
+
+def fuyao_smoke_waits(ctx: Ctx, svc: Services, user: str, gwcfg: Dict[str, str]) -> Dict[str, float]:
+    """Fuyao 模式的冒烟:先把冒烟工号自己的旧版诊断沙箱交给网关收尾删除(否则冒烟跑在旧模板上),
+    再按网关「一次请求最多等多久」放宽单次请求的超时 —— 网关准备沙箱时把请求挂住,超过才回 503 等待。"""
+    try:
+        gone = e2b.refresh_smoke_user(svc.kube, user, lambda m, lv: ctx.log(m, lv), svc.sleep)
+        if not gone:
+            ctx.log("冒烟工号 %s 没有旧版诊断沙箱:冒烟时网关按新模板新建或沿用新模板的" % user)
+    except e2b.ADMIN_ERRORS as exc:
+        ctx.log("没能清掉冒烟工号的旧版沙箱(%s):冒烟可能跑在旧模板上" % exc, "w")
+    try:
+        hold = float(gwcfg.get("FUYAO_WAIT_SECONDS") or 90)
+    except ValueError:
+        hold = 90.0
+    return {"ready_timeout_s": max(FUYAO_SMOKE_READY_S, hold * 3), "request_timeout_s": hold + 30}
+
+
 def step_done(ctx: Ctx) -> None:
     store = _svc(ctx).store
     run = store.run(ctx.run_id)
@@ -526,9 +572,12 @@ def step_done(ctx: Ctx) -> None:
     ctx.sub(0, "done", ctx.plan["to_v"])
     ctx.sub(1, "done")
     ctx.log("当前版本记为 %s(配置版本 #%s)" % (ctx.plan["to_v"], run["config_version"]), "g")
-    ctx.detail("发布报告已生成")
+    outdated = int((ctx.shared().get("fuyao") or {}).get("outdated") or 0)
+    if outdated:
+        ctx.log("还有 %d 台旧版沙箱,闲置后自动换新(在用的不打断)" % outdated, "w")
+    ctx.detail("发布报告已生成" + (" · 还有 %d 台旧版沙箱,闲置后自动换新" % outdated if outdated else ""))
 
 
 STEPS = {"pkg": step_pkg, "plan": step_plan, "images": step_images, "config": step_config, "review": step_review,
-         "whitelist": step_whitelist, "gateway": step_gateway, "pool": step_pool, "kbimport": step_kbimport,
-         "kbstd": step_kbstd, "smoke": step_smoke, "done": step_done}
+         "whitelist": step_whitelist, "template": e2b.step_template, "gateway": step_gateway, "sandbox": e2b.step_sandbox,
+         "pool": step_pool, "kbimport": step_kbimport, "kbstd": step_kbstd, "smoke": step_smoke, "done": step_done}

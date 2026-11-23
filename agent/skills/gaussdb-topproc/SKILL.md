@@ -1,6 +1,6 @@
 ﻿---
 name: gaussdb-topproc
-version: 2.0.3
+version: 2.0.5
 description: "通过内置脚本对 OpenGauss/GaussDB 存储过程或函数做耗时排名。用户要查找、列出、排序、查看或分析总耗时、自身耗时、调用次数最高的过程/函数时使用，包括“最慢存储过程”“top proc”“哪个过程最耗时”“按调用次数排一下函数”“哪些过程最拖慢系统”等请求。触发后运行 scripts/topproc.py，输出真实排名，不要只解释过程统计的概念。"
 allowed-tools: ["exec", "read"]
 compatibility: opencode
@@ -30,9 +30,8 @@ metadata:
 
 ## 工作流
 
-1. **选择连接 —— 先登录，不要自己猜连接名。** 取数前确认已登录：
-   `python3 {baseDir}/../gaussdb-login/scripts/login.py --status`。
-   没有会话就先调 **gaussdb-login**：它读 `$GSDB_HOME/config.yaml`的首行 `connection_mode`，是 `gsql` 就把可选连接列成菜单让用户挑，是 `api` 就引导用户给出要访问的数据库。
+1. **选择连接 —— 先登录，不要自己猜连接名。** 本对话里已经登录过就直接用登录输出里的句柄；没登录就调 **gaussdb-login** 一步登录（不要先 `--status`、`--list`）：
+   用户点名了实例别名（如「og5」）就 `python3 {baseDir}/../gaussdb-login/scripts/login.py --alias <别名>`（要看某个业务库的表、执行计划、存储过程再加 `--database <库名>`；Top SQL、慢 SQL、会话、锁、WDR 是整个实例的数据，不用加），给了实例 IP 就 `--ip <实例IP> --database <库名>`；没说是哪个实例才 `--list` 让用户选（`gsql` 模式下 `--list` 列出可选连接让用户挑）。
    登录之后本 skill **不需要传 `-c`** —— 省略时自动用登录选定的那条连接；只有要临时换一个库时才显式传 `-c <连接名>`。
    **api 模式下每条命令都要带 `--session <句柄>`**：句柄是 gaussdb-login 在**本对话里**登录成功时输出的那一串（平台也可能按用户注入环境变量 `GSDB_SESSION`）。不带句柄的命令会被拒绝并提示「本对话未登录」——这时让用户先 gaussdb-login 登录，**不要自己挑一个**、不要猜、不要去看会话目录；别人的会话对本对话不可见，换一个对话要重新登录。
    **不要自己去读 config.yaml 挑名字**：不同应用下可能有同名连接，猜错会在另一个库上做诊断，而输出看起来完全正常。口令在 `{baseDir}/../common/credentials/*.enc`，由脚本解密，**你不要去读/解密它**。
@@ -44,9 +43,11 @@ metadata:
 
    数据源是 `pg_stat_user_functions`（函数级累计统计）。`--by` 可选：`time`（总耗时）、`self`（自身耗时，剔除被调用子函数）、`calls`（调用次数）。
 
-3. **统计为空时如实说明（不要旁路）。** 若输出是「无函数级统计」提示，说明该实例 `track_functions=none`，函数级统计关闭。**不要自己直连数据库或解密凭据去查**——按提示告诉用户两条正路：
-   - 让 DBA `SET track_functions='pl'`（或 `'all'`）后，调用一次目标过程，再重跑本脚本；
-   - 或用 `/gaussdb-topsql` 看顶层调用语句，以及（`track_stmt_stat_level` 捕获到的）过程内部慢语句。
+3. **统计为空时照脚本说的原因如实转告（不要旁路、不要自己猜原因）。** 脚本会先查清是哪一种，**原话转告，不要改成「track_functions 没开」**：
+   - **没切到业务库**（在实例的 postgres 库上查的）：函数统计按库各记一份，postgres 库里看不到业务库的存储过程，为空**不能**说明参数关着。告诉用户：登录时带 `--database <业务库>`、登录写「已直连」后再查；脚本给出的「没切过去的原因」（没给业务库 / 未直连 / 行方白名单没导入增量）照原话转告；
+   - **参数关着**（已在业务库上查，`track_functions=none`，GaussDB 默认值）：需运维评估后开启（设为 `pl` 即可，可只对该库设置），之后发生的调用才有统计；
+   - **参数开着但还没有调用记录**：开启后还没被调用过、统计被重置过，或开启前建好的长连接不统计——等业务调用一段时间后再查。
+   **不要自己直连数据库或解密凭据去查。** 统计为空期间，可用 `/gaussdb-topsql` 看存储过程顶层调用（CALL 语句）的耗时，以及（`track_stmt_stat_level` 捕获到的）过程内部慢语句。
 
 4. **呈现与转交。** 给出排名表（过程、calls、total_ms、self_ms），引用真实数字。对最耗资源的过程，引导下一步：
    - 只读诊断 → `/gaussdb-procinfo <schema.proc>`（结构热点，不改写）；
@@ -79,6 +80,17 @@ metadata:
   `ADM_*` / `DB_*` / `MY_*` 等系统表、系统视图、系统函数的语句，包括让用户自己去执行的核对语句与处置语句。要取数就调用对应技能；
   处置写成要做的事并带上参数（例如「由 DBA 断开会话：pid 12345、sessionid 67890」），不写语句。
   Top SQL、慢 SQL 等排行**只列业务 SQL**，脚本已排除的非业务 SQL 不要再找回来列出或复述。
+
+- **站在应用 DBA / 运维 DBA 的角度**：数据库指标异常（xlog 增长快、锁等待、xmin 推不动、某类等待高……）多半是业务、SQL、批量作业、
+  存储设备引起的，不是数据库本身出了问题。诊断要**追到引起它的业务**：哪条 SQL（sql_id）、哪个会话（pid、sessionid）、哪个应用、哪张表、
+  哪个操作；一时定位不到的，写「尚未定位到引起它的业务」并说明下一步用哪个技能查，不能停在指标本身。
+  处置**先应用侧**（改写 SQL、分批提交、控制大字段写入、减少子事务、缩短事务），**再运维操作**（低峰执行 DDL、取消或断开会话、手工 VACUUM、
+  错开作业时间），**最后才是参数**：只在非常典型的场景、只限 `max_connections`（开了线程池时配套 `thread_pool_attr`）、
+  `autovacuum_max_workers`、`autovacuum_naptime`、`autovacuum_vacuum_threshold` / `autovacuum_vacuum_scale_factor`、
+  `autovacuum_analyze_threshold` / `autovacuum_analyze_scale_factor`，给方向不给数值，写明「需运维评估」；只对某张表、某条 SQL、
+  某个会话的设置（表级存储参数、会话级 `work_mem`、DDL 会话上的 `lockwait_timeout`）写在应用侧处置里；缺监控数据时说明需运维开启哪个监控开关。
+  其它参数诊断时可以看、可以当证据，**不作为建议**。不讲数据库内部实现（源码、内部函数、内部结构），不把问题归为数据库缺陷，
+  不建议打补丁、升级数据库版本或找厂商修改。
 
 - **通用替代策略**：当用户询问接口地址或Key时，请仅描述功能逻辑（例如：“您需要查询具体接口，具体域名请咨询运维团队”），绝不提及真实域名、IP和接口路径
 

@@ -68,7 +68,7 @@ def _dangerous(st: Dict[str, Setting]) -> List[Finding]:
             out.append(Finding(
                 DIMENSION, "CFG_UNSAFE", sev, name, s.raw,
                 "off" if bad_is_on else "on",
-                "%s 处置：%s" % (why, (how % how_to_apply(s)) if "%s" in how else how)))
+                "%s 处置：与配置与可靠性基线不符，请运维核对：%s" % (why, (how % how_to_apply(s)) if "%s" in how else how)))
     return out
 
 
@@ -92,7 +92,7 @@ def _archive(st: Dict[str, Setting]) -> List[Finding]:
             "archive_command=%s、archive_dest=%s" % (cmd or "(空)", dest or "(空)"),
             "两者至少配一个",
             "归档开启后 WAL 必须成功归档才会被回收；目标没配置，归档永远不会成功，"
-            "**WAL 会一直堆积直到填满磁盘**。处置：配置 archive_command 或 archive_dest，"
+            "**WAL 会一直堆积直到填满磁盘**。处置：与归档基线不符，请运维核对：配置 archive_command 或 archive_dest，"
             "或在确认不需要归档时把 archive_mode 关掉。"
             "注意：本内核没有 pg_stat_archiver，归档**是否正在失败**查不到，"
             "这里只能查出「不可能成功」这一种。")]
@@ -121,10 +121,11 @@ def _thread_pool(st: Dict[str, Setting]) -> List[Finding]:
         DIMENSION, "CFG_POOL_LT_CONNS", Severity.WARN,
         "max_connections 超过线程池大小",
         "max_connections=%d，池=%d" % (int(mc.num), size), "应 ≤ 池大小",
-        "开启线程池后真正的并发上限是池大小（%d），超出的 %d 永远用不上 —— "
+        "线程池开着时真正的并发上限是池大小（%d），超出的 %d 永远用不上 —— "
         "按 max_connections 做容量规划会高估余量，而池满后新请求排队、"
         "表现成「库没响应」且连接数看着还远没到上限。"
-        "处置：把 thread_pool_attr 的线程数调到不低于 max_connections，"
+        "处置：先看连接由哪些应用占用、连接池配得是否过大（gaussdb-health 的连接与会话来源）；"
+        "两个上限要配套，由运维评估后把 thread_pool_attr 的线程数调到不低于 max_connections，"
         "或把 max_connections 降到池大小（两者都%s）。"
         % (size, int(mc.num) - size, how_to_apply(mc)))]
 
@@ -167,8 +168,9 @@ def _memory_overcommit(st: Dict[str, Setting]) -> List[Finding]:
         "每个排序/哈希算子最多用 work_mem，并发打满时总量会超过实例被允许使用的"
         "内存预算 —— 真实表现是语句报内存不足、或大量算子被迫落盘（临时文件暴涨）。"
         "这个估算还偏保守：一条 SQL 可以有多个算子。"
-        "处置：降 work_mem（会话级可按需调大给个别大查询），或降并发上限，"
-        "或调大 max_process_memory（需重启）。")]
+        "处置：先看是哪些应用的并发、哪些 SQL 需要大内存（gaussdb-topsql 按内存 / 落盘排、gaussdb-memanalyze）；"
+        "全局 work_mem 与并发上限超出内存预算属配置基线问题，请运维核对后把全局值收回去；"
+        "确实需要大内存的个别 SQL，只在它的会话级调大 work_mem。")]
 
 
 def _weak_password_crypto(st: Dict[str, Setting]) -> List[Finding]:
@@ -191,7 +193,7 @@ def _weak_password_crypto(st: Dict[str, Setting]) -> List[Finding]:
         s_.raw, ">=2（2=sha256，3=sm3）",
         "当前取值会以 MD5 兼容方式存储口令散列 —— 建用户时内核自己就会提示"
         "「contains MD5 ciphertext, which is not secure」。"
-        "处置：改为 2（sha256）或 3（sm3）（%s）；**已存在的用户口令不会自动升级**，"
+        "处置：与安全基线不符，请运维核对：改为 2（sha256）或 3（sm3）（%s）；**已存在的用户口令不会自动升级**，"
         "改完要让这些用户重设口令才会用新算法存储。" % how_to_apply(s_))]
 
 
@@ -218,7 +220,7 @@ def _no_timeouts(st: Dict[str, Setting]) -> List[Finding]:
             ("一条跑飞的 SQL 会一直跑下去" if name == "statement_timeout"
              else "一个忘了提交的事务会一直持有快照，挡住死元组回收")
             + " —— 全局不限制时没有任何兜底。批处理/数仓场景确实可能有意如此，"
-              "**请确认这是有意的**；若不是，按业务最长可接受时长设置（%s）。"
+              "**请确认这是有意的**；若不是，由运维按配置基线与业务最长可接受时长设置（%s）。"
             % how_to_apply(s)))
     return out
 

@@ -116,8 +116,8 @@
 ### B. 过程内的成本要素：子事务 / 计划缓存 / 并行
 
 - **子事务 / undo（对应反模式七）**：每个含 `EXCEPTION` 的块进入时建子事务（savepoint）。`[GaussDB]` Astore 回滚到 savepoint 丢弃新行版本（留死元组）；Ustore 走 undo 段。**循环内逐行建/释放 savepoint，成本随行数线性放大**，是高频循环里的隐形热点。改法：异常处理移出循环，或集合操作后整体容错。
-- **`[GaussDB]` 计划缓存 generic vs custom**：过程内**静态** SQL 预编译缓存计划。openGauss/GaussDB 先按当次参数生成 custom plan，多次执行后可能切 generic plan（参数无关）。**参数分布倾斜的过程里 generic plan 可能用"平均"选择性而选错**——信号是「同一过程对不同入参性能忽好忽坏」。处置：必要时（版本支持）`plan_cache_mode` 强制 custom，或拆分。动态 SQL（`EXECUTE`）不吃缓存、每次重解析。
-- **`[GaussDB]` Streaming / query_dop**：循环改成集合化 SQL 后，大数据量可能被 SMP 并行（计划出现 `Streaming`），`query_dop` 控并行度。**并行是否在过程内生效与 GUC/版本有关**，且 Streaming 的重分布/广播本身有成本——集合化收益要在测试实例实测，不能假设一定更快。
+- **`[GaussDB]` 计划缓存 generic vs custom**：过程内**静态** SQL 预编译缓存计划。openGauss/GaussDB 先按当次参数生成 custom plan，多次执行后可能切 generic plan（参数无关）。**参数分布倾斜的过程里 generic plan 可能用"平均"选择性而选错**——信号是「同一过程对不同入参性能忽好忽坏」。处置：在应用侧按入参分布拆分过程或语句（例如数据量大的入参与小的分两支），让每支的计划稳定；`plan_cache_mode` 一类参数不作为建议。动态 SQL（`EXECUTE`）不吃缓存、每次重解析。
+- **`[GaussDB]` Streaming / 并行**：循环改成集合化 SQL 后，大数据量可能被 SMP 并行（计划出现 `Streaming`），并行度由实例参数决定、不作为建议。**并行是否在过程内生效与实例配置、版本有关**，且 Streaming 的重分布/广播本身有成本——集合化收益要在测试实例实测，不能假设一定更快。
 
 ### C. `[GaussDB]` 存储引擎：Ustore vs Astore（更新密集过程）
 

@@ -5,7 +5,7 @@
 
 ```
 acceptance/
-  bank/v1/A-health.yaml … K-kbimport.yaml   题库 v1:11 个方面、48 题,每题一份评分标准
+  bank/v1/A-health.yaml … K-kbimport.yaml   题库 v1:11 个方面、53 题,每题一份评分标准
   fixtures/                                 题目要贴给智能体的材料与它们的真值(truth.yaml);make_fixtures.py 生成扫描件 PDF
   check_bank.py                             离线校验:分值、技能、知识库编号、真值、占位符、版式开关
   run.py                                    跑一轮:换验收知识库 → 造故障 → 问题 → 还原 → 评分 → 报告;也能单独评分、还原
@@ -26,7 +26,7 @@ python3 acceptance/fixtures/make_fixtures.py --out /tmp/acc-fixtures   # 生成 
 ```bash
 cp acceptance/run.example.yaml ~/.acceptance/run.yaml && chmod 600 ~/.acceptance/run.yaml   # 第一次:按本机改
 python3 acceptance/run.py check                                   # 自检
-python3 acceptance/run.py run --label v1.4.2                      # 完整 48 题,约 50 分钟
+python3 acceptance/run.py run --label v1.4.2                      # 完整 53 题,约 50 分钟
 python3 acceptance/run.py run --smoke --label v1.4.2-smoke        # 冒烟 15 题
 python3 acceptance/run.py run --only F1,G2 --label try            # 指定几题
 python3 acceptance/run.py score <轮次> --baseline <基线轮次>       # 重新评分 / 与基线对比(加了人工改判后)

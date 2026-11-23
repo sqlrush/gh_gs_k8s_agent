@@ -23,6 +23,7 @@ for parent in _HERE.parents:
 # 取数失败只认这一个类型。换一种数据库访问方式时，改的是访问模块，
 # 不是这里 —— 详见 common/grmp/errors.py。
 from common import access  # noqa: E402
+from common.grmp.values import as_int  # noqa: E402
 
 
 TABLES_SCRIPT = "sqlreview.tables"
@@ -73,7 +74,7 @@ def _collect_indexes(runner, schema: str) -> tuple[tuple[IndexFact, ...], list[s
                   columns=_as_tuple(r["columns"]),
                   is_unique=_as_bool(r["is_unique"]),
                   is_primary=_as_bool(r["is_primary"]),
-                  scans=int(r["scans"] or 0))
+                  scans=as_int(r["scans"]))
         for r in rows
     ), []
 

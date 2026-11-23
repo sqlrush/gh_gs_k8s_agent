@@ -43,7 +43,13 @@ from common import sqlrefs, sysdict, sysobjects
 SYSTEM, USER, UNSURE = "system", "user", "unsure"
 # 非业务 SQL 的类别(报告按类说排除了几条)
 KIND_KERNEL, KIND_SESSION, KIND_ADMIN, KIND_TOOL = "内核与数据字典", "会话设置与事务控制", "运维管理", "中间件自身"
-KINDS = (KIND_KERNEL, KIND_SESSION, KIND_ADMIN, KIND_TOOL)
+KIND_PLATFORM = "平台运维账号"
+KINDS = (KIND_KERNEL, KIND_SESSION, KIND_ADMIN, KIND_TOOL, KIND_PLATFORM)
+# 云平台自己的运维账号:它们跑的监控采样 / 备份 / 复制 SQL 不是业务,哪怕查的是看着像业务表的东西
+# (2026-11-08 行方测试报告:Top SQL 第一名是 rdsAdmin 的 ASP 采样 SQL,查的是它自己 schema 下的表,按对象认不出来)。
+# 按执行账号认;GSDB_PLATFORM_ACCOUNTS(逗号分隔)在默认之外再加,大小写不敏感。
+PLATFORM_ACCOUNTS = ("rdsadmin", "rdsbackup", "rdsmetric", "rdsrepl", "rdsproxy")
+ENV_PLATFORM_ACCOUNTS = "GSDB_PLATFORM_ACCOUNTS"
 # 中间件 schema:我方交付的白名单与配置表(scripts.sql 里的 grmp.script_config)。中间件每调一次诊断脚本都查它
 TOOL_SCHEMAS = frozenset({"grmp"})
 # 我方白名单脚本自己建的探测表(explain.multi_stmt_probe 建临时表 t_probe 验多语句)。改脚本要行方重导白名单,所以按名字认
@@ -98,6 +104,8 @@ SCREEN_MARGIN = 500
 # 补取全文的上限:每条一次中间件往返。理由同上 —— 截断的系统 SQL 可能有上百条排在业务 SQL 前面。
 # 判过的进缓存(VerdictCache),所以只有第一次跑会补这么多次;补得多时会在 stderr 说一声,不让人以为卡住了。
 MAX_LOOKUPS = 200
+# 脚本没带 user_name 时按 sql_id 补查执行账号的上限:只为排在前面的行查(榜单本身就这么长),不为 WDR 的 200 行宽榜逐条查
+MAX_ACCOUNT_LOOKUPS = 40
 _LOOKUP_NOTICE_AT = 10
 # 判定缓存:sql_id → system / user(只存靠全文判出来的)。sql_id 是归一化语句的哈希,同一个 id 就是同一条
 # 语句,判一次就够 —— 不然每次跑都要按 sql_id 一条条补全文。放在状态目录(容器里是持久卷 /nas/me/gdaa)。
@@ -323,24 +331,39 @@ class Screening:
                 "note": self.note(), "brief": self.brief()}
 
 
+def platform_accounts() -> frozenset:
+    extra = os.environ.get(ENV_PLATFORM_ACCOUNTS, "")
+    return frozenset(PLATFORM_ACCOUNTS) | {a.strip().lower() for a in extra.split(",") if a.strip()}
+
+
 def screen(rows: Iterable, *, sql_id: Callable, text: Callable, want: Optional[int] = None,
            shown_chars: Optional[int] = None, full_text: Optional[Callable[[str], Optional[str]]] = None,
            seconds: Optional[Callable] = None, max_lookups: int = MAX_LOOKUPS,
-           cache: Optional["VerdictCache"] = None) -> Screening:
+           cache: Optional["VerdictCache"] = None, user: Optional[Callable] = None) -> Screening:
     """按排名顺序走一遍,留下前 want 条非系统 SQL;走到的范围里的系统 SQL 记为排除。
 
     shown_chars:正文在 SQL 里被截到多少字(LEFT(…, n));None = 给的就是全文。
     full_text:sql_id → 全文(见 full_text_lookup);None = 不补取,截断的一律保留。
     seconds:行 → 耗时秒数,只用于说明里的「合计耗时」。
     cache:判定缓存(见 VerdictCache);先查缓存,查不到才补全文,补全文判出来的写回并在结束时落盘。
+    user:行 → 执行账号(脚本带 user_name 列时);取不到时用 full_text 顺带查到的账号(sqlfetch.from_statement 本来就返回)。
+    执行账号是平台运维账号(platform_accounts)的一律按非业务排除,类别记「平台运维账号」。
     调用方要**多取一些行**(want 之外留 SCREEN_MARGIN),否则排除掉几条之后榜就短了。
     """
     kept, excluded, ids = [], [], []
     cost, unresolved, lookups, guessed = 0.0, 0, 0, 0
     kinds: Dict[str, int] = {}
-    for row in rows:
+    platform = platform_accounts()
+    for n, row in enumerate(rows):
         if want is not None and len(kept) >= want:
             break
+        who = _account(row, sql_id, user, full_text if n < MAX_ACCOUNT_LOOKUPS else None)
+        if who and who.lower() in platform:
+            excluded.append(row)
+            ids.append(str(sql_id(row)))
+            kinds[KIND_PLATFORM] = kinds.get(KIND_PLATFORM, 0) + 1
+            cost += float(seconds(row) or 0) if seconds else 0.0
+            continue
         body = str(text(row) or "")
         # 没有正文(老基线里只存了数字)也算「不知道」,要补取
         complete = bool(body.strip()) and ((len(body) < shown_chars) if shown_chars else not looks_cut(body))
@@ -383,32 +406,54 @@ def keep_all(rows: Sequence) -> Screening:
     return Screening(kept=list(rows))
 
 
-def full_text_lookup(runner) -> Callable[[str], Optional[str]]:
-    """sql_id → 全文(取不到返回 None)。按 FULL_TEXT_SCRIPTS 的顺序试,同一个 sql_id 只取一次。
+def _account(row, sql_id: Callable, user: Optional[Callable], full_text) -> str:
+    """这一行的执行账号:脚本给了就用;没给且 full_text 能顺带查账号时按 sql_id 查(每个 sql_id 只查一次)。"""
+    who = str((user(row) if user else "") or "").strip()
+    if not who and full_text is not None and hasattr(full_text, "user"):
+        who = str(full_text.user(str(sql_id(row))) or "").strip()
+    return who
+
+
+class _FullText:
+    """sql_id → 全文(取不到返回 None),顺带记下执行账号(sqlfetch.from_statement 返回 user_name)。
+    按 FULL_TEXT_SCRIPTS 的顺序试,同一个 sql_id 只取一次。
 
     取不到的原因(脚本没登记、备机、权限、统计已清零)一律不抛:后果只是这一条保留在榜上,
     screen 会把它计入 unresolved 并写进说明 —— 不是静默吞掉。
     """
-    cache: dict = {}
 
-    def get(sid: str) -> Optional[str]:
-        if sid in cache:
-            return cache[sid]
-        cache[sid] = None
+    def __init__(self, runner):
+        self.runner, self.texts, self.users = runner, {}, {}
+
+    def __call__(self, sid: str) -> Optional[str]:
+        if sid in self.texts:
+            return self.texts[sid]
+        self.texts[sid] = None
         try:
             key = int(sid)
         except ValueError:
             return None
         for script in FULL_TEXT_SCRIPTS:
             try:
-                rows = runner.run(script, {"sid": key})
+                rows = self.runner.run(script, {"sid": key})
             except Exception:  # noqa: BLE001 —— 换下一个来源;都不行就按业务 SQL 保留(计入 unresolved)
                 continue
+            if rows and rows[0].get("user_name") and sid not in self.users:
+                self.users[sid] = str(rows[0]["user_name"])
             body = str((rows[0].get("query") if rows else "") or "").strip()
             if body:
-                cache[sid] = body
+                self.texts[sid] = body
                 break
-        return cache[sid]
+        return self.texts[sid]
+
+    def user(self, sid: str) -> Optional[str]:
+        if sid not in self.texts:
+            self(sid)
+        return self.users.get(sid)
+
+
+def full_text_lookup(runner) -> _FullText:
+    return _FullText(runner)
 
     return get
 

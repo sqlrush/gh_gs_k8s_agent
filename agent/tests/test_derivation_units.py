@@ -131,11 +131,13 @@ def test_report_shows_per_term_arithmetic():
     assert "实测" in report
 
 
-def test_report_shows_which_variant_was_used():
-    """「用了哪一版公式」是测出来的，报告里要写清楚是哪一版。"""
-    report = derivation.render_report(_calibration(), COST, [_fresh()])
-    assert "min_io_split_seq" in report
-    assert "不是假设的" in report
+def test_report_does_not_print_the_cost_variant():
+    """「用了哪一版公式」是测出来的,结果留在 calibration 对象里给维护者核对;报告站在应用 / 运维 DBA 角度,
+    不印优化器内部常数的变体名(2026-11-05)。"""
+    cal = _calibration()
+    report = derivation.render_report(cal, COST, [_fresh()])
+    assert "min_io_split_seq" not in report and "内核版本变体" not in report
+    assert cal.variant.min_io_split_seq is not None
 
 
 def test_report_lists_actual_cost_constants():

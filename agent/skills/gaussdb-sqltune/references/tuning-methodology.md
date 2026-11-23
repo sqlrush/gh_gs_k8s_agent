@@ -27,12 +27,11 @@
 
 ## 4. GUC 审查(对照 `## Key Parameters (GUC)`)
 
-| 参数 | 经验法则 |
+| 参数 | 怎么用 |
 |---|---|
-| work_mem | Sort/Hash 溢出 → 先会话级调高,别全局 |
-| effective_cache_size | 应反映可用 OS 缓存;过低会让优化器偏离索引扫描 |
-| random_page_cost | SSD 存储 → 1.1–2.0;默认 4 过度惩罚索引扫描 |
-| default_statistics_target | 倾斜数据按列调高,然后 ANALYZE |
+| work_mem | Sort/Hash 溢出 → 先改 SQL(加过滤、分页、用索引避免排序);确有必要时只对这条 SQL 的会话级调高,不动全局 |
+| effective_cache_size、random_page_cost | 实例级代价参数,读出来解释计划为什么这么选;不作为建议 |
+| 列统计目标 | 倾斜数据只对那一列在表级调高统计目标(不动全局 default_statistics_target),然后 ANALYZE |
 
 并行执行类参数(`max_parallel_workers_per_gather`、GaussDB 的 `query_dop`)**不作为调优建议**:
 用并行换时延是把单条 SQL 的负载摊给整个系统,生产温和性策略禁止(见 SKILL.md)。

@@ -8,6 +8,9 @@
     产品内部规则(按标签选 Pod 的)取新清单;资源配置里明确填了网段的,覆盖对应的那一类。
   - 命名空间、PVC 只在首次部署时建;Secret 不在这里(见 steps)。
   - 池子:升级时只改 StatefulSet 模板里的镜像(池子规模、资源限额都保留),首次部署才调 render-pool.py。
+  - Fuyao 运行模式:清单取 k8s/overlays/fuyao(= base + k8s/fuyao 的状态服务、凭据代理服务 + 网关切 fuyao 的补丁),
+    镜像与 base 同一套改名 / 改标签;gateway-config 的 FUYAO_RUNTIME_TEMPLATE / FUYAO_IMPORT_TEMPLATE 由发版台管
+    (目标版本的模板名,调用方算好传进来)。发版台不切换运行模式:资源配置里写了别的模式就报问题。
 """
 from __future__ import annotations
 
@@ -21,12 +24,19 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import yaml
 
+from .plan import FUYAO
+
 IMAGE = re.compile(r"^(?:.*/)?(gaussdb-agent-[a-z-]+):[\w.-]+$")
 PLACEHOLDER = "10.0.0.0/8"
-MANAGED = {("gateway-config", "USER_IMAGE_TAG"), ("gateway-config", "USER_IMAGE_REGISTRY")}
+MANAGED = {("gateway-config", "USER_IMAGE_TAG"), ("gateway-config", "USER_IMAGE_REGISTRY"),
+           ("gateway-config", "FUYAO_RUNTIME_TEMPLATE"), ("gateway-config", "FUYAO_IMPORT_TEMPLATE")}
+FUYAO_TEMPLATE_KEYS = {"runtime": ("gateway-config", "FUYAO_RUNTIME_TEMPLATE"),
+                       "kb-import": ("gateway-config", "FUYAO_IMPORT_TEMPLATE")}
 SENSITIVE = {"GRMP_PATH_PREFIX"}            # 中间件路径前缀:界面与日志只显示「已设置」
 KEEP_WHOLE = {"agent-roles"}
-NAMESPACED_REFS = (("RoleBinding", "subjects"),)
+NAMESPACED_REFS = (("RoleBinding", "subjects"), ("ClusterRoleBinding", "subjects"))
+# 集群级对象:不写 metadata.namespace(与 kubectl kustomize 一致);ClusterRoleBinding 的 subject 命名空间照样跟着改
+CLUSTER_SCOPED = ("ClusterRole", "ClusterRoleBinding", "PersistentVolume")
 
 # 资源配置字段 → (ConfigMap, 键)。只在资源配置里填了非空值时覆盖集群现值。
 CONFIG_KEYS: Dict[str, Tuple[str, str]] = {
@@ -92,18 +102,61 @@ def ref(doc: dict) -> str:
 
 # -- 读清单 --------------------------------------------------------------------------------------
 
+def _yaml_docs(path: pathlib.Path) -> List[dict]:
+    return [d for d in yaml.safe_load_all(path.read_text(encoding="utf-8")) if d]
+
+
+def _kustomization(d: pathlib.Path, label: str, allowed: Sequence[str]) -> dict:
+    kz = yaml.safe_load((d / "kustomization.yaml").read_text(encoding="utf-8")) or {}
+    extra = set(kz) - set(allowed)
+    if extra:
+        raise RenderError("%s/kustomization.yaml 用到了发版台不认识的写法:%s" % (label, sorted(extra)))
+    return kz
+
+
+def _load_resources(d: pathlib.Path, label: str) -> List[dict]:
+    """只有 resources(都是文件,没有补丁、生成器)的 kustomization:k8s/base、k8s/fuyao。"""
+    kz = _kustomization(d, label, ("apiVersion", "kind", "resources"))
+    return [doc for res in kz.get("resources") or [] for doc in _yaml_docs(d / res)]
+
+
 def load_base(k8s_root: pathlib.Path) -> List[dict]:
     """k8s/base:kustomization 只有 resources(没有补丁、生成器)—— 出现别的写法说明清单的组织变了,直接报错让人看。"""
-    base = k8s_root / "base"
-    kz = yaml.safe_load((base / "kustomization.yaml").read_text(encoding="utf-8")) or {}
-    extra = set(kz) - {"apiVersion", "kind", "resources"}
-    if extra:
-        raise RenderError("k8s/base/kustomization.yaml 用到了发版台不认识的写法:%s" % sorted(extra))
+    return _load_resources(k8s_root / "base", "k8s/base")
+
+
+def _patch_configmap(docs: List[dict], patch: dict, label: str) -> List[dict]:
+    """overlay 的补丁只认 ConfigMap 的 data(按键合并,同 kustomize 的 strategic merge)。返回新的 docs。"""
+    name = (patch.get("metadata") or {}).get("name")
+    if patch.get("kind") != "ConfigMap" or set(patch) - {"apiVersion", "kind", "metadata", "data"}:
+        raise RenderError("%s 的补丁 %s 发版台不认识:只认改 ConfigMap 的 data" % (label, ref(patch)))
+    if not any(d.get("kind") == "ConfigMap" and d["metadata"]["name"] == name for d in docs):
+        raise RenderError("%s 的补丁 %s 找不到要改的 ConfigMap" % (label, ref(patch)))
+    return [dict(d, data=dict(d.get("data") or {}, **(patch.get("data") or {})))
+            if d.get("kind") == "ConfigMap" and d["metadata"]["name"] == name else d for d in docs]
+
+
+def load_overlay(k8s_root: pathlib.Path, name: str) -> List[dict]:
+    """k8s/overlays/<name>:resources 是目录(各自只有 resources 的 kustomization)或文件,patches 只认 [{path: 文件}]、
+    只改 ConfigMap 的 data。用 kubectl kustomize 也能渲染,这里自己读:渲染是纯函数(测试不需要 kubectl),
+    出现别的写法同样直接报错。"""
+    d, label = k8s_root / "overlays" / name, "k8s/overlays/" + name
+    if not (d / "kustomization.yaml").is_file():
+        raise RenderError("目标版本的清单包里没有 %s:这个版本不支持 %s 运行模式" % (label, name))
+    kz = _kustomization(d, label, ("apiVersion", "kind", "resources", "patches"))
+    root = k8s_root.resolve()
     docs: List[dict] = []
     for res in kz.get("resources") or []:
-        for d in yaml.safe_load_all((base / res).read_text(encoding="utf-8")):
-            if d:
-                docs.append(d)
+        p = (d / res).resolve()
+        if root not in p.parents:
+            raise RenderError("%s 引用了 k8s/ 以外的 %s" % (label, res))
+        rel = "k8s/" + p.relative_to(root).as_posix()
+        docs += _load_resources(p, rel) if p.is_dir() else _yaml_docs(p)
+    for item in kz.get("patches") or []:
+        if not isinstance(item, dict) or set(item) != {"path"}:
+            raise RenderError("%s 的 patches 只认 [{path: 文件}]:%s" % (label, item))
+        for patch in _yaml_docs(d / item["path"]):
+            docs = _patch_configmap(docs, patch, label)
     return docs
 
 
@@ -115,8 +168,9 @@ def set_namespace(docs: List[dict], ns: str) -> None:
         if d.get("kind") == "Namespace":
             md["name"] = ns
             continue
-        md["namespace"] = ns
-        if d.get("kind") == "RoleBinding":
+        if d.get("kind") not in CLUSTER_SCOPED:
+            md["namespace"] = ns
+        if d.get("kind") in ("RoleBinding", "ClusterRoleBinding"):
             for s in d.get("subjects") or []:
                 if s.get("kind") == "ServiceAccount":
                     s["namespace"] = ns
@@ -153,13 +207,15 @@ def retarget(docs: List[dict], registry: str, tag: str, digests: Optional[Dict[s
 
 
 def migrate_configmaps(docs: List[dict], cluster: Dict[str, Dict[str, str]], cfg: Dict[str, Any],
-                       registry: str, tag: str) -> List[Change]:
-    """cluster: ConfigMap 名 → 集群里现在的 data(不存在的不出现)。就地改 docs 里的 ConfigMap,返回逐键变化。"""
+                       registry: str, tag: str, managed: Optional[Dict[Tuple[str, str], str]] = None) -> List[Change]:
+    """cluster: ConfigMap 名 → 集群里现在的 data(不存在的不出现)。就地改 docs 里的 ConfigMap,返回逐键变化。
+    managed:另外由发版台管的键((ConfigMap, 键) → 值,如 Fuyao 模式的模板名)。"""
     changes: List[Change] = []
     overrides: Dict[Tuple[str, str], str] = {v: str(cfg[k]) for k, v in CONFIG_KEYS.items()
                                              if cfg.get(k) not in (None, "")}
     overrides[("gateway-config", "USER_IMAGE_TAG")] = tag
     overrides[("gateway-config", "USER_IMAGE_REGISTRY")] = registry
+    overrides.update(managed or {})
     for d in docs:
         if d.get("kind") != "ConfigMap":
             continue
@@ -284,14 +340,32 @@ def pool_image_patch(sts: dict, image: str) -> Dict[str, Any]:
 
 # -- 合在一起 ----------------------------------------------------------------------------------------
 
+def _mode_inputs(mode: str, cfg: Dict[str, Any], templates: Optional[Dict[str, str]]
+                 ) -> Tuple[Dict[str, Any], Dict[Tuple[str, str], str], List[str]]:
+    """按运行模式定:生效的资源配置、发版台另管的键、问题。Fuyao:运行模式不由资源配置改,模板名由发版台管。"""
+    if mode != FUYAO:
+        return cfg, {}, []
+    if set(templates or {}) != set(FUYAO_TEMPLATE_KEYS):
+        raise RenderError("Fuyao 模式要给两种模板名(%s),实际 %s" % ("、".join(FUYAO_TEMPLATE_KEYS), sorted(templates or {})))
+    want = str(cfg.get("gateway.runtime_mode") or "")
+    problems = [] if want in ("", FUYAO) else [
+        "资源配置的运行模式是「%s」,集群是 fuyao:发版台不切换运行模式,把资源配置的「运行模式」改回空" % want]
+    effective = {k: v for k, v in cfg.items() if k != "gateway.runtime_mode"}
+    return effective, {FUYAO_TEMPLATE_KEYS[k]: v for k, v in templates.items()}, problems
+
+
 def render(k8s_root: pathlib.Path, cfg: Dict[str, Any], tag: str, cluster_cms: Dict[str, Dict[str, str]],
            cluster_netpols: Dict[str, dict], existing: Sequence[str], required: Sequence[dict],
-           digests: Optional[Dict[str, str]] = None) -> Rendered:
-    """existing:集群里已有的对象(「Kind/name」),用来跳过命名空间与 PVC。digests:镜像 → 平台清单 digest(钉住用)。"""
+           digests: Optional[Dict[str, str]] = None, mode: str = "",
+           templates: Optional[Dict[str, str]] = None) -> Rendered:
+    """existing:集群里已有的对象(「Kind/name」),用来跳过命名空间与 PVC。digests:镜像 → 平台清单 digest(钉住用)。
+    mode:集群的运行模式;fuyao 时清单取 k8s/overlays/fuyao,templates(种类 → 模板名)写进 gateway-config。"""
+    cfg, managed, mode_problems = _mode_inputs(mode, cfg, templates)
     ns = cfg.get("k8s.namespace") or "gaussdb-agent"
     registry = str(cfg.get("registry.prefix") or "").rstrip("/")
     fresh = "Deployment/gateway" not in existing
-    out = Rendered(docs=copy.deepcopy(load_base(k8s_root)))
+    out = Rendered(docs=copy.deepcopy(load_overlay(k8s_root, FUYAO) if mode == FUYAO else load_base(k8s_root)),
+                   problems=list(mode_problems))
     keep = []
     for d in out.docs:
         r = ref(d)
@@ -303,7 +377,7 @@ def render(k8s_root: pathlib.Path, cfg: Dict[str, Any], tag: str, cluster_cms: D
     out.docs = keep
     set_namespace(out.docs, ns)
     retarget(out.docs, registry, tag, digests)
-    out.changes = migrate_configmaps(out.docs, cluster_cms, cfg, registry, tag)
+    out.changes = migrate_configmaps(out.docs, cluster_cms, cfg, registry, tag, managed)
     out.problems += ["必填配置没填:%s" % m for m in required_missing(out.docs, required)]
     out.problems += merge_netpols(out.docs, cluster_netpols, cfg, fresh)
     return out

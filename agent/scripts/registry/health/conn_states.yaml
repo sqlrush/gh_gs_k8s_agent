@@ -8,9 +8,9 @@
 #
 # 同时给 count(*) 加了别名 cnt。
 #
-# **改动（2026-10-24 faultlab）：加 WHERE sessionid <> 0。** 开了线程池时 pg_stat_activity
+# **改动（2026-10-24 故障演练）：加 WHERE sessionid <> 0。** 开了线程池时 pg_stat_activity
 # 里有一批空闲工作线程的条目：sessionid = 0、没有客户端、不持锁（见 health.thread_pool 的说明）。
-# 不排除的话它们全算进总数和 idle —— faultlab 那轮 10:02 直接查库是 61 个会话，
+# 不排除的话它们全算进总数和 idle —— 故障演练那轮 10:02 直接查库是 61 个会话，
 # 报告写「共 65：…、idle 17」。与 health.thread_pool 的 real_sessions 同一口径。
 name: health.conn_states
 description: 连接状态分布

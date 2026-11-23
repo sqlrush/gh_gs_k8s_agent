@@ -90,6 +90,15 @@ def main(argv: Sequence[str] = None) -> int:
         "--standby", action="store_true",
         help="模拟备机：读 statement_history 的脚本回 HTTP 400 + unlogged 报错，health.overview 的 in_recovery 置 t",
     )
+    parser.add_argument(
+        "--bank-like", action="store_true",
+        help="行方模式:一条脚本里有多条语句时回 HTTP 400、执行失败只回「agent诊断脚本执行失败」(与行方真实 GRMP 一致)",
+    )
+    parser.add_argument("--dbname-missing", choices=("reject", "postgres"), default="reject",
+                        help="appbusiness 的脚本没带 dbName 时:按行方实测报「数据库[]在目标高斯实例中不存在」(默认,11-11 现场)"
+                             "或连实例默认库(postgres,旧假设)")
+    parser.add_argument("--dbname-on-postgres", choices=("ignore", "reject"), default="ignore",
+                        help="postgres 的脚本带了 dbName 时:忽略或报错。行方未答复前默认忽略")
     # 2026-09-18 中间件加固:给了 --appkey 就在 auth 之外校验 Appkey / Timestamp / Signature
     parser.add_argument("--appkey", default="", help="登记的调用方应用名;给了即开启签名校验")
     parser.add_argument("--sm2-public-key", default="", help="该 Appkey 的 SM2 公钥:hex(X‖Y)或 @文件(PEM)")
@@ -140,6 +149,10 @@ def main(argv: Sequence[str] = None) -> int:
         statement_timeout=args.statement_timeout,
         standby=args.standby,
         signature=policy,
+        single_statement=args.bank_like,
+        opaque_errors=args.bank_like,
+        dbname_missing=args.dbname_missing,
+        dbname_on_postgres=args.dbname_on_postgres,
     )
     if policy is not None:
         print("签名校验:开启(Appkey=%s, userId=%r, %s/%s/%s, 窗口 ±%ds)" % (

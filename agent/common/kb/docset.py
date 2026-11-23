@@ -375,10 +375,28 @@ def update_index_state(root: pathlib.Path, state: Dict[str, Any]) -> None:
     write_text_atomic(root / "manifest.json", json.dumps(m, ensure_ascii=False, indent=1))
 
 
+def retired_root(kb: pathlib.Path) -> pathlib.Path:
+    """整套退役的文档集放在这里(retire()),每套一个 <代号>-<日期>/ 目录。"""
+    return pathlib.Path(kb) / "archive" / DOCSETS_DIR
+
+
+def find_retired_item(kb: pathlib.Path, item_id: str) -> Optional[pathlib.Path]:
+    """退役文档集里的这条(引用核对要区分「已退役」与「编造」)。同一代号退役过几次的,取日期最新的那份。"""
+    code = code_of(item_id)
+    root = retired_root(kb)
+    if not code or not root.is_dir():
+        return None
+    for d in sorted(root.glob(f"{code}-*"), reverse=True):
+        p = d / "items" / f"{item_id}.md"
+        if d.is_dir() and p.is_file():
+            return p
+    return None
+
+
 def retire(kb: pathlib.Path, code: str) -> pathlib.Path:
     """整套退役:移到 archive/docsets/<代号>-<日期>/。ID 表跟着走,号永不复用。"""
     ds = get(kb, code)
-    dest = pathlib.Path(kb) / "archive" / DOCSETS_DIR / f"{code}-{datetime.date.today().isoformat()}"
+    dest = retired_root(kb) / f"{code}-{datetime.date.today().isoformat()}"
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
         shutil.rmtree(dest)
@@ -387,6 +405,6 @@ def retire(kb: pathlib.Path, code: str) -> pathlib.Path:
 
 
 __all__ = ["DocsetError", "Docset", "DOCSETS_DIR", "SCHEMA", "CODE_RE", "ID_RE", "SEP", "docsets_root",
-           "installed", "get", "load_manifest", "load_catalog", "code_of", "find_item", "scan", "unpacked_root",
+           "installed", "get", "load_manifest", "load_catalog", "code_of", "find_item", "retired_root", "find_retired_item", "scan", "unpacked_root",
            "split_all", "topic_map_rows", "read_plan", "overrides", "summaries", "build_items", "assign_ids",
            "render_item", "render_page", "apply", "swap_in", "update_index_state", "retire"]

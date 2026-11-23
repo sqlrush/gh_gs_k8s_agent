@@ -12,6 +12,76 @@
 # 版本从新到旧;第一条必须是本仓库清单里的版本(守卫测试)。min_upgrade_from 之前的版本按《部署上线方案》§14 手工升级。
 min_upgrade_from: agent-v1.4.0
 versions:
+  - version: agent-v1.5.0
+    mixed_with: [agent-v1.4.14]   # 网关改了(新增 Fuyao 模式与资源大盘),与池子管家的协议、会话文件格式不变,槽位换到哪版用哪版
+    required: []                  # Fuyao 是新增的可选模式,按需与固定池化升级没有必须新填的配置
+    steps: [rebuild_kb_import]    # 导入镜像里的启动脚本与容器内程序换了
+    whitelist: [scripts-delta-20261119.sql]
+    notes:
+      - "白名单增量 20261119 更新 4 条(业务库脚本的拼接改用 concat,M 兼容业务库上原来整条报错),导完仍是 132 条;还在 v1.4.13 白名单的先导 20261116"
+      - "(按需)换过根规范的,用本版本的离线包重做 rootspec-overlay.sh 再推内网仓库(版本说明 v1.4.5「根规范模板替换」)"
+      - "用技能包装在自有环境的:scripts/ 与 common/ 放同一层、设好 GSDB_SKILLS_DIR,装完跑一次部署自检(版本说明 v1.5.0)"
+      - "Fuyao 沙箱模式(预览)是新增的可选运行模式,发版台不切换运行模式;要试用的按《Fuyao沙箱部署手册》首次部署,只用于测试环境"
+  - version: agent-v1.4.14
+    mixed_with: [agent-v1.4.13, agent-v1.4.12, agent-v1.4.11]  # 网关没改;会话文件格式不变,槽位换到哪版用哪版
+    required: []
+    steps: [rebuild_kb_import]    # 导入镜像里的公共代码换了
+    whitelist: [scripts-delta-20261116.sql]
+    notes:
+      - "(按需)换过根规范的,用本版本的离线包重做 rootspec-overlay.sh 再推内网仓库(版本说明 v1.4.5「根规范模板替换」)"
+      - "白名单增量 20261116 只更新 2 条(死元组清单、锁堵塞成对明细的时间差写法),还在 138 条的先导 20261112"
+  - version: agent-v1.4.13
+    mixed_with: [agent-v1.4.12, agent-v1.4.11]  # 网关没改;会话文件格式不变,槽位换到哪版用哪版
+    required: []
+    steps: [rebuild_kb_import]    # 导入镜像里的公共代码换了
+    whitelist: [scripts-delta-20261112.sql]
+    notes:
+      - "(按需)换过根规范的,用本版本的离线包重做 rootspec-overlay.sh 再推内网仓库(版本说明 v1.4.5「根规范模板替换」)"
+      - "导入白名单前可用 agent/tools/compare_whitelist.py 核对行方现有白名单,按它给出的顺序导增量;8 条两段 SQL 的旧脚本可保留"
+  - version: agent-v1.4.12
+    mixed_with: [agent-v1.4.11, agent-v1.4.10]  # 网关没改;会话文件格式不变,槽位换到哪版用哪版
+    required: []
+    steps: [rebuild_kb_import]    # 导入镜像里的公共代码换了
+    whitelist: []                 # 脚本与 v1.4.11 相同;从 v1.4.10 升级时 20261111 由 v1.4.11 那条带上
+    notes:
+      - "(按需)换过根规范的,用本版本的离线包重做 rootspec-overlay.sh 再推内网仓库(版本说明 v1.4.5「根规范模板替换」)"
+      - "行方白名单没导入 scripts-delta-20261111.sql 时本版也不报错(取数在 postgres);要切到业务库仍须导入并确认登录「已直连」"
+  - version: agent-v1.4.11
+    mixed_with: [agent-v1.4.10]  # 网关没改;切库与登录改动跟着用户镜像走,槽位换到哪版用哪版(白名单没导本版增量时不切库)
+    required: []
+    steps: [rebuild_kb_import]    # 导入镜像里的公共代码换了
+    whitelist: [scripts-delta-20261111.sql]
+    notes:
+      - "(按需)换过根规范的,用本版本的离线包重做 rootspec-overlay.sh 再推内网仓库(版本说明 v1.4.5「根规范模板替换」)"
+      - "切到业务库要行方中间件支持 dbName、并导入 scripts-delta-20261111.sql;导入后用 --database <业务库> 登录看到「已直连」即生效"
+  - version: agent-v1.4.10
+    mixed_with: [agent-v1.4.9, agent-v1.4.8]  # 网关没改;技能修复与自检跟着镜像走,槽位换到哪版用哪版(新脚本没导时按旧口径降级)
+    required: []
+    steps: [rebuild_kb_import]    # 导入镜像里的公共代码换了(系统 SQL 筛选、版本号)
+    whitelist: [scripts-delta-20261108.sql]
+    notes:
+      - "(按需)换过根规范的,用本版本的离线包重做 rootspec-overlay.sh 再推内网仓库(版本说明 v1.4.5「根规范模板替换」)"
+  - version: agent-v1.4.9
+    mixed_with: [agent-v1.4.8, agent-v1.4.7]  # 网关没改;只改了登录技能(库名核对不再拦),槽位换到哪版用哪版
+    required: []
+    steps: []                     # 导入镜像只有登录技能的文档与代码变了,导入环境不用登录技能,不必重建
+    whitelist: []
+    notes:
+      - "(按需)换过根规范的,用本版本的离线包重做 rootspec-overlay.sh 再推内网仓库(版本说明 v1.4.5「根规范模板替换」)"
+  - version: agent-v1.4.8
+    mixed_with: [agent-v1.4.7]  # 网关没改;只改了技能(登录放行实例上存在的库、取数库另记),槽位换到哪版用哪版
+    required: []
+    steps: [rebuild_kb_import]    # 导入镜像里的公共代码换了(连接多一个取数库字段)
+    whitelist: []                 # 不新增脚本:按 id 看历史计划用的 explain.plan_from_history 已在 20261022 增量里
+    notes:
+      - "(按需)换过根规范的,用本版本的离线包重做 rootspec-overlay.sh 再推内网仓库(版本说明 v1.4.5「根规范模板替换」)"
+  - version: agent-v1.4.7
+    mixed_with: [agent-v1.4.6]  # 网关没改;技能与提示词跟着镜像走,槽位换到哪版用哪版(新脚本没导时技能按旧口径降级)
+    required: []
+    steps: [rebuild_kb_import]    # 导入镜像换了(红线与导入技能的文档更正)
+    whitelist: [scripts-delta-20261105.sql]
+    notes:
+      - "(按需)换过根规范的,用本版本的离线包重做 rootspec-overlay.sh 再推内网仓库(版本说明 v1.4.5「根规范模板替换」)"
   - version: agent-v1.4.6
     mixed_with: [agent-v1.4.5]  # 网关没改;槽位里的提示词与技能跟着镜像走,换到哪版用哪版
     required: []

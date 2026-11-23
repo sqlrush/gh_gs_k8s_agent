@@ -9,15 +9,14 @@ metadata:
   name: gateway-config
   namespace: gaussdb-agent
 data:
-  USER_IMAGE_TAG: "agent-v1.4.6-oc1.18.27"
-  # 用户 Pod 镜像的仓库前缀,与网关镜像推在同一个仓库时填同一个前缀,例如 registry.example/gaussdb-agent
+  USER_IMAGE_TAG: "agent-v1.5.0-oc1.18.27"
+  # 用户 Pod 镜像的仓库前缀,与网关、前端镜像推在同一个仓库时填同一个前缀,例如 registry.example/gaussdb-agent
   # (网关据此建 registry.example/gaussdb-agent/gaussdb-agent-runtime:<USER_IMAGE_TAG>)。
   # 留空 = 不带前缀,只适用于镜像直接载在每个节点上的环境(kind load / docker load)。
   USER_IMAGE_REGISTRY: ""
   PULL_POLICY: "IfNotPresent"
 
-  # 前端的 Service 名(/dash/* 代理到它)。前端由前端方部署(样例 k8s/base/frontend.example.yaml);
-  # 没部署时这条路回 502,不影响对话与报告。
+  # 大盘前端的 Service 名(/dash/* 代理到它)。没部署前端镜像时这条路回 502,不影响对话与报告。
   FRONTEND_SERVICE: "frontend"
 
   # 上游 SSO / WAF 把工号放在哪个请求头里。按客户实际填。
@@ -27,6 +26,10 @@ data:
   ROLES_HEADER: "X-Agent-Roles"
   # 哪些角色值算「知识库管理员」(会多建一个 kb-import Pod)。逗号分隔,大小写不敏感。
   KB_ADMIN_ROLES: "kb-admin"
+  # 哪些角色值算「运维管理员」(能看大盘的「资源大盘」页)。另外工号登记在 agent-roles 的 ops-admins 里的人也算。
+  OPS_ADMIN_ROLES: "ops-admin"
+  # 产品名:大盘的标题、左上角 logo、文艺风格的日报报头都用它。至多 40 个字符,不含 < > " ' &。
+  PRODUCT_NAME: "GaussDB 智能体"
 
   # 回收模式:
   #   scale   缩到 0 副本,重连再拉起 —— 省掉镜像拉取与冷启动,代价是占着 Deployment(默认)
@@ -55,6 +58,26 @@ data:
   POOL_FREE_SLOTS: "1"              # 每个 Pod 后台至少留几个空闲槽位给新人(≥0)
   POOL_SWEEP_SECONDS: "30"          # 清扫多久一轮:报活动、转保留、腾挪、核验(≥5)
   POOL_WAIT_SECONDS: "60"           # 一次请求为分配最多等多久;等不到回等待页,页面 30 秒自动重试(≥10)
+  # —— Fuyao 运行模式(RUNTIME_MODE: "fuyao")才用到下面这组;模板与沙箱组由平台方给,集群服务地址写 ClusterIP ——
+  FUYAO_API: ""                     # OpenSandbox 地址,如 http://opensandbox-server.flux-system.svc:80;平台开认证后 API Key 放 Secret fuyao-api
+  FUYAO_RUNTIME_TEMPLATE: ""        # 诊断环境的 E2B 模板名(scripts/build-e2b-template.py 构建)
+  FUYAO_RUNTIME_GROUP: ""           # 诊断环境的沙箱组
+  FUYAO_IMPORT_TEMPLATE: ""         # 导入环境的 E2B 模板名
+  FUYAO_IMPORT_GROUP: ""            # 导入环境的沙箱组
+  FUYAO_CPU: "2"                    # 建沙箱请求里的资源字段(平台要求必填;虚拟机实际规格由模板决定)
+  FUYAO_MEMORY: "4Gi"
+  FUYAO_SANDBOX_TIMEOUT: "0"        # 沙箱寿命(秒)。0 = 不设(推荐:平台不自动删,生命周期由网关管);平台强制要求时
+                                    # 填 ≥1800、不超过平台上限 —— 平台到点直接删且不能续期(实测),网关在到期前 15 分钟收尾后删除
+  FUYAO_IDLE_SECONDS: "1800"        # 闲置多久收尾同步并暂停(≥300)
+  FUYAO_RETAIN_DAYS: "7"            # 暂停多少天后删除;数据早已写回 NAS(≥1)
+  FUYAO_PAUSE: "1"                  # 平台不支持暂停时设 0:闲置即收尾后删除
+  FUYAO_SWEEP_SECONDS: "30"         # 清扫多久一轮(≥5)
+  FUYAO_WAIT_SECONDS: "90"          # 一次请求为准备沙箱最多等多久;等不到回等待页(≥10)
+  # 状态服务(k8s/fuyao/statesvc.yaml)与凭据代理服务(k8s/fuyao/credproxy.yaml)的地址。留空 = 按网关所在命名空间推导
+  # (http://statesvc.<命名空间>.svc:8090、http://credproxy.<命名空间>.svc:8091),换命名空间部署不用改;
+  # 网关解析成 ClusterIP 再下发给沙箱(沙箱解析不了集群域名)。服务不在网关的命名空间时才填。
+  FUYAO_STATE_URL: ""
+  FUYAO_CREDPROXY_URL: ""
 
   # 允许携带工号头的来源网段(上游 SSO / Ingress 的地址),逗号分隔。
   # 与 Secret 里的 TRUST_SECRET 两道门任一即可,但**两者不能都为空** —— 都空网关拒绝启动。

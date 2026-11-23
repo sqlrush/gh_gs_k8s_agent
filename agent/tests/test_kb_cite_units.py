@@ -98,3 +98,39 @@ def test_library_name_must_match_the_id_type():
     assert kb_cite.library_mismatches(text) == [("本行规范库", "RB-LCK-001", "处置手册库")]
     assert "这个编号属于处置手册库" in kb_cite.render_mismatches(kb_cite.library_mismatches(text))
     assert kb_cite.library_mismatches("没有引用") == []
+
+
+# ---- 官方文档集(2026-11-19):PD-<代号>-<5 位> 的条目在 <kb>/docsets/<代号>/items/,不在类型化条目里 ----------------
+# 11-02 诊断容器实测:cite-check 只按 kbtypes.load_items 认 ID,官方文档集的引用一律判「未找到 · 疑似编造」,
+# 退出码 2 —— 模型按规矩会把这些正确的官方引用删掉。
+
+def _docset(kb, code, ids, archived_as=""):
+    import json
+    root = (kb / "archive" / "docsets" / archived_as) if archived_as else (kb / "docsets" / code)
+    (root / "items").mkdir(parents=True)
+    (root / "manifest.json").write_text(json.dumps({"schema": "docset-1", "code": code, "product": "GaussDB",
+                                                    "versions": ["*"]}), encoding="utf-8")
+    for i in ids:
+        (root / "items" / f"{i}.md").write_text(f"---\nid: {i}\ntype: product\n---\n## 摘要\n官方文档条目\n", encoding="utf-8")
+
+
+def test_official_docset_ids_are_found_retired_or_missing(tmp_path, capsys):
+    kb = _kb(tmp_path)
+    _docset(kb, "G25132C", ["PD-G25132C-01481"])
+    _docset(kb, "G24100A", ["PD-G24100A-00007"], archived_as="G24100A-2026-10-01")     # 整套退役的旧文档集
+    by = {c.token: c for c in kb_cite.check("参数默认 20 分钟(PD-G25132C-01481);旧版写法见 PD-G24100A-00007;"
+                                          "另见 PD-G25132C-99999。", kb)}
+    assert by["PD-G25132C-01481"].status == "存在", "在用的官方文档集条目"
+    assert by["PD-G24100A-00007"].status == "已退役" and "退役" in by["PD-G24100A-00007"].note, "不能当成编造"
+    assert by["PD-G25132C-99999"].status == "未找到" and by["PD-G25132C-99999"].note == "疑似编造"
+    assert kbmain.main(["cite-check", "--kb", str(kb), "--text", "见 PD-G25132C-01481 与 PD-G24100A-00007"]) == 0
+    out = capsys.readouterr().out
+    assert "✓ PD-G25132C-01481" in out and "⚠ PD-G24100A-00007  已退役" in out and "1 个需注意" in out
+    assert kbmain.main(["cite-check", "--kb", str(kb), "--text", "见 PD-G25132C-99999"]) == 2
+
+
+def test_a_docset_that_was_retired_and_reinstalled_counts_as_in_use(tmp_path):
+    kb = _kb(tmp_path)
+    _docset(kb, "G25132C", ["PD-G25132C-01481"], archived_as="G25132C-2026-11-01")
+    _docset(kb, "G25132C", ["PD-G25132C-01481"])
+    assert kb_cite.check("PD-G25132C-01481", kb)[0].status == "存在", "在用的优先"

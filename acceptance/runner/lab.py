@@ -1,6 +1,6 @@
 """faultlab 这一侧:造故障、边造边记下各场景会话的 pid 与 sql_id、事后读时间线,给占位符与真值用。
 
-faultlab 在技能仓库 tools/faultlab/(只动测试库的模式 fl 与用户 fl_app,实例参数不改)。这里:
+faultlab 在本仓库 agent/tools/faultlab/(2026-11-05 从技能仓库迁来;只动测试库的模式 fl 与用户 fl_app,实例参数不改)。这里:
   · 起 `faultlab.py run`(20 分钟窗口),等时间线出现「故障窗口开始」;
   · 每 20 秒以 omm 身份查一次 pg_stat_activity 里 application_name 以 fl: 开头的会话,
     记下每个场景的 pid 与 unique_sql_id({pid:K1/root}、{sql_id:S3} 由它们来);
@@ -23,7 +23,7 @@ import yaml
 
 TIMELINE = pathlib.Path.home() / ".faultlab" / "timeline.jsonl"
 FAULT_CODES = frozenset(["S%d" % i for i in range(1, 8)] + ["K%d" % i for i in range(1, 11)] + ["D"]
-                        + ["V%d" % i for i in range(1, 8)] + ["L%d" % i for i in range(1, 6)])
+                        + ["V%d" % i for i in range(1, 8)] + ["L%d" % i for i in range(1, 6)] + ["W1"])
 SAMPLE_S = 20
 # 场景的设计事实(faultlab 的 schema 与场景代码里写死的),真值直接用
 STATIC = {
@@ -34,6 +34,8 @@ STATIC = {
     "V5": {"object": "fl.bloat_slow"},
     "V6": {"object": "fl.maint_hist"},
     "V7": {"object": "fl.import_stage"},
+    "K3": {"object": "fl.payments"},
+    "W1": {"object": "fl.doc_blob", "app": "fl:W1/load"},
 }
 ACTIVITY_SQL = ("SELECT application_name, pid, unique_sql_id FROM pg_stat_activity "
                 "WHERE application_name LIKE 'fl:%' AND sessionid <> 0;")

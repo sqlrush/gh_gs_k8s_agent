@@ -23,7 +23,7 @@
 
 `## Runtime Attribution` 需要实例采集**嵌套语句**统计。未开启时 `gaussdb-proctune` 自动降级为纯静态分析（命令不失败），但拿不到「哪条 embedded SQL 真正耗时」的真实排序。
 
-- 把 `track_stmt_stat_level` 调到捕获嵌套层级（具体取值见实例文档），重采 `proctune.py collect` 即可获得真实 calls/avg/total。
+- 需运维把 `track_stmt_stat_level` 调到捕获嵌套层级（具体取值见实例文档），开启后重采 `proctune.py collect` 才能获得真实 calls/avg/total。
 - 这是只读统计，不改业务行为。
 
 ## 四、症状对照表
@@ -36,7 +36,7 @@
 | 连接失败（退出码 2） | host/port/凭据错或库不可达 | 跑一次 `proctune.py collect` 验证；确认网络与账号；或用 `GSDB_PASSWORD`（旧 `GDAA_PASSWORD` 仍兼容） |
 | 权限不足（退出码 3） | 账号缺 `pg_get_functiondef` / `dbe_perf` / `gs_index_advise` / hypopg 权限 | 用有相应读取/调优权限的账号 |
 | 「过程未找到」报告里写「ADM_SOURCE 兜底:没取到 —— 执行账号没有 ADM_SOURCE 的读权限」 | 库开了对象隔离，执行账号查不到 pg_proc，又没有 ADM_SOURCE 的读权限 | 由 DBA 决定是否给执行账号授 ADM_SOURCE 的读权限，或按报告里的 USAGE / EXECUTE 授权；授权后重跑（回答里写要做的事，不写授权语句） |
-| `## Runtime Attribution` 为空或标「不可用」 | 未开 `track_stmt_stat_level` 捕获嵌套语句 | 见「三、开启运行时归因」；不开则按纯静态分析进行 |
+| `## Runtime Attribution` 为空或标「不可用」 | `track_stmt_stat_level` 没开到捕获嵌套语句(缺数据,需运维开启) | 见「三、开启运行时归因」；不开则按纯静态分析进行 |
 | `## Verified Index Candidates` 显示无候选 | gs_index_advise 未发现，或合成值下无收益 | 用 `--bind <var=value>` 传真实值重验；或仅作未验证思路呈现 |
 | 索引验证报「不可用」 | 实例未启用 hypopg / `enable_hypo_index` | 确认 OpenGauss 版本支持并启用；不支持则索引验证降级，命令仍成功 |
 | 大量游标进 `## Skipped Cursors` | FOR UPDATE / 动态 / 参数化 / 包内 / REF CURSOR | 属预期：v1 仅自动改只读基础游标，其余转建议 |

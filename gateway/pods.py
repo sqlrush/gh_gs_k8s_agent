@@ -38,6 +38,7 @@ SECRET_KEY_PASSWORD = "OPENCODE_SERVER_PASSWORD"
 # 知识库管理员名单(SSO 不传角色时用):ConfigMap agent-roles 的 kb-admins,每行一个工号。
 ROLES_CONFIGMAP = "agent-roles"
 ROLES_KEY = "kb-admins"
+OPS_ROLES_KEY = "ops-admins"    # 运维管理员(资源大盘,2026-11-18),同一张表、同一套读法
 ROLES_CACHE_S = 30          # 每个请求都要判一次;30 秒内复用,运维改了名单半分钟内生效
 
 # 「本人 Pod」的两种形态。顺序有意义:runtime 先建,它是浏览器落地的那个。
@@ -85,7 +86,7 @@ class Manager:
         self.activity_interval_s = activity_interval_s
         self.log = log
         self._last_touch: Dict[str, float] = {}
-        self._roles: frozenset = frozenset()
+        self._roles: Dict[str, frozenset] = {}          # 名单键 → 工号集合(同一张 ConfigMap 一次读全)
         self._roles_at = float("-inf")
         self._diag_denied_logged = False
         self._lock = threading.Lock()
@@ -118,19 +119,28 @@ class Manager:
         读失败(k8s 一时不可达 / 没给权限)时**沿用上一次读到的名单**并记日志:
         管理员不该因为一次读失败就被当成普通用户(他会突然没有导入容器)。
         """
+        return self._role_list(ROLES_KEY, now)
+
+    def ops_admins(self, now: Optional[float] = None) -> frozenset:
+        """同一张表里的运维管理员(ops-admins 键),读法、缓存、读失败沿用上一次,都与 kb_admins 相同。"""
+        return self._role_list(OPS_ROLES_KEY, now)
+
+    def _role_list(self, key: str, now: Optional[float] = None) -> frozenset:
         now = time.time() if now is None else now
         with self._lock:
             if now - self._roles_at < ROLES_CACHE_S:
-                return self._roles
+                return self._roles.get(key, frozenset())
         try:
             cm = self.kube.get(CORE, "configmaps", ROLES_CONFIGMAP)
-            ids = parse_kb_admins(((cm or {}).get("data") or {}).get(ROLES_KEY) or "")
+            data = (cm or {}).get("data") or {}
+            lists = {k: parse_kb_admins(data.get(k) or "") for k in (ROLES_KEY, OPS_ROLES_KEY)}
         except (KubeError, OSError) as exc:
             self.log("读 ConfigMap %s 失败,沿用上一次的管理员名单:%s" % (ROLES_CONFIGMAP, exc))
-            ids = self._roles
+            with self._lock:
+                lists = dict(self._roles)
         with self._lock:
-            self._roles, self._roles_at = ids, now
-        return ids
+            self._roles, self._roles_at = lists, now
+        return lists.get(key, frozenset())
 
     # -- 建 -----------------------------------------------------------------
 

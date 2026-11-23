@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>智能体交互耗时报告</title>
+<style>
+.viz-root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface-1: #fcfcfb; --ink-1: #0b0b0b; --ink-2: #52514e; --ink-3: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+  --k1: #2a78d6; --k2: #eb6834; --k3: #1baf7a; --k4: #eda100; --k0: #c3c2b7;
+  --neutral: #52514e;
+  --serious: #ec835a; --warning: #fab219; --good: #0ca30c; --info: #898781;
+  --sim: rgba(237,161,0,0.10); --codebg: #f3f2ee;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface-1: #1a1a19; --ink-1: #f0efec; --ink-2: #c3c2b7; --ink-3: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --k1: #3987e5; --k2: #d95926; --k3: #199e70; --k4: #c98500; --k0: #5a5955;
+    --neutral: #c3c2b7; --sim: rgba(201,133,0,0.14); --codebg: #111110;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+.viz-root { background: var(--page); color: var(--ink-1); min-height: 100vh;
+  font: 14px/1.55 system-ui, -apple-system, "PingFang SC", "Segoe UI", sans-serif; padding: 28px 0 60px; }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 0 28px; }
+h1 { font-size: 22px; margin: 0 0 4px; font-weight: 600; }
+h2 { font-size: 16px; margin: 0 0 4px; font-weight: 600; }
+h3 { font-size: 13px; margin: 0; font-weight: 600; }
+.sub { color: var(--ink-2); font-size: 13px; }
+.muted { color: var(--ink-3); }
+.card { background: var(--surface-1); border: 1px solid var(--ring); border-radius: 10px; padding: 18px 20px; margin-top: 16px; }
+.card .hint { color: var(--ink-3); font-size: 12px; margin-bottom: 12px; }
+.banner { margin-top: 10px; padding: 9px 14px; border-radius: 8px; background: var(--sim); color: var(--ink-2); font-size: 13px; border: 1px solid var(--ring); }
+.banner b { color: var(--ink-1); }
+.banner.lock { background: color-mix(in srgb, var(--serious) 12%, transparent); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; font-weight: 500; color: var(--ink-3); border-bottom: 1px solid var(--axis); padding: 6px 8px; white-space: nowrap; }
+td { border-bottom: 1px solid var(--grid); padding: 6px 8px; vertical-align: top; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.pick { cursor: pointer; }
+tr.pick:hover td { background: var(--grid); }
+tr.pick.on td { background: color-mix(in srgb, var(--k1) 9%, transparent); }
+.thin { display: flex; gap: 2px; height: 8px; width: 220px; }
+.thin span { display: block; height: 8px; border-radius: 4px; min-width: 2px; }
+.tabs { display: flex; gap: 6px; margin-top: 22px; flex-wrap: wrap; align-items: center; }
+.tabs button { font: inherit; font-size: 13px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--axis);
+  background: var(--surface-1); color: var(--ink-2); cursor: pointer; }
+.tabs button.on { background: var(--ink-1); color: var(--surface-1); border-color: var(--ink-1); }
+.tabs .sep { width: 1px; height: 20px; background: var(--axis); margin: 0 6px; }
+.hero { display: flex; gap: 28px; align-items: flex-end; flex-wrap: wrap; }
+.hero .big { font-size: 52px; font-weight: 600; line-height: 1; }
+.hero .big small { font-size: 18px; font-weight: 500; color: var(--ink-2); margin-left: 6px; }
+.tiles { display: flex; gap: 26px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--grid); }
+.tile { min-width: 120px; }
+.tile .l { color: var(--ink-3); font-size: 12px; }
+.tile .v { font-size: 22px; font-weight: 600; }
+.tile .v.s { font-size: 17px; }
+.tile .v small { font-size: 12px; color: var(--ink-3); font-weight: 400; margin-left: 4px; }
+.qfull { margin: 2px 0 14px; padding: 8px 12px; border-left: 3px solid var(--axis); color: var(--ink-1); background: var(--page); border-radius: 0 6px 6px 0; }
+.diag { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 10px; }
+.diag .d { border: 1px solid var(--ring); border-radius: 8px; padding: 10px 12px; display: flex; gap: 10px; }
+.diag .ic { flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 13px; color: #0b0b0b; }
+.diag .t { font-weight: 600; }
+.diag .lv { font-size: 12px; color: var(--ink-3); margin-left: 6px; font-weight: 400; }
+.diag .x { color: var(--ink-2); font-size: 13px; }
+a.go { color: var(--k1); cursor: pointer; text-decoration: none; font-size: 13px; white-space: nowrap; }
+a.go:hover { text-decoration: underline; }
+.tall { display: flex; gap: 2px; height: 28px; margin: 6px 0 10px; }
+.tall div { height: 28px; border-radius: 4px; color: #fff; font-size: 12px; line-height: 28px; padding-left: 8px; white-space: nowrap; overflow: visible; min-width: 2px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.legend .v { color: var(--ink-1); font-variant-numeric: tabular-nums; margin-left: 4px; }
+.legend .s { color: var(--ink-3); margin-left: 3px; }
+.tag-sim { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 4px; background: var(--sim); color: var(--ink-2); border: 1px solid var(--ring); margin-left: 6px; font-weight: 400; }
+svg text { fill: var(--ink-3); font-size: 11px; font-family: inherit; }
+svg .gl { stroke: var(--grid); stroke-width: 1; }
+svg .ax { stroke: var(--axis); stroke-width: 1; }
+svg .hit { fill: transparent; cursor: pointer; }
+svg rect.m.hl, svg path.m.hl { filter: brightness(1.15); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+.bars .b { display: grid; grid-template-columns: 110px 1fr 150px; align-items: center; gap: 10px; margin: 6px 0; font-size: 13px; }
+.bars .track { height: 14px; }
+.bars .fill { height: 14px; border-radius: 0 4px 4px 0; background: var(--neutral); }
+.bars .val { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: 0; }
+details > summary { cursor: pointer; }
+pre.text { font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre; overflow-x: auto; margin: 0; color: var(--ink-1); }
+/* 逐轮详情 */
+.rd { border-top: 1px solid var(--grid); }
+.rd > summary { display: grid; grid-template-columns: 64px 260px 74px minmax(0, 1fr); gap: 14px; align-items: center; padding: 9px 6px; list-style: none; }
+.rd > summary::-webkit-details-marker { display: none; }
+.rd > summary:hover { background: var(--grid); }
+.rd[open] > summary { background: color-mix(in srgb, var(--k1) 7%, transparent); }
+.rd .no { font-weight: 600; white-space: nowrap; }
+.rd .no::before { content: "▸ "; color: var(--ink-3); }
+.rd[open] .no::before { content: "▾ "; }
+.rd .tm { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.rd .act { min-width: 0; }
+.rd .act .a { font-size: 13px; }
+.chips { margin-top: 2px; }
+.chips span { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--page); border: 1px solid var(--ring); color: var(--ink-2); margin: 2px 6px 2px 0; display: inline-block; }
+.mbar { display: flex; gap: 2px; height: 10px; }
+.mbar span { height: 10px; border-radius: 3px; min-width: 2px; }
+.rbody { padding: 10px 6px 20px 84px; display: grid; gap: 12px; }
+.kv { display: flex; flex-wrap: wrap; gap: 4px 22px; font-size: 13px; color: var(--ink-2); }
+.kv b { color: var(--ink-1); font-weight: 600; font-variant-numeric: tabular-nums; }
+.blk { border: 1px solid var(--ring); border-radius: 8px; padding: 10px 12px; background: var(--surface-1); }
+.blk .hd { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 6px; }
+.blk .hd .meta { color: var(--ink-3); font-size: 12px; }
+.blk .lab { color: var(--ink-3); font-size: 12px; margin-top: 8px; }
+pre.code { font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; background: var(--codebg); border: 1px solid var(--grid); border-radius: 6px;
+  padding: 8px 10px; max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 4px 0 0; color: var(--ink-1); }
+pre.code.tall2 { max-height: 520px; }
+.more { font-size: 12px; color: var(--k1); cursor: pointer; margin-top: 4px; display: inline-block; }
+.gtab td, .gtab th { padding: 4px 8px; font-size: 12.5px; }
+.flash > summary { animation: flash 1.6s ease-out; }
+@keyframes flash { from { background: color-mix(in srgb, var(--k1) 28%, transparent); } to { background: transparent; } }
+#tip { position: fixed; pointer-events: none; background: var(--surface-1); color: var(--ink-1); border: 1px solid var(--ring);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; min-width: 180px; max-width: 420px; display: none; z-index: 9; }
+#tip .tv { font-weight: 600; font-size: 14px; }
+#tip .tr { display: flex; align-items: center; gap: 8px; margin-top: 2px; color: var(--ink-2); }
+#tip .tr .lk { width: 12px; height: 3px; border-radius: 2px; flex: 0 0 auto; }
+#tip .tr .vv { color: var(--ink-1); font-variant-numeric: tabular-nums; margin-left: auto; padding-left: 12px; white-space: nowrap; }
+#tip .hint2 { color: var(--ink-3); margin-top: 6px; font-size: 12px; }
+.foot { margin-top: 22px; color: var(--ink-3); font-size: 12px; }
+.foot li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+<div class="wrap" id="app"></div>
+<div id="tip"></div>
+</div>
+<script type="application/json" id="data">__DATA__</script>
+<script>
+(() => {
+  const D = JSON.parse(document.getElementById('data').textContent);
+  const M = D.meta, Q = D.questions;
+  const SPLIT = !M.has_grmp;          // 没有 GRMP 计时日志:工具时间没拆分,两段标「未拆分」
+  const KINDS = [
+    { k: 'ttft', n: '模型·等首字', c: 'var(--k1)' },
+    { k: 'gen', n: '模型·思考与输出', c: 'var(--k2)' },
+    { k: 'grmp', n: '工具·GRMP 与数据库', c: 'var(--k3)', sim: SPLIT },
+    { k: 'local', n: '工具·脚本本地', c: 'var(--k4)', sim: SPLIT },
+    { k: 'idle', n: '运行时空档', c: 'var(--k0)' },
+  ];
+  const KMAP = Object.fromEntries(KINDS.map(k => [k.k, k]));
+  const INK_ON = { ttft: '#fff', gen: '#fff', grmp: '#fff', local: '#0b0b0b', idle: '#0b0b0b' };
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const app = document.getElementById('app');
+  const tip = document.getElementById('tip');
+
+  // ---------- 小工具(所有数据文字一律 textContent) ----------
+  function el(tag, attrs, ...kids) {
+    const e = document.createElement(tag);
+    for (const [a, v] of Object.entries(attrs || {})) {
+      if (v == null) continue;
+      if (a === 'class') e.className = v; else if (a === 'style') e.style.cssText = v;
+      else if (a.startsWith('on')) e.addEventListener(a.slice(2), v); else e.setAttribute(a, v);
+    }
+    for (const k of kids.flat()) if (k != null && k !== false) e.append(k instanceof Node ? k : document.createTextNode(String(k)));
+    return e;
+  }
+  function sv(tag, attrs, ...kids) {
+    const e = document.createElementNS(SVGNS, tag);
+    for (const [a, v] of Object.entries(attrs || {})) e.setAttribute(a, v);
+    for (const k of kids) if (k != null) e.append(k instanceof Node ? k : document.createTextNode(String(k)));
+    return e;
+  }
+  const fmt = s => s >= 120 ? `${Math.floor(s / 60)} 分 ${Math.round(s % 60)} 秒` : (s < 1 ? `${s.toFixed(2)} 秒` : `${s.toFixed(1)} 秒`);
+  const pct = (a, b) => b ? `${(a / b * 100).toFixed(a / b < 0.1 ? 1 : 0)}%` : '0%';
+  const kTok = n => n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
+  const num = n => Number(n).toLocaleString('zh-CN');
+  const spd = v => v ? `${Math.round(v)} token/秒` : '—';
+  function niceStep(max, n) {
+    const raw = max / n, p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p;
+    return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
+  }
+  function showTip(ev, title, value, rows, hint) {
+    tip.replaceChildren(el('div', { class: 'muted' }, title), el('div', { class: 'tv' }, value),
+      ...(rows || []).map(r => el('div', { class: 'tr' }, el('span', { class: 'lk', style: `background:${r.c || 'var(--ink-3)'}` }), r.n, el('span', { class: 'vv' }, r.v))),
+      hint ? el('div', { class: 'hint2' }, hint) : null);
+    tip.style.display = 'block';
+    const x = Math.min(ev.clientX + 14, innerWidth - tip.offsetWidth - 8), y = Math.min(ev.clientY + 14, innerHeight - tip.offsetHeight - 8);
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  const hideTip = () => { tip.style.display = 'none'; };
+  function hover(node, fn) {
+    node.addEventListener('pointermove', e => fn(e));
+    node.addEventListener('pointerleave', hideTip);
+    node.setAttribute('tabindex', '0');
+    node.addEventListener('focus', () => { const r = node.getBoundingClientRect(); fn({ clientX: r.right, clientY: r.top }); });
+    node.addEventListener('blur', hideTip);
+  }
+  // 一轮里各段时长(按类型合计)
+  function roundKinds(r) {
+    const o = { idle: r.idle, ttft: r.ttft, gen: r.gen, grmp: r.grmp, local: r.local };
+    return KINDS.map(k => ({ ...k, v: o[k.k] || 0 }));
+  }
+  const roundOwn = r => r.end - r.t + r.idle;
+
+  // ---------- 页头 ----------
+  const maskTxt = M.masked_text || '无';
+  const tzTxt = M.utc_offset === 8 ? '北京时间' : `UTC${M.utc_offset >= 0 ? '+' : ''}${M.utc_offset}`;
+  app.append(
+    el('h1', {}, '智能体交互耗时报告', el('span', { class: 'muted', style: 'font-size:15px;font-weight:400;margin-left:10px' }, M.detail ? '详细版' : '摘要版')),
+    el('div', { class: 'sub' }, `${Q.length} 次提问 · 生成于 ${M.generated}（${tzTxt}）· 纯脚本统计，不调模型`),
+    el('div', { class: 'sub' }, `会话数据：${M.source} · GRMP 计时：${M.grmp_source}`),
+    M.detail
+      ? el('div', { class: 'banner lock' }, el('b', {}, '详细版含思考原文、命令参数与工具输出，只在内部查看，不要外传。'),
+          `已自动遮掉：${maskTxt}。SQL 与表名保留，否则看不出在做什么。不加 --detail 出的是摘要版，不含这些内容。`)
+      : el('div', { class: 'banner' }, el('b', {}, '摘要版：'), '只有时间、技能与脚本名、token 数、GRMP 调用统计，不含思考原文、命令参数与工具输出。需要看每一步具体在做什么时，加 --detail 生成详细版（只在内部查看）。'),
+    ...(SPLIT ? [el('div', { class: 'banner' }, el('b', {}, '没有 GRMP 计时记录：'), '工具时间没有拆成「GRMP 与数据库 / 脚本本地」（标「未拆分」）。v1.4.14 起技能每次调用 GRMP 都会自动记录，之后的提问就有拆分。')] : []),
+  );
+
+  // ---------- 全部提问 ----------
+  const listCard = el('div', { class: 'card' }, el('h2', {}, '全部提问'),
+    el('div', { class: 'hint' }, '点一行看这次提问的明细。时间构成条：蓝 等首字 · 橙 思考与输出 · 绿 GRMP 与数据库 · 黄 脚本本地 · 灰 空档'));
+  const tb = el('tbody');
+  listCard.append(el('table', {}, el('thead', {}, el('tr', {},
+    el('th', {}, '#'), el('th', {}, '提问时间'), el('th', {}, '问题（前 40 字）'), el('th', { class: 'num' }, '总时长'),
+    el('th', { class: 'num' }, '模型轮数'), el('th', { class: 'num' }, '工具次数'), el('th', {}, '时间构成'), el('th', {}, '主要慢在'))), tb));
+  app.append(listCard);
+  const rows = Q.map((q, i) => {
+    const thin = el('div', { class: 'thin' }, KINDS.filter(k => q.totals[k.k] > 0).map(k =>
+      el('span', { style: `flex:${q.totals[k.k]};background:${k.c}` })));
+    const tr = el('tr', { class: 'pick', onclick: () => select(i) },
+      el('td', {}, q.idx), el('td', { class: 'num', style: 'text-align:left' }, q.start), el('td', {}, q.text),
+      el('td', { class: 'num' }, fmt(q.total)), el('td', { class: 'num' }, q.rounds_n), el('td', { class: 'num' }, q.tools_n),
+      el('td', {}, thin), el('td', {}, q.diag[0].title));
+    hover(thin, e => showTip(e, `第 ${q.idx} 问 · 时间构成`, fmt(q.total),
+      KINDS.map(k => ({ c: k.c, n: k.n + (k.sim ? '（未拆分）' : ''), v: `${fmt(q.totals[k.k])} · ${pct(q.totals[k.k], q.total)}` }))));
+    tb.append(tr);
+    return tr;
+  });
+
+  const tabs = el('div', { class: 'tabs' });
+  const detail = el('div');
+  app.append(tabs, detail);
+  const tabBtns = Q.map((q, i) => el('button', { onclick: () => select(i) }, `第 ${q.idx} 问`));
+  const txtBtn = el('button', { onclick: () => select(-1) }, '文本版');
+  tabs.append(...tabBtns, el('span', { class: 'sep' }), txtBtn);
+
+  let current = null;
+  function select(i, roundNo) {
+    hideTip();
+    rows.forEach((r, j) => r.classList.toggle('on', j === i));
+    tabBtns.forEach((b, j) => b.classList.toggle('on', j === i));
+    txtBtn.classList.toggle('on', i === -1);
+    current = i;
+    detail.replaceChildren(...(i === -1 ? [textView()] : renderQuestion(Q[i])));
+    if (i >= 0) {
+      const q = Q[i];
+      const target = roundNo || q.rounds.reduce((a, r) => roundOwn(r) > roundOwn(a) ? r : a, q.rounds[0]).i;
+      openRound(target, !!roundNo);
+    }
+  }
+  function openRound(no, scroll = true) {
+    const d = document.getElementById(`r${no}`);
+    if (!d) return;
+    d.open = true;
+    if (scroll) {
+      d.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      d.classList.remove('flash'); void d.offsetWidth; d.classList.add('flash');
+    }
+  }
+  const goRound = no => el('a', { class: 'go', onclick: e => { e.stopPropagation(); openRound(no); } }, `看第 ${no} 轮 →`);
+
+  function textView() {
+    return el('div', { class: 'card' }, el('h2', {}, '文本版'),
+      el('div', { class: 'hint' }, '与 HTML 同一份数据，运维在终端里直接看（--text 输出的就是这一段；加 --detail 才带思考与命令）。'),
+      el('pre', { class: 'text' }, D.text));
+  }
+
+  // ---------- 单次提问 ----------
+  function renderQuestion(q) {
+    const T = q.totals, model = T.ttft + T.gen, tk = q.tok;
+    const ctxAll = tk.in + tk.read + tk.write;
+    const out = [];
+    const lv = { serious: ['!', 'var(--serious)', '严重'], warning: ['!', 'var(--warning)', '注意'], info: ['i', 'var(--info)', '提示'], good: ['✓', 'var(--good)', '正常'] };
+    out.push(el('div', { class: 'card' },
+      el('div', { class: 'sub', style: 'margin-bottom:4px' }, `第 ${q.idx} 问 · ${q.start} · 模型 ${q.model}`),
+      el('div', { class: 'qfull' }, q.full),
+      el('div', { class: 'hero' },
+        el('div', {}, el('div', { class: 'tile' }, el('div', { class: 'l' }, '总时长')),
+          el('div', { class: 'big' }, fmt(q.total), q.total >= 120 ? el('small', {}, `${q.total.toFixed(1)} 秒`) : null)),
+        el('div', { class: 'tile' }, el('div', { class: 'l' }, '模型轮数'), el('div', { class: 'v' }, q.rounds_n, el('small', {}, `平均每轮 ${fmt(model / q.rounds_n)}`))),
+        el('div', { class: 'tile' }, el('div', { class: 'l' }, '工具调用'), el('div', { class: 'v' }, q.tools_n, el('small', {}, `共 ${fmt(T.grmp + T.local)}`))),
+        el('div', { class: 'tile' }, el('div', { class: 'l' }, 'GRMP 调用'), el('div', { class: 'v' }, q.grmp_n, el('small', {}, SPLIT ? '无计时记录' : `共 ${fmt(T.grmp)}${q.grmp_fail ? ` · 失败 ${q.grmp_fail}` : ''}`))),
+        el('div', { class: 'tile' }, el('div', { class: 'l' }, '每轮上下文（token）'), el('div', { class: 'v' }, `${kTok(q.ctx_first)} → ${kTok(q.ctx_peak)}`))),
+      el('div', { class: 'tiles' },
+        el('div', { class: 'tile' }, el('div', { class: 'l' }, '发给模型的 token 合计'), el('div', { class: 'v s' }, num(ctxAll))),
+        el('div', { class: 'tile' }, el('div', { class: 'l' }, '其中缓存命中'), el('div', { class: 'v s' }, num(tk.read), el('small', {}, pct(tk.read, ctxAll)))),
+        el('div', { class: 'tile' }, el('div', { class: 'l' }, '未命中（新输入）'), el('div', { class: 'v s' }, num(tk.in + tk.write))),
+        el('div', { class: 'tile' }, el('div', { class: 'l' }, '模型思考 token'), el('div', { class: 'v s' }, num(tk.rsn))),
+        el('div', { class: 'tile' }, el('div', { class: 'l' }, '模型输出 token'), el('div', { class: 'v s' }, num(tk.out))),
+        el('div', { class: 'tile' }, el('div', { class: 'l' }, '生成速度（中位）'), el('div', { class: 'v s' }, spd(q.speed_median)))),
+      el('h2', { style: 'margin-top:20px' }, '慢在哪'),
+      el('div', { class: 'diag', style: 'margin-top:8px' }, q.diag.map(d => el('div', { class: 'd' },
+        el('div', { class: 'ic', style: `background:${lv[d.lvl][1]}` }, lv[d.lvl][0]),
+        el('div', {}, el('div', { class: 't' }, d.title, el('span', { class: 'lv' }, lv[d.lvl][2])),
+          el('div', { class: 'x' }, d.detail), d.round ? goRound(d.round) : null)))),
+    ));
+
+    // 时间构成
+    const tall = el('div', { class: 'tall', role: 'img', 'aria-label': '时间构成：' + KINDS.map(k => `${k.n} ${fmt(T[k.k])}`).join('，') });
+    KINDS.filter(k => T[k.k] > 0).forEach(k => {
+      const share = T[k.k] / q.total;
+      const blk = el('div', { style: `flex:${T[k.k]};background:${k.c};color:${INK_ON[k.k]}` }, share >= 0.07 ? pct(T[k.k], q.total) : '');
+      hover(blk, e => showTip(e, k.n + (k.sim ? '（未拆分）' : ''), fmt(T[k.k]), [{ c: k.c, n: '占这次提问', v: pct(T[k.k], q.total) }]));
+      tall.append(blk);
+    });
+    out.push(el('div', { class: 'card' }, el('h2', {}, '时间构成'),
+      el('div', { class: 'hint' }, '一次提问 = 若干轮「模型想 → 调工具」。模型两段、工具两段、加上运行时空档，合起来就是总时长。'),
+      tall,
+      el('div', { class: 'legend' }, KINDS.map(k => el('span', {}, el('i', { style: `background:${k.c}` }), k.n,
+        k.sim ? el('span', { class: 'tag-sim' }, '未拆分') : null, el('span', { class: 'v' }, fmt(T[k.k])), el('span', { class: 's' }, pct(T[k.k], q.total)))))));
+
+    out.push(el('div', { class: 'card' }, el('h2', {}, '时间轴'),
+      el('div', { class: 'hint' }, '每一行是一轮，横轴是从提问开始经过的秒数。悬停看这一轮的分段；点一下展开这一轮的详情（在下面「逐轮详情」里）。'),
+      el('div', { class: 'legend', style: 'margin-bottom:6px' }, KINDS.map(k => el('span', {}, el('i', { style: `background:${k.c}` }), k.n))),
+      gantt(q)));
+
+    out.push(el('div', { class: 'two' },
+      el('div', { class: 'card' }, el('h2', {}, '每轮模型用时'),
+        el('div', { class: 'hint' }, '等首字 + 思考与输出，单位秒；点柱子看那一轮'),
+        el('div', { class: 'legend', style: 'margin-bottom:4px' }, [KMAP.ttft, KMAP.gen].map(k => el('span', {}, el('i', { style: `background:${k.c}` }), k.n))),
+        perRoundColumns(q)),
+      el('div', { class: 'card' }, el('h2', {}, '每轮发给模型的上下文'),
+        el('div', { class: 'hint' }, '输入 + 缓存命中，单位 token；每轮都要整段重发'),
+        ctxLine(q))));
+
+    const maxC = Math.max(...q.cats.map(c => c.secs));
+    out.push(el('div', { class: 'two' },
+      el('div', { class: 'card' }, el('h2', {}, '生成量与用时'),
+        el('div', { class: 'hint' }, `每个点是一轮：横轴 = 思考 + 输出 token，纵轴 = 思考与输出用时。斜线是本问的中位速度（${spd(q.speed_median)}）。贴着斜线 = 速度正常、慢是因为写得多；远高于斜线 = 这一轮模型服务变慢。`),
+        scatter(q)),
+      el('div', { class: 'card' }, el('h2', {}, '这些轮都在干什么'),
+        el('div', { class: 'hint' }, '按每轮调用的工具归类；条长是这些轮自身用时（模型 + 工具）'),
+        el('div', { class: 'bars' }, q.cats.map(c => {
+          const b = el('div', { class: 'b' }, el('div', {}, c.name), el('div', { class: 'track' }, el('div', { class: 'fill', style: `width:${Math.max(1, c.secs / maxC * 100)}%` })),
+            el('div', { class: 'val' }, `${c.n} 轮 · ${fmt(c.secs)}`));
+          hover(b, e => showTip(e, c.name, fmt(c.secs), [{ n: '轮数', v: c.n }, { n: '占这次提问', v: pct(c.secs, q.total) }]));
+          return b;
+        })))));
+
+    out.push(el('div', { class: 'card' }, el('h2', {}, '最慢的 10 段'),
+      el('div', { class: 'hint' }, '点一行展开那一轮的详情'),
+      el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, '轮'), el('th', {}, '这一段'), el('th', { class: 'num' }, '用时'), el('th', { class: 'num' }, '占比'), el('th', {}, '这一轮为什么慢'))),
+        el('tbody', {}, q.slow.map(s => {
+          const r = q.rounds[s.round - 1];
+          return el('tr', { class: 'pick', onclick: () => openRound(s.round) },
+            el('td', { class: 'num', style: 'text-align:left' }, s.round),
+            el('td', {}, el('span', { class: 'sw', style: `background:${KMAP[s.k].c}` }), s.what,
+              s.cat ? el('span', { class: 'muted' }, ` · ${s.cat}`) : el('span', { class: 'muted' }, ` → ${r.act}`)),
+            el('td', { class: 'num' }, fmt(s.secs)), el('td', { class: 'num' }, pct(s.secs, q.total)),
+            el('td', { class: 'muted' }, r.why.join('；')));
+        })))));
+
+    if (q.grmp_scripts.length) {
+      const maxG = Math.max(...q.grmp_scripts.map(g => g.secs)) || 1;
+      out.push(el('div', { class: 'card' }, el('h2', {}, 'GRMP 调用（按总用时）'),
+        el('div', { class: 'hint' }, `共 ${q.grmp_n} 次、${fmt(T.grmp)}；含中间件验签与数据库执行。同一条登记脚本调了几次就合在一行。`),
+        el('div', { class: 'bars' }, q.grmp_scripts.slice(0, 15).map(g => {
+          const b = el('div', { class: 'b', style: 'grid-template-columns: 220px 1fr 200px' }, el('div', {}, g.name),
+            el('div', { class: 'track' }, el('div', { class: 'fill', style: `width:${Math.max(1, g.secs / maxG * 100)}%;background:var(--k3)` })),
+            el('div', { class: 'val' }, `${g.n} 次 · ${fmt(g.secs)}${g.fail ? ` · 失败 ${g.fail}` : ''}`));
+          hover(b, e => showTip(e, g.name, fmt(g.secs), [{ n: '次数', v: g.n }, { n: '平均', v: fmt(g.secs / g.n) }, { n: '返回行数合计', v: num(g.rows) }, { n: '失败', v: g.fail }]));
+          return b;
+        }))));
+    }
+    out.push(roundList(q));
+
+    out.push(el('div', { class: 'card' }, el('details', {},
+      el('summary', { class: 'sub' }, `每轮明细（${q.rounds_n} 行，表格；点一行跳到详情）`),
+      el('table', { style: 'margin-top:10px' }, el('thead', {}, el('tr', {},
+        ...['轮', '开始（秒）', '等首字', '思考', '输出', '工具', '其中 GRMP', '空档', '上下文', '思考 token', '输出 token', '速度', '动作'].map((h, i) => el('th', { class: i && i < 12 ? 'num' : '' }, h)))),
+        el('tbody', {}, q.rounds.map(r => el('tr', { class: 'pick', onclick: () => openRound(r.i) },
+          el('td', {}, r.i), el('td', { class: 'num' }, r.t.toFixed(1)), el('td', { class: 'num' }, r.ttft.toFixed(2)),
+          el('td', { class: 'num' }, r.think.secs.toFixed(2)), el('td', { class: 'num' }, r.outp.secs.toFixed(2)),
+          el('td', { class: 'num' }, (r.grmp + r.local).toFixed(2)), el('td', { class: 'num' }, r.grmp.toFixed(2)), el('td', { class: 'num' }, r.idle.toFixed(2)),
+          el('td', { class: 'num' }, kTok(r.ctx)), el('td', { class: 'num' }, num(r.rsn)), el('td', { class: 'num' }, num(r.out)),
+          el('td', { class: 'num' }, r.speed ? Math.round(r.speed) : '—'), el('td', {}, r.act))))))));
+
+    out.push(el('ul', { class: 'foot' },
+      el('li', {}, '等首字：这一轮开始（运行时发出模型请求），到模型返回第一个字（思考或正文）；含运行时拼上下文、网络与模型服务排队。'),
+      el('li', {}, '思考：模型思考片段的起止时间；输出：思考结束到把这一轮的工具参数写完（最后一轮是写完回答）。速度 =（思考 + 输出 token）÷ 思考与输出用时。'),
+      el('li', {}, '工具：技能脚本或命令从启动到退出（会话库）。GRMP 与数据库：技能每次调 GRMP 的往返用时（logs/grmp-timing.log，含中间件验签与数据库执行），一次一条；工具里其余时间算脚本本地。'),
+      el('li', {}, '空档：上一轮结束到下一轮开始，运行时自己的开销（落库、拼上下文）。'),
+      el('li', {}, '原文上限（详细版）：思考 12000 字、正文 8000 字、命令 6000 字、输出 8000 字，超出部分注明省略了多少。'),
+      el('li', {}, '本报告由脚本按固定规则统计生成，不调用模型；同一份数据重复生成结果完全一致。')));
+    return out;
+  }
+
+  // ---------- 逐轮详情 ----------
+  function roundList(q) {
+    const maxOwn = Math.max(...q.rounds.map(roundOwn));
+    const card = el('div', { class: 'card' }, el('h2', {}, '逐轮详情'),
+      el('div', { class: 'hint' }, '每一轮：时间拆分 → 模型想了什么（思考原文）、说了什么（正文）→ 执行了什么（完整命令与参数）、结果如何（退出码、输出）→ 每一次 GRMP 调用。默认展开最慢的一轮。'));
+    q.rounds.forEach(r => {
+      const kinds = roundKinds(r);
+      const bar = el('div', { class: 'mbar', style: `width:${Math.max(4, roundOwn(r) / maxOwn * 100)}%` },
+        kinds.filter(k => k.v > 0.001).map(k => el('span', { style: `flex:${k.v};background:${k.c}` })));
+      hover(bar, e => showTip(e, `第 ${r.i} 轮`, fmt(roundOwn(r)), kinds.map(k => ({ c: k.c, n: k.n, v: fmt(k.v) }))));
+      const d = el('details', { class: 'rd', id: `r${r.i}` },
+        el('summary', {},
+          el('div', { class: 'no' }, `第 ${r.i} 轮`), bar, el('div', { class: 'tm' }, fmt(roundOwn(r))),
+          el('div', { class: 'act' }, el('div', { class: 'a' }, r.act, el('span', { class: 'muted' }, `  · 从 ${r.t.toFixed(1)}s 开始`)),
+            el('div', { class: 'chips' }, r.why.map(w => el('span', {}, w))))));
+      let built = false;
+      d.addEventListener('toggle', () => { if (d.open && !built) { built = true; d.append(roundBody(q, r)); } });
+      card.append(d);
+    });
+    return card;
+  }
+
+  function codeBlock(text, tallAllowed) {
+    const pre = el('pre', { class: 'code' }, text);
+    if (!tallAllowed || text.split('\n').length < 16) return pre;
+    const more = el('span', { class: 'more' }, '展开全部');
+    more.addEventListener('click', () => { pre.classList.toggle('tall2'); more.textContent = pre.classList.contains('tall2') ? '收起' : '展开全部'; });
+    return el('div', {}, pre, more);
+  }
+
+  function roundBody(q, r) {
+    const body = el('div', { class: 'rbody' });
+    const kinds = roundKinds(r);
+    body.append(el('div', { class: 'kv' }, kinds.map(k => el('span', {}, el('span', { class: 'sw', style: `background:${k.c}` }), k.n.replace('模型·', '').replace('工具·', '工具 '), ' ', el('b', {}, fmt(k.v)), k.sim ? el('span', { class: 'tag-sim' }, '未拆分') : null))));
+
+    // 模型
+    const mb = el('div', { class: 'blk' },
+      el('div', { class: 'hd' }, el('h3', {}, '模型'), el('span', { class: 'meta' }, `${r.model} · 结束原因 ${r.finish || '—'}`)),
+      el('div', { class: 'kv' },
+        el('span', {}, '上下文 ', el('b', {}, num(r.ctx)), ' token（新输入 ', el('b', {}, num(r.ctx_in + r.ctx_write)), ' · 缓存命中 ', el('b', {}, num(r.ctx_read)), '）'),
+        el('span', {}, '等首字 ', el('b', {}, fmt(r.ttft))),
+        el('span', {}, '思考 ', el('b', {}, fmt(r.think.secs)), ' · ', el('b', {}, num(r.rsn)), ' token · ', el('b', {}, spd(r.think.speed))),
+        el('span', {}, '输出 ', el('b', {}, fmt(r.outp.secs)), ' · ', el('b', {}, num(r.out)), ' token · ', el('b', {}, spd(r.outp.speed))),
+        el('span', {}, '本轮速度 ', el('b', {}, spd(r.speed)), el('span', { class: 'muted' }, `（本问中位 ${spd(q.speed_median)}）`)),
+        r.ctx_next_delta != null ? el('span', {}, '下一轮上下文 ', el('b', {}, `${r.ctx_next_delta >= 0 ? '+' : ''}${num(r.ctx_next_delta)}`), ' token') : null));
+    r.think.parts.forEach((p, n) => mb.append(
+      el('div', { class: 'lab' }, `思考原文${r.think.parts.length > 1 ? ` ${n + 1}` : ''} · ${fmt(p.secs)} · ${num(p.chars)} 字${M.detail ? '' : '（摘要版不含原文）'}`),
+      M.detail ? codeBlock(p.text, true) : null));
+    if (!r.think.parts.length) mb.append(el('div', { class: 'lab' }, '这一轮没有思考原文（模型没返回，或这一轮直接输出）。'));
+    r.outp.texts.forEach(t => mb.append(el('div', { class: 'lab' }, `输出正文 · ${num(t.chars)} 字${M.detail ? '' : '（摘要版不含原文）'}`), M.detail ? codeBlock(t.text, true) : null));
+    body.append(mb);
+
+    // 工具
+    r.tools.forEach((t, n) => {
+      const exitTxt = t.exit == null ? '—' : (t.exit === 0 ? '0（成功）' : `${t.exit}（失败）`);
+      const tb = el('div', { class: 'blk' },
+        el('div', { class: 'hd' }, el('h3', {}, `工具 ${r.tools.length > 1 ? n + 1 + ' ' : ''}· ${t.label}`),
+          el('span', { class: 'meta' }, `${t.catn} · ${t.tool} · 第 ${t.s.toFixed(1)}–${t.e.toFixed(1)} 秒`)),
+        el('div', { class: 'kv' },
+          el('span', {}, '用时 ', el('b', {}, fmt(t.secs))),
+          el('span', {}, '退出码 ', el('b', {}, exitTxt)),
+          el('span', {}, '命令 ', el('b', {}, num(t.cmd_chars)), ' 字', t.inline ? el('span', { class: 'muted' }, '（模型现写的脚本 / 数据）') : null),
+          el('span', {}, '输出 ', el('b', {}, num(t.out_chars)), ' 字 / ', el('b', {}, num(t.out_lines)), ' 行', t.truncated ? el('span', { class: 'muted' }, '（运行时已截断）') : null),
+          t.desc ? el('span', {}, '模型给的说明：', el('b', {}, t.desc)) : null),
+        M.detail ? el('div', { class: 'lab' }, '完整命令与参数') : null, M.detail ? codeBlock(t.cmd, true) : null);
+      if (t.grmp.length) {
+        const gsum = t.grmp.reduce((a, g) => a + g.e - g.s, 0);
+        tb.append(el('div', { class: 'lab' }, `GRMP 调用 ${t.grmp.length} 次 · 共 ${fmt(gsum)} · 脚本本地 ${fmt(Math.max(0, t.secs - gsum))}`),
+          toolStrip(t),
+          el('table', { class: 'gtab' }, el('thead', {}, el('tr', {}, ...['#', '登记脚本', '执行库', '开始', '用时', '返回行数', '字节', '结果'].map((h, i) => el('th', { class: i >= 3 && i < 7 ? 'num' : '' }, h)))),
+            el('tbody', {}, t.grmp.map((g, k) => el('tr', {},
+              el('td', {}, k + 1), el('td', {}, g.name), el('td', {}, g.db), el('td', { class: 'num' }, `${g.s.toFixed(2)}s`),
+              el('td', { class: 'num' }, fmt(g.e - g.s)), el('td', { class: 'num' }, g.rows == null ? '—' : num(g.rows)),
+              el('td', { class: 'num' }, g.bytes == null ? '—' : num(g.bytes)), el('td', {}, g.ok ? '成功' : `失败 ${g.status || ''}`))))));
+      }
+      if (M.detail) tb.append(el('div', { class: 'lab' }, '工具输出'), codeBlock(t.out || '（无输出）', true));
+      body.append(tb);
+    });
+    return body;
+  }
+
+  // 一次工具调用内部的细条:脚本本地(黄)与每次 GRMP(绿)
+  function toolStrip(t) {
+    const W = 900, H = 18, sx = x => (x - t.s) / Math.max(1e-6, t.e - t.s) * W;
+    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', style: 'max-width:900px;display:block;margin:4px 0 6px' });
+    svg.append(sv('rect', { x: 0, y: 4, width: W, height: 10, rx: 3, fill: KMAP.local.c }));
+    t.grmp.forEach(g => {
+      const r = sv('rect', { class: 'm', x: sx(g.s) + 1, y: 4, width: Math.max(1, sx(g.e) - sx(g.s) - 2), height: 10, rx: 2, fill: KMAP.grmp.c });
+      hover(r, e => showTip(e, g.name, fmt(g.e - g.s), [{ n: '执行库', v: g.db }, { n: '返回行数', v: g.rows == null ? '—' : num(g.rows) }, { n: '结果', v: g.ok ? '成功' : '失败' }]));
+      svg.append(r);
+    });
+    return svg;
+  }
+
+  // ---------- 时间轴 ----------
+  function gantt(q) {
+    const W = 1180, L = 64, R = 16, rowH = 18, barH = 10, top = 8, axisH = 26;
+    const H = top + q.rounds.length * rowH + axisH;
+    const xmax = q.total, sx = t => L + t / xmax * (W - L - R);
+    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': `时间轴，共 ${q.rounds_n} 轮` });
+    const step = niceStep(xmax, 8);
+    for (let t = 0; t <= xmax + 1e-9; t += step) {
+      svg.append(sv('line', { class: 'gl', x1: sx(t), x2: sx(t), y1: top - 4, y2: H - axisH + 2 }),
+        sv('text', { x: sx(t), y: H - 8, 'text-anchor': 'middle' }, `${+t.toFixed(1)}s`));
+    }
+    svg.append(sv('line', { class: 'ax', x1: L, x2: W - R, y1: H - axisH + 2, y2: H - axisH + 2 }));
+    q.rounds.forEach((r, i) => {
+      const y = top + i * rowH;
+      svg.append(sv('text', { x: L - 10, y: y + rowH / 2 + 4, 'text-anchor': 'end' }, `第 ${r.i} 轮`));
+      const g = sv('g', {});
+      r.segs.forEach(s => {
+        const x = sx(s.s), w = Math.max(1, sx(s.e) - sx(s.s));
+        g.append(sv('rect', { class: 'm', x, y: y + (rowH - barH) / 2, width: w, height: barH, rx: w > 6 ? 3 : 0, fill: KMAP[s.k].c }));
+      });
+      const hit = sv('rect', { class: 'hit', x: L, y, width: W - L - R, height: rowH });
+      hover(hit, e => {
+        const lines = [{ c: KMAP.ttft.c, n: '等首字', v: fmt(r.ttft) }, { c: KMAP.gen.c, n: `思考与输出（${num(r.rsn)} + ${num(r.out)} token）`, v: fmt(r.gen) }];
+        r.tools.forEach(t => lines.push({ c: KMAP.local.c, n: t.label, v: fmt(t.secs) + (t.grmp.length ? ` · GRMP ${t.grmp.length} 次` : '') }));
+        if (r.idle > 0.005) lines.push({ c: KMAP.idle.c, n: '轮前空档', v: fmt(r.idle) });
+        showTip(e, `第 ${r.i} 轮 · 从 ${r.t.toFixed(1)}s 开始`, fmt(roundOwn(r)), lines, r.why.join('；') + '  ·  点击看详情');
+        g.querySelectorAll('rect').forEach(x => x.classList.add('hl'));
+      });
+      hit.addEventListener('pointerleave', () => g.querySelectorAll('rect').forEach(x => x.classList.remove('hl')));
+      hit.addEventListener('click', () => { hideTip(); openRound(r.i); });
+      svg.append(g, hit);
+    });
+    return svg;
+  }
+
+  // ---------- 每轮模型用时(堆叠柱) ----------
+  function perRoundColumns(q) {
+    const W = 560, H = 220, L = 40, R = 8, top = 10, bottom = 26;
+    const vals = q.rounds.map(r => r.ttft + r.gen), ymax = Math.max(...vals) * 1.08 || 1;
+    const step = niceStep(ymax, 4), n = q.rounds.length;
+    const band = (W - L - R) / n, bw = Math.min(24, band - 2);
+    const sy = v => H - bottom - v / ymax * (H - top - bottom);
+    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': '每轮模型用时' });
+    for (let v = 0; v <= ymax; v += step) svg.append(sv('line', { class: 'gl', x1: L, x2: W - R, y1: sy(v), y2: sy(v) }), sv('text', { x: L - 6, y: sy(v) + 4, 'text-anchor': 'end' }, `${+v.toFixed(1)}`));
+    q.rounds.forEach((r, i) => {
+      const x = L + i * band + (band - bw) / 2;
+      const y1 = sy(r.ttft), y2 = sy(r.ttft + r.gen);
+      const g = sv('g', {});
+      g.append(sv('rect', { class: 'm', x, y: y1, width: bw, height: Math.max(0, sy(0) - y1), fill: KMAP.ttft.c }));
+      if (r.gen > 0) g.append(sv('path', { class: 'm', fill: KMAP.gen.c, d: roundTop(x, y2, bw, Math.max(0, y1 - y2 - 2), 3) }));
+      const hit = sv('rect', { class: 'hit', x: L + i * band, y: top, width: band, height: H - top - bottom });
+      hover(hit, e => showTip(e, `第 ${r.i} 轮 · ${r.act}`, fmt(r.ttft + r.gen), [{ c: KMAP.ttft.c, n: '等首字', v: fmt(r.ttft) }, { c: KMAP.gen.c, n: '思考与输出', v: fmt(r.gen) }, { n: '思考 / 输出 token', v: `${num(r.rsn)} / ${num(r.out)}` }], '点击看详情'));
+      hit.addEventListener('click', () => { hideTip(); openRound(r.i); });
+      svg.append(g, hit);
+      if (n <= 20 || (i + 1) % 5 === 0 || i === 0) svg.append(sv('text', { x: x + bw / 2, y: H - 8, 'text-anchor': 'middle' }, r.i));
+    });
+    svg.append(sv('line', { class: 'ax', x1: L, x2: W - R, y1: sy(0), y2: sy(0) }));
+    return svg;
+  }
+  function roundTop(x, y, w, h, r) {
+    if (h <= 0) return '';
+    r = Math.min(r, h, w / 2);
+    return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+  }
+
+  // ---------- 生成量与用时(散点) ----------
+  function scatter(q) {
+    const W = 560, H = 240, L = 44, R = 14, top = 12, bottom = 30;
+    const pts = q.rounds.filter(r => r.gen > 0.05).map(r => ({ r, x: r.rsn + r.out, y: r.gen }));
+    const xmax = Math.max(...pts.map(p => p.x)) * 1.08 || 1, ymax = Math.max(...pts.map(p => p.y)) * 1.12 || 1;
+    const sx = v => L + v / xmax * (W - L - R), sy = v => H - bottom - v / ymax * (H - top - bottom);
+    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': '生成量与用时' });
+    const ys = niceStep(ymax, 4), xs = niceStep(xmax, 5);
+    for (let v = 0; v <= ymax; v += ys) svg.append(sv('line', { class: 'gl', x1: L, x2: W - R, y1: sy(v), y2: sy(v) }), sv('text', { x: L - 6, y: sy(v) + 4, 'text-anchor': 'end' }, `${+v.toFixed(1)}s`));
+    for (let v = 0; v <= xmax; v += xs) svg.append(sv('text', { x: sx(v), y: H - 12, 'text-anchor': 'middle' }, v >= 1000 ? `${+(v / 1000).toFixed(1)}K` : v));
+    svg.append(sv('text', { x: W - R, y: H - 1, 'text-anchor': 'end' }, '思考 + 输出 token'));
+    svg.append(sv('line', { class: 'ax', x1: L, x2: W - R, y1: sy(0), y2: sy(0) }));
+    if (q.speed_median) {      // 中位速度参考线:用时 = token ÷ 中位速度
+      const x2 = Math.min(xmax, ymax * q.speed_median);
+      svg.append(sv('line', { x1: sx(0), y1: sy(0), x2: sx(x2), y2: sy(x2 / q.speed_median), stroke: 'var(--axis)', 'stroke-width': 1.5 }),
+        sv('text', { x: sx(x2 * 0.62) + 10, y: sy(x2 * 0.62 / q.speed_median) + 16, 'text-anchor': 'start' }, `中位速度 ${Math.round(q.speed_median)} token/秒`));
+    }
+    const top2 = [...pts].sort((a, b) => b.y - a.y).slice(0, 2).map(p => p.r.i);
+    pts.forEach(p => {
+      const slow = q.speed_median && p.r.speed && p.r.gen >= 2 && p.r.speed < 0.5 * q.speed_median;
+      const c = slow ? 'var(--serious)' : 'var(--neutral)';
+      const dot = sv('circle', { cx: sx(p.x), cy: sy(p.y), r: 4.5, fill: c, stroke: 'var(--surface-1)', 'stroke-width': 2 });
+      const hit = sv('circle', { class: 'hit', cx: sx(p.x), cy: sy(p.y), r: 12 });
+      hover(hit, e => showTip(e, `第 ${p.r.i} 轮 · ${p.r.act}`, fmt(p.y), [{ n: '思考 token', v: num(p.r.rsn) }, { n: '输出 token', v: num(p.r.out) }, { n: '速度', v: spd(p.r.speed) }], (slow ? '速度明显偏低 · ' : '') + '点击看详情'));
+      hit.addEventListener('click', () => { hideTip(); openRound(p.r.i); });
+      svg.append(dot, hit);
+      if (top2.includes(p.r.i)) svg.append(sv('text', { x: sx(p.x) - 8, y: sy(p.y) + 4, 'text-anchor': 'end', style: 'fill:var(--ink-2)' }, `第 ${p.r.i} 轮`));
+    });
+    return svg;
+  }
+
+  // ---------- 每轮上下文(折线 + 十字线) ----------
+  function ctxLine(q) {
+    const W = 560, H = 220, L = 48, R = 40, top = 10, bottom = 26;
+    const vals = q.rounds.map(r => r.ctx), ymax = Math.max(...vals) * 1.1 || 1, n = vals.length;
+    const sx = i => L + (n === 1 ? 0 : i / (n - 1) * (W - L - R)), sy = v => H - bottom - v / ymax * (H - top - bottom);
+    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': '每轮上下文 token' });
+    const step = niceStep(ymax, 4);
+    for (let v = 0; v <= ymax; v += step) svg.append(sv('line', { class: 'gl', x1: L, x2: W - R, y1: sy(v), y2: sy(v) }), sv('text', { x: L - 6, y: sy(v) + 4, 'text-anchor': 'end' }, v >= 1000 ? `${Math.round(v / 1000)}K` : v));
+    svg.append(sv('path', { d: `M${L},${sy(0)}` + vals.map((v, i) => `L${sx(i)},${sy(v)}`).join('') + `L${sx(n - 1)},${sy(0)}Z`, fill: 'var(--neutral)', opacity: 0.10 }));
+    svg.append(sv('path', { d: vals.map((v, i) => `${i ? 'L' : 'M'}${sx(i)},${sy(v)}`).join(''), fill: 'none', stroke: 'var(--neutral)', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+    svg.append(sv('circle', { cx: sx(n - 1), cy: sy(vals[n - 1]), r: 4, fill: 'var(--neutral)', stroke: 'var(--surface-1)', 'stroke-width': 2 }));
+    svg.append(sv('text', { x: sx(n - 1) + 6, y: sy(vals[n - 1]) + 4, style: 'fill:var(--ink-2)' }, kTok(vals[n - 1])));
+    for (let i = 0; i < n; i++) if (n <= 20 || (i + 1) % 5 === 0 || i === 0) svg.append(sv('text', { x: sx(i), y: H - 8, 'text-anchor': 'middle' }, q.rounds[i].i));
+    svg.append(sv('line', { class: 'ax', x1: L, x2: W - R, y1: sy(0), y2: sy(0) }));
+    const cross = sv('line', { x1: 0, x2: 0, y1: top, y2: H - bottom, stroke: 'var(--axis)', 'stroke-width': 1, visibility: 'hidden' });
+    const dot = sv('circle', { r: 4, fill: 'var(--neutral)', stroke: 'var(--surface-1)', 'stroke-width': 2, visibility: 'hidden' });
+    const hit = sv('rect', { class: 'hit', x: L - 6, y: top, width: W - L - R + 12, height: H - top - bottom });
+    svg.append(cross, dot, hit);
+    const idxAt = e => {
+      const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+      const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+      return Math.max(0, Math.min(n - 1, Math.round((p.x - L) / ((W - L - R) / Math.max(1, n - 1)))));
+    };
+    hit.addEventListener('pointermove', e => {
+      const i = idxAt(e);
+      cross.setAttribute('x1', sx(i)); cross.setAttribute('x2', sx(i)); cross.setAttribute('visibility', 'visible');
+      dot.setAttribute('cx', sx(i)); dot.setAttribute('cy', sy(vals[i])); dot.setAttribute('visibility', 'visible');
+      const r = q.rounds[i];
+      showTip(e, `第 ${r.i} 轮`, `${num(vals[i])} token`, [{ n: '新输入', v: num(r.ctx_in + r.ctx_write) }, { n: '缓存命中', v: num(r.ctx_read) }, { c: 'var(--neutral)', n: '这一轮模型用时', v: fmt(r.ttft + r.gen) }], '点击看详情');
+    });
+    hit.addEventListener('click', e => { hideTip(); openRound(q.rounds[idxAt(e)].i); });
+    hit.addEventListener('pointerleave', () => { hideTip(); cross.setAttribute('visibility', 'hidden'); dot.setAttribute('visibility', 'hidden'); });
+    return svg;
+  }
+
+  // #q2 / #q2-r38 / #text 直接打开;默认打开最慢的一次
+  let worst = 0; Q.forEach((q, i) => { if (q.total > Q[worst].total) worst = i; });
+  const h = location.hash.match(/^#(?:q(\d+)(?:-r(\d+))?|(text))$/);
+  if (h && h[3]) select(-1);
+  else if (h) select(Math.min(Q.length, Math.max(1, +h[1])) - 1, h[2] ? +h[2] : undefined);
+  else select(worst);
+})();
+</script>
+</body>
+</html>

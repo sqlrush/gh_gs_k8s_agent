@@ -5,10 +5,19 @@ GaussDB 数据库智能体的**后端**：把 opencode 与 GaussDB / openGauss �
 
 本仓库是**联合项目**：我方负责后端，前端方负责前端，双方（含各自的编码智能体）在同一个仓库里协作。
 
-## v1.4.7 起：交付分支
+## 发布出口（v1.5.0 起）
 
-代码只在测试仓库 [gh_agent_k8s](https://github.com/sqlrush/gh_agent_k8s) 维护（完整代码 + 行外自测用的模拟组件）。交付给行内的是本仓库的两个分支，
-由测试仓库的转化脚本 `delivery/transform.py` 从发布标签自动生成——**不要在这两个分支上手工修改**（转化脚本发现手改会停下，需要的改动挪回测试仓库再生成）：
+**本仓库是对外发布的唯一出口。** 每个发布版本在这里同时提供下面几样，版本号一致：
+
+| 内容 | 位置 | 标签 |
+|---|---|---|
+| 完整源码（构建全部镜像所需） | `main` 的 `agent/`、`docker/`、`frontend/`、`gateway/`、`k8s/`、`release/`、`scripts/`、`acceptance/`、`delivery/` | `agent-v1.5.0` |
+| Fuyao 沙箱模板材料 | `main` 的 [`e2b/`](e2b/)（模板注册脚本、临时仓库、`Dockerfile.e2b`，与离线包的 `e2b/` 逐字节相同） | `agent-v1.5.0` |
+| 面向客户的手册与白名单 | `main` 的 [`docs/`](docs/)（白名单在 `docs/delivery/`） | `agent-v1.5.0` |
+| 诊断技能包 / 知识库导入技能包 | 分支 `diag` / `kbimport`（见下表） | `diag-v1.5.0` / `kbimport-v1.5.0` |
+| 容器镜像与沙箱模板镜像 | `ghcr.io/sqlrush/gaussdb-agent-*:agent-v1.5.0-oc1.18.27`（见下文「Fuyao 沙箱运行模式」） | — |
+
+代码在开发仓库 [gh_agent_k8s](https://github.com/sqlrush/gh_agent_k8s) 开发，每次发版整体同步到本仓库 `main` 并打同名标签；两个技能包分支由转化脚本 `delivery/transform.py` 从同一发布标签自动生成。**不要在本仓库直接改代码或这两个分支**（转化脚本发现手改会停下），改动在开发仓库做、下次发版同步过来：
 
 | 分支 / 标签 | 内容 | 用在 |
 |---|---|---|
@@ -41,7 +50,7 @@ cat $SK/common/VERSION                                 # v1.5.0 显示 agent-v1.
 
 装完后登录任一实例，在对话里说「做一次部署自检」（或运行 `python3 $SK/gaussdb-login/scripts/selfcheck.py --session <句柄>`）：它核对技能包版本、白名单是否导全、关键脚本能否执行（含执行账号权限）、数据库监控开关，以及（v1.4.11 起）本会话是否切到了业务库、行方白名单里各脚本的执行库与本版是否一致，逐项写明结论和找谁。
 
-`main` 上的后端代码停在 `agent-v1.4.6`，不再更新；v1.4.6 及以前的部署上线方案照旧按各自的标签使用。
+`main` 上的代码与发布标签 `agent-v1.5.0` 一致：`git clone -b agent-v1.5.0 https://github.com/sqlrush/gh_gs_k8s_agent.git`，按《[从源码构建到K8s运行-完整手册](docs/从源码构建到K8s运行-完整手册.md)》可以自己构建全部镜像。v1.4.6 及以前的部署上线方案照旧按各自的标签使用。
 
 | 文档 | 给谁 | 内容 |
 |---|---|---|
@@ -54,11 +63,12 @@ cat $SK/common/VERSION                                 # v1.5.0 显示 agent-v1.
 | [docs/部署上线方案-v1.4.2.md](docs/部署上线方案-v1.4.2.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/deploy/v1.4.2/)） | 留档 | 上一版（agent-v1.4.2）的部署上线方案 |
 | [docs/部署上线方案-v1.4.1.md](docs/部署上线方案-v1.4.1.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/deploy/v1.4.1/)） | 留档 | 上一版（agent-v1.4.1）的部署上线方案 |
 | [docs/部署上线方案-v1.4.0.md](docs/部署上线方案-v1.4.0.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/deploy/v1.4.0/)） | 留档 | 上一版（agent-v1.4.0）的部署上线方案 |
-| [docs/delivery/白名单脚本清单.md](docs/delivery/白名单脚本清单.md) | 中间件团队 | 128 条诊断脚本的用途、参数与 SQL 全文；全量 `scripts.sql` 与 5 份升级增量都在 `docs/delivery/` |
-| [docs/从源码构建到K8s运行-完整手册.md](docs/从源码构建到K8s运行-完整手册.md) | 实施 / 运维 / 开发 | 从拉代码、构建 3 个镜像、推仓库，到部署进 K8s、开通工号、对话里跑通健康检查；可选的固定池化。每步带实测输出 |
+| [docs/delivery/白名单脚本清单.md](docs/delivery/白名单脚本清单.md) | 中间件团队 | 132 条诊断脚本的用途、参数与 SQL 全文；全量 `scripts.sql` 与历次升级增量都在 `docs/delivery/`（诊断技能包的 `whitelist/` 里是同一份） |
+| [docs/从源码构建到K8s运行-完整手册.md](docs/从源码构建到K8s运行-完整手册.md) | 实施 / 运维 / 开发 | 从拉代码（本仓库）、构建镜像、推仓库，到部署进 K8s、开通工号、对话里跑通健康检查；可选的固定池化。每步带实测输出 |
 | [docs/前端对接接口说明.md](docs/前端对接接口说明.md) | 前端 | 接入后端的全部接口（v1.1）：身份与网关行为、对话接口与事件流、报告接口、大盘链接格式、回答正文的渲染与版式、联调清单 |
-| [docs/智能体验收方案.md](docs/智能体验收方案.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/acceptance/)） | 后端 / 项目经理 | **每次升级智能体怎么验收**：11 个方面 48 道题、每题的评分标准（版式、工具、要点、处置、引用、禁止项）、三层评分、失分归因到工具 / 提示词 / 模型、发版门槛；题库在 [acceptance/](acceptance/) |
-| [docs/代码结构说明.md](docs/代码结构说明.md) | 后端 / 前端 / 双方的编码智能体 | 逐个目录说明每个文件的作用、一个请求在代码里怎么走、改什么去哪里（有守卫测试，加删文件要同步） |
+| [docs/智能体验收方案.md](docs/智能体验收方案.md)（[在线查看](https://sqlrush.github.io/gh_gs_k8s_agent/acceptance/)） | 后端 / 项目经理 | **每次升级智能体怎么验收**：11 个方面 53 道题、每题的评分标准（版式、工具、要点、处置、引用、禁止项）、三层评分、失分归因到工具 / 提示词 / 模型、发版门槛；题库在 [acceptance/](acceptance/) |
+| [docs/仓库结构说明.md](docs/仓库结构说明.md) | 后端 / 前端 / 双方的编码智能体 | 逐个目录说明每个文件的作用、改什么去哪里 |
+| [docs/](docs/) 其余手册 | 实施 / 运维 | 《部署手册-从零到上线》《版本说明》《参数手册》《快速搭建-K8s》《对接清单-各方要做什么》《接入手册-SSO与K8s》《固定池化手册》《功能清单-容器版》《单机演示-不用K8s》《现场测试-模拟SSO》《命令卡-测试环境搭建》，与离线包里的 HTML 手册同源 |
 | [docs/api/](docs/api/) | 前端 / 后端 | 机器可读的接口定义：`opencode-1.18.27-openapi.json`（对话接口全集）、`reports-contract.json`（报告字段契约，后端单测逐条核对） |
 | [docs/delivery/回答模板化-交付说明.md](docs/delivery/回答模板化-交付说明.md) | 平台 / 中间件 / 前端 | 回答模板化（2026-10-26）要做的事：白名单增量 3 条、镜像升级、前端第二种颜色、装后冒烟 |
 | [docs/reports/answer-template-comparison-20261026.html](https://sqlrush.github.io/gh_gs_k8s_agent/reports/answer-template-comparison-20261026.html) | 双方 | 回答模板化前后对比：同一组 11 道题在测试环境改造前后各问一次，格式检查、耗时、生成量与原文并排（在线查看） |
@@ -77,7 +87,7 @@ cat $SK/common/VERSION                                 # v1.5.0 显示 agent-v1.
 |---|---|---|
 | 5 个 Docker 镜像 + 发版台 | `ghcr.io/sqlrush/gaussdb-agent-{gateway,frontend,runtime,kb-import,kbstd}:agent-v1.5.0-oc1.18.27`（amd64 / arm64 双架构），发版台 `gaussdb-agent-release`；离线包里同样有 | K8s 集群：网关、前端、状态服务与凭据代理服务（runtime 镜像不同入口）、标准知识库安装 Job |
 | 2 个沙箱模板镜像 | `ghcr.io/sqlrush/gaussdb-agent-{runtime-e2b,kb-import-e2b}:agent-v1.5.0-oc1.18.27`（本版只出 arm64）；离线包里是同内容的 OCI 包 `gaussdb-agent-v1.5.0-oc1.18.27-e2b-arm64.oci.tar`。从 GHCR 拉的要先导出成 OCI 包，做法见部署手册 §2.3 | 在平台的模板构建主机上注册成诊断、导入两种沙箱模板 |
-| 模板注册脚本 | 离线包 `e2b/scripts/build-e2b-template.py`，或测试仓库标签 `agent-v1.5.0` 的 `scripts/build-e2b-template.py`、`scripts/oci-serve.py`（`--from-oci` 用上面的 OCI 包，本机起临时只读仓库供平台拉取） | 模板构建主机（root） |
+| 模板注册脚本 | 本仓库 [`e2b/`](e2b/)（与离线包 `e2b/` 相同）：`e2b/scripts/build-e2b-template.py`、`e2b/scripts/oci-serve.py`、`e2b/docker/Dockerfile.e2b`（`--from-oci` 用上面的 OCI 包，本机起临时只读仓库供平台拉取） | 模板构建主机（root） |
 
 | 文档 | 给谁 | 内容 |
 |---|---|---|
@@ -93,29 +103,34 @@ cat $SK/common/VERSION                                 # v1.5.0 显示 agent-v1.
 | 知识库导入环境 | `gaussdb-agent-kb-import` | 每个知识库管理员一个 | 知识库导入、入库前标准化、官方文档集（CHM）导入；内网网页剪藏（书签 → 剪藏页 → 导入环境）、扫描件 PDF 看图转录、PPT 导入 |
 | 标准知识库 | `gaussdb-agent-kbstd`（我方发布） | 部署时跑一次的 Job | GaussDB 官方文档集，`kubectl apply` 后自动装进知识库（同版本跳过、不碰贵方知识） |
 | 发版台（可选） | `gaussdb-agent-release`（我方发布） | 跳板机上的容器，不进 K8s | 首次部署、升级、回滚：发布前扫描资源、变更预览由运维确认、固定池化按槽位在线替换、冒烟验证；见《发版台运维手册》 |
-| 前端 | 前端方自建 | 可部署进本集群（`k8s/base/frontend.example.yaml`），也可在贵方门户 | 按《前端对接接口说明》接入 |
+| 大盘前端 | `gaussdb-agent-frontend` | Deployment | 诊断大盘、资源大盘的静态页面（`frontend/`），经网关 `/dash/*` 访问；门户页面按《前端对接接口说明》接入 |
 | NAS | — | 一个 RWX 卷 | 唯一的状态所在：`users/<工号>/`（会话、报告）、`kb/`（知识库与索引 `kb/index/store.sqlite`） |
 
 ## 目录
 
 ```
-agent/       技能代码:common/ 公共模块、skills/ 20 个技能(runtime 装 18 个,kb-import 装 3 个)、grmp_middleware/ 中间件客户端与模拟服务、tests/ 单测
-docker/      Dockerfile(base → runtime / kb-import)、Dockerfile.gateway、容器启动脚本、凭据代理、固定池化的管家与槽位程序、报告端口
+agent/       技能代码:common/ 公共模块(含 timing/ 交互耗时报告)、skills/ 技能、grmp_middleware/ 中间件客户端与模拟服务、
+             scripts/registry/ 白名单脚本定义、tests/ 单测
+docker/      Dockerfile(runtime / kb-import / gateway / kbstd / release / e2b 沙箱模板)、容器启动脚本、凭据代理、固定池化的管家与槽位程序
+frontend/    大盘前端(诊断大盘、资源大盘)的静态页面
 gateway/     接入网关
-k8s/         base/ 部署清单;templates/ 网关按工号建 Pod 的模板;tools/ 现场工具(runtime-doctor、sso-sim、render-pool);local/ 本地测试集群覆盖
-scripts/     构建、离线打包、大盘样例数据(dash-samples.py)、测试集群与端到端脚本
-docs/        构建部署手册、前端对接接口说明、代码结构说明、智能体验收方案、api/ 机器可读的接口定义
-acceptance/  智能体版本验收:bank/v1/ 48 题评分标准、fixtures/ 夹具、run.py 跑题评分出报告、check_bank.py 离线校验
+k8s/         base/ 部署清单;fuyao/ Fuyao 沙箱模式;templates/ 网关建 Pod 的模板;overlays/ 现场覆盖;release/ 发版台;tools/ 现场工具;local/ 本地测试集群
+release/     发版台(首次部署、升级、回滚)与离线包元数据
+scripts/     构建、离线打包、模板注册(build-e2b-template.py、oci-serve.py)、测试集群与端到端脚本
+e2b/         Fuyao 沙箱模板材料(与离线包 e2b/ 相同)
+docs/        面向客户的手册、白名单(delivery/)、接口定义(api/)、各版部署页
+acceptance/  智能体版本验收:题库、夹具、跑题评分出报告
+delivery/    转化脚本:从发布标签生成 diag / kbimport 两个技能包分支
 ```
 
-前端代码约定放在 `frontend/`（由前端方建立与维护）。
+`frontend/` 自 v1.5.0 起是我方大盘前端（`gaussdb-agent-frontend` 镜像）的源码，随发布标签同步；前端方的门户页面按《前端对接接口说明》对接，如需放在本仓库，另建目录并在下表登记。
 
 ## 分工与协作约定
 
 | 范围 | 负责方 | 目录 |
 |---|---|---|
-| 后端：网关、用户镜像、技能、部署清单、构建与打包脚本、验收题库 | 我方 | `agent/`、`docker/`、`gateway/`、`k8s/`、`scripts/`、`acceptance/` |
-| 前端：页面、大盘、前端镜像 | 前端方 | `frontend/` |
+| 后端：网关、用户镜像、技能、大盘前端、部署清单、发版台、构建与打包脚本、沙箱模板材料、验收题库 | 我方（开发仓库同步） | `agent/`、`docker/`、`frontend/`、`gateway/`、`k8s/`、`release/`、`scripts/`、`e2b/`、`acceptance/`、`delivery/` |
+| 前端：门户页面 | 前端方 | 另建目录并登记 |
 | 接口：对话 / 报告接口、事件、链接格式、报告字段契约 | 双方共同 | `docs/前端对接接口说明.md`、`docs/api/` |
 
 - **接口变更走契约**：后端改报告字段、前端要用新字段，都先改 `docs/api/reports-contract.json` 与接口说明，再改代码，三者在同一个提交里；
@@ -135,7 +150,7 @@ pip install pytest PyYAML cryptography psycopg2-binary sqlite-vec pillow pycrypt
 python -m pytest -q
 ```
 
-五组测试：`agent/tests/`（技能与公共模块）、`docker/tests/`（容器程序）、`gateway/tests/`（网关）、`scripts/k8s/tests/`（部署脚本与清单守卫）、`acceptance/tests/`（验收题库）。
+七组测试：`agent/tests/`（技能与公共模块）、`docker/tests/`（容器程序）、`gateway/tests/`（网关）、`release/tests/`（发版台）、`scripts/k8s/tests/`（部署脚本与清单守卫）、`delivery/tests/`（转化脚本）、`acceptance/tests/`（验收题库）。
 需要真实数据库的用例（标记 `live`）没配连接时自动跳过。
 
 ## 许可

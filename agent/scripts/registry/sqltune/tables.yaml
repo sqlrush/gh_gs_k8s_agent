@@ -27,6 +27,7 @@
 # 拿冻结值复算的话，这张表的 Seq Scan 代价会差 3.5%，校准闸会判模型不适用
 # —— 而真正的原因是取错了页数来源。
 name: sqltune.tables
+database_type: appbusiness
 description: SQL 涉及的表的页数/行数/大小（证据包 ## Tables）
 sql: |
   SELECT n.nspname, c.relname, c.relpages,

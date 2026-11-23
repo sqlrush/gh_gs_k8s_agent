@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 构建后端三个镜像;第 4 个 kbstd(标准知识库:GaussDB 官方文档集)要给 --kbstd <放 kb-std-*.tar.gz 的目录> 才构建
-# (包不在代码仓库里,由我方随版本发布在镜像仓与离线包里),不给就跳过并说明。默认本机架构;--platform linux/amd64,linux/arm64 交叉构建(需要 buildx)。
+# 构建镜像:runtime、kb-import、gateway、frontend 四个从源码构建;第 5 个 kbstd(标准知识库)要给 --kbstd <目录>
+# (放 kb-std-*.tar.gz 的目录,包不在代码仓库里)才构建,不给就跳过并说明。默认本机架构;--platform linux/amd64,linux/arm64 交叉构建(需要 buildx)。
 #
 # 用法: scripts/build-images.sh [TAG] [--platform P] [--registry R --push [--single-arch]] [--kbstd <目录>]
 #   本地构建:   scripts/build-images.sh dev
@@ -68,12 +68,15 @@ done
 # shellcheck disable=SC2086
 docker buildx build $PLATFORM $LOAD $PUSH -f "$HERE/docker/Dockerfile.gateway" \
   -t "${PREFIX}gaussdb-agent-gateway:$TAG" "$HERE"
-# 前端不在本仓库构建:由前端方自建镜像,按 docs/前端对接接口说明.md 接入
+# 前端是纯静态 + nginx,没有构建步骤,也没有可复用的层
+# shellcheck disable=SC2086
+docker buildx build $PLATFORM $LOAD $PUSH -f "$HERE/docker/Dockerfile.frontend" \
+  -t "${PREFIX}gaussdb-agent-frontend:$TAG" "$HERE"
 # 发版台:跳板机上跑的独立程序(不进 k8s)。随离线包单独一个 tar 发出,不推进行方的镜像仓库
 # shellcheck disable=SC2086
 docker buildx build $PLATFORM $LOAD $PUSH -f "$HERE/docker/Dockerfile.release" \
   -t "${PREFIX}gaussdb-agent-release:$TAG" "$HERE"
-echo "built: ${PREFIX}gaussdb-agent-{runtime,kb-import,gateway,release}:$TAG"
+echo "built: ${PREFIX}gaussdb-agent-{runtime,kb-import,gateway,frontend,release}:$TAG"
 # 标准知识库(官方文档集):只装数据包,部署时由 Job kbstd-install 装进 NAS。包不在代码仓库里,要从 --kbstd 传进来
 if [ -n "$KBSTD" ]; then
   # shellcheck disable=SC2086

@@ -1,0 +1,19 @@
+# 窗口内 redo(xlog)写了多少(2026-11-05 加):两个快照的 redo 文件 IO 计数之差 —— 物理写次数与写入块数。
+# 官方 WDR 报告的「Redo size(blocks)」就是这一项;块数按 8KB 一块折算成字节,报告里写「约」。
+name: wdr.redo_io
+description: 窗口内 redo（xlog）的物理写次数与写入块数
+readonly: true
+params:
+  - key: b
+    type: INTEGER
+    description: 起始快照 ID
+  - key: e
+    type: INTEGER
+    description: 结束快照 ID
+sql: |
+  SELECT COALESCE(SUM(e.snap_phywrts - b.snap_phywrts), 0) AS writes,
+         COALESCE(SUM(e.snap_phyblkwrt - b.snap_phyblkwrt), 0) AS blocks
+    FROM snapshot.snap_global_file_redo_iostat e
+    JOIN snapshot.snap_global_file_redo_iostat b
+      ON b.snapshot_id = {{b}} AND b.snap_node_name = e.snap_node_name
+   WHERE e.snapshot_id = {{e}};

@@ -82,9 +82,10 @@ def test_the_other_local_dimensions_are_untouched():
 
     storage 是后来（2026-10-17）新增的一维，不是这次交接动的 ——
     列在这里是为了让"少了一维"依然能被这条测试抓住。
+    wal 是 2026-11-05 新增的一维(xlog 生成速度与写入来源),紧跟 logs(checkpoint·WAL·归档)。
     """
     keys = [k for k, _ in collectors.registry()]
-    assert keys == ["overview", "slowsql", "xact", "conn", "logs", "repl",
+    assert keys == ["overview", "slowsql", "xact", "conn", "logs", "wal", "repl",
                     "schema", "storage", "concurrency"]
     for gone in ("waits", "bloat", "lwlock", "locks"):
         assert gone not in keys

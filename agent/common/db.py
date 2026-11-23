@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import dataclasses
+
 from typing import Any, Optional, Sequence
 
 from .backends.base import Backend, DBError  # 再导出
@@ -74,9 +76,12 @@ class Database:
         return cls(backend, conn)
 
     @classmethod
-    def connect(cls, name: str = "", read_only: bool = True) -> "Database":
-        """name 省略时用 gaussdb-login 建立的会话（见 config.resolve）。"""
+    def connect(cls, name: str = "", read_only: bool = True, database: str = "") -> "Database":
+        """name 省略时用 gaussdb-login 建立的会话（见 config.resolve）。database:连同一实例上的另一个库
+        (模拟中间件按 dbName 切库用;凭据仍是该连接的)。"""
         conn = resolve(name)
+        if database:
+            conn = dataclasses.replace(conn, database=database)
         return cls.open(conn, secret_for(conn), read_only=read_only)
 
     def query(self, sql, params=None):

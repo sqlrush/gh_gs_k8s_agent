@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import yaml
 
+from . import routing
 from .placeholder import ParamDef, api_type_name, extract_placeholders
 from .statement import is_read_only
 
@@ -127,8 +128,9 @@ class ScriptRecord:
 
         这份 JSON 是双方共享的数据资产，格式偏一点，导出的 DML 行方就用不了。
         autoAcquire 是 JSON 布尔 false，不是字符串。
+        appbusiness 的脚本最前面多一项 dbName(路由参数,见 routing.py),写法与行方已改好的记录逐字一致。
         """
-        items = [
+        items = ([routing.CONFIG_ENTRY] if self.database_type == routing.APPBUSINESS else []) + [
             {
                 "key": p.key,
                 "value": "",
@@ -196,8 +198,9 @@ class ScriptRecord:
             "cmd_name": self.script_name,
             "description": self.script_name,
             "cmd_type": self.script_type,
-            # OperationParam（四字段），与请求里的 OperationValue 不是同一结构
-            "param": [
+            # OperationParam（四字段），与请求里的 OperationValue 不是同一结构;
+            # appbusiness 的脚本最前面是路由参数 dbName(行方规范 required:false)
+            "param": ([dict(routing.API_PARAM)] if self.database_type == routing.APPBUSINESS else []) + [
                 {
                     "param_name": p.key,
                     "data_type": api_type_name(p.type),
@@ -322,6 +325,13 @@ def load_script(path: pathlib.Path) -> ScriptRecord:
             "不声明就默认只读的话，一条写脚本能注册进去却永远执行不了 ——"
             "既不报错也不能用，问题要到执行时才暴露。" % path
         )
+
+    if data.get("database_type", routing.POSTGRES) not in routing.DATABASE_TYPES:
+        raise ScriptError(
+            "%s: database_type 只能是 %s,收到 %r(appbusiness = 中间件按调用时给的 dbName 切到业务库执行)"
+            % (path, " / ".join(routing.DATABASE_TYPES), data.get("database_type")))
+    if any(str(p.get("key", "")) == routing.PARAM for p in (data.get("params") or []) if isinstance(p, dict)):
+        raise ScriptError("%s: %s 是路由参数,由 database_type: appbusiness 自动带上,不要写进 params" % (path, routing.PARAM))
 
     overrides = {
         key: data[key]

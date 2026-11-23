@@ -8,8 +8,8 @@
   topsql/og5/…  wdr/og5/…  sqltune/og5/1a9f.json  kb/health.json  kb/queries.jsonl  whoami.json
 
 两个用途:
-  · 前端开发的样例数据:把输出目录当成 /reports/ 端出来(任何静态服务器都行),页面不连真集群也能开发与验收;
-  · agent/tests/test_frontend_contract_units.py 拿同一批构造函数核对 docs/api/reports-contract.json。
+  · scripts/dash-preview.sh 拿它起本地预览站,四个页面对着它开发与验收;
+  · agent/tests/test_frontend_contract_units.py 拿同一批构造函数核对 frontend/lib/contract.json。
 样例形状一变,两边一起变 —— 这就是不手写 JSON 的原因。
 """
 from __future__ import annotations

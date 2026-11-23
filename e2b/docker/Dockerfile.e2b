@@ -1,0 +1,62 @@
+# Fuyao 运行模式(2026-11-17):构建 E2B 模板用的镜像。由 scripts/build-e2b-template.py 在构建服务所在的主机上构建,
+# 不推任何仓库 —— 导出成 OCI 目录后由 scripts/oci-serve.py 只读端出(127.0.0.1),平台的模板构建服务从那里拉。
+#
+# 在已发布的镜像上只加两样(业务代码与技能不变,模板与同版本的容器版逐字节同源):
+#   1. 磁盘占位文件:平台按「镜像大小 + 固定余量」定模板磁盘,模板参数里的 diskSizeMB 不生效(平台实测);
+#      全零文件撑大磁盘,沙箱启动时 podctl fuyao-start 删掉它,空间留给用户状态。全零数据压缩后只有几 MB。
+#   2. 两种模板都内置官方文档集(kb/docsets):沙箱挂不了 NAS,文档集随版本走,不必每台沙箱都从状态服务拉一遍
+#      (导入环境实测拉一遍近两分钟)。状态服务给两种环境的知识库清单都不含 docsets,发布也不动它。
+#      用导入镜像里的 `kb.py docset install` 装(与 kbstd-install Job、管理员手工安装是同一段代码)。
+#
+# **最后压成一层**(FROM scratch + COPY --from=… / /):平台的模板构建服务解层时**不处理 OCI whiteout**(实测):
+# 上层删掉的文件全回来了(诊断镜像里删掉的两个导入技能、/opt/agent/src、pip 都在),`.wh.*` 标记文件也留在
+# 根文件系统里(属主 root、权限 000,entrypoint.sh 复制配置目录时读不了而失败)。压成一层就没有 whiteout 可处理。
+# 压层会丢镜像配置,ENV / USER / WORKDIR / ENTRYPOINT 在下面照 docker/Dockerfile 原样补回(守卫测试核对)。
+#
+# 构建参数:
+#   RUNTIME_IMAGE / KBIMPORT_IMAGE / KBSTD_IMAGE   同一版本的三个镜像(本机 containerd 里已有,或可拉取)
+#   RESERVE_MB                                     占位文件大小,默认 6144(模板磁盘约 9.3GB,删后可用约 8GB)
+# 目标:runtime-e2b(诊断)、kbimport-e2b(导入)
+ARG RUNTIME_IMAGE
+ARG KBIMPORT_IMAGE
+ARG KBSTD_IMAGE
+
+FROM ${KBSTD_IMAGE} AS kbstd
+
+FROM ${KBIMPORT_IMAGE} AS docsets
+USER root
+COPY --from=kbstd /kbstd/ /packs/
+RUN mkdir -p /out/kb \
+    && python3 /opt/agent/config/opencode/skills/gaussdb-kb-import/scripts/kb.py docset install /packs --kb /out/kb \
+    && test -d /out/kb/docsets && chmod -R a+rX /out/kb/docsets
+
+FROM ${RUNTIME_IMAGE} AS runtime-prep
+ARG RESERVE_MB=6144
+USER root
+COPY --from=docsets /out/kb/docsets /data/kb/docsets
+RUN mkdir -p /var/lib/gsdb && chmod 0700 /var/lib/gsdb \
+    && dd if=/dev/zero of=/var/lib/gsdb/disk-reserve bs=1M count=${RESERVE_MB} status=none
+
+FROM ${KBIMPORT_IMAGE} AS kbimport-prep
+ARG RESERVE_MB=6144
+USER root
+COPY --from=docsets /out/kb/docsets /data/kb/docsets
+RUN mkdir -p /var/lib/gsdb && chmod 0700 /var/lib/gsdb \
+    && dd if=/dev/zero of=/var/lib/gsdb/disk-reserve bs=1M count=${RESERVE_MB} status=none
+
+FROM scratch AS runtime-e2b
+COPY --from=runtime-prep / /
+ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 \
+    PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TZ=Asia/Shanghai GSDB_ROOTSPEC_HOME=/workspace
+USER agent
+WORKDIR /data
+ENTRYPOINT ["/opt/agent/entrypoint.sh"]
+
+FROM scratch AS kbimport-e2b
+COPY --from=kbimport-prep / /
+ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 \
+    PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TZ=Asia/Shanghai GSDB_ROOTSPEC_HOME=/workspace \
+    GSDB_KB_INBOX=/nas/kb/inbox/uploads AGENT_ROLE=kb-import
+USER agent
+WORKDIR /data
+ENTRYPOINT ["/opt/agent/entrypoint.sh"]

@@ -3,21 +3,27 @@
 模型、中间件、NAS 写入在**集群里面**测:跳板机连得上不代表 Pod 连得上(中间隔着网络策略)。已有池子时借管家容器
 (它的网络策略放行模型与中间件,模型 Key 也在它的环境变量里 —— 探测脚本在容器里读,密钥不出容器);首次部署还没有池子,
 这几项标「首次部署后核对」,由冒烟验证兜底。
+
+Fuyao 运行模式(gateway-config 的 RUNTIME_MODE=fuyao)没有池子:不找管家、不看池子,模型与中间件由冒烟验证核对;
+另加一项「Fuyao 沙箱」:状态服务、凭据代理服务两个 Deployment 就绪,gateway-config 的 FUYAO_API 有值,
+Secret gateway-auth 有 ADMIN_TOKEN(1.5.0 起 Fuyao 模式必填)。
 """
 from __future__ import annotations
 
 import json
 import pathlib
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from . import package, wldb
 from .kube import Kube, KubeError
+from .plan import FUYAO, FUYAO_DEPLOYS, runtime_mode
 from .store import Store
 
 OK, BAD, WARN = "ok", "bad", "warn"
 NAMES = {"dir": "发布包目录", "registry": "内网镜像仓库", "k8s": "Kubernetes", "nas": "NAS", "model": "模型服务",
-         "grmp": "中间件", "whitelist": "白名单核对", "sso": "统一认证", "capacity": "集群余量"}
+         "grmp": "中间件", "whitelist": "白名单核对", "sso": "统一认证", "capacity": "集群余量", "fuyao": "Fuyao 沙箱"}
+FUYAO_LATER = "Fuyao 模式:沙箱经凭据代理服务访问,由冒烟验证核对"
 
 MAX_SKEW = 1      # kubectl 与集群相差的小版本数,超过就提示(k8s 的版本偏差策略)
 
@@ -88,13 +94,20 @@ class Scanner:
     target: str = ""                     # 目标版本标签:核它的 sha256
     log: Callable[[str], None] = lambda _m: None
     db_rows: Callable[[Dict[str, Any], str], List[tuple]] = wldb.rows     # 白名单只读账号;测试替换
+    mode: str = field(default="", init=False)                             # 集群的运行模式,run() 开头读一次
 
     def cfg(self) -> Dict[str, Any]:
         return self.store.config()
 
     def run(self) -> List[Item]:
+        try:
+            self.mode = runtime_mode(self.kube)
+        except KubeError:
+            self.mode = ""                      # 读不到 ConfigMap:按非 Fuyao 扫,Kubernetes 一项会报出权限问题
+        checks = [self.dir, self.registry, self.k8s] + ([self.fuyao] if self.mode == FUYAO else []) + [
+            self.nas, self.model, self.grmp, self.whitelist, self.sso, self.capacity]
         items = []
-        for fn in (self.dir, self.registry, self.k8s, self.nas, self.model, self.grmp, self.whitelist, self.sso, self.capacity):
+        for fn in checks:
             try:
                 it = fn()
             except Exception as exc:            # noqa: BLE001  一项出错不影响其他项
@@ -114,6 +127,8 @@ class Scanner:
         return None
 
     def _probe(self, script: str) -> Optional[dict]:
+        if self.mode == FUYAO:
+            return None                         # 没有池子,不找管家
         pod = self._steward()
         if not pod:
             return None
@@ -185,6 +200,32 @@ class Scanner:
                        "启动时用 --kubectl 换成集群配套的 kubectl" % (v["client"], v["server"], abs(v["client"] - v["server"]), MAX_SKEW))
         return it
 
+    def fuyao(self) -> Item:
+        """Fuyao 模式:两个集群服务就绪(就绪副本数达到期望)、OpenSandbox 地址有值。模板在发布的「模板核对」一步查。"""
+        api = str(((self.kube.get("configmap", "gateway-config") or {}).get("data") or {}).get("FUYAO_API") or "").strip()
+        problems = [] if api else ["gateway-config 的 FUYAO_API 没填(OpenSandbox 地址)"]
+        auth = self.kube.get("secret", "gateway-auth")
+        if auth is not None and not str((auth.get("data") or {}).get("ADMIN_TOKEN") or "").strip():
+            # 1.5.0 起 Fuyao 模式的网关缺它不启动;首次部署(还没有这个 Secret)由发版台生成,不报
+            problems.append("Secret gateway-auth 没有 ADMIN_TOKEN:1.5.0 起 Fuyao 模式必填(网关缺它不启动),"
+                            "先补上:kubectl -n <命名空间> patch secret gateway-auth --type merge "
+                            "-p '{\"stringData\":{\"ADMIN_TOKEN\":\"<openssl rand -hex 24 生成>\"}}'")
+        ready = []
+        for name in FUYAO_DEPLOYS:
+            d = self.kube.get("deploy", name)
+            if d is None:
+                problems.append("没有 Deployment %s(k8s/fuyao/%s.yaml)" % (name, name))
+                continue
+            want = int((d.get("spec") or {}).get("replicas", 1) or 0)
+            have = int((d.get("status") or {}).get("readyReplicas") or 0)
+            if want < 1 or have < want:
+                problems.append("%s 就绪 %d/%d" % (name, have, want))
+            else:
+                ready.append("%s %d/%d" % (name, have, want))
+        if problems:
+            return Item("fuyao", "Fuyao 沙箱", api, BAD, ";".join(problems))
+        return Item("fuyao", "Fuyao 沙箱", api, OK, "状态服务、凭据代理服务就绪(%s)" % "、".join(ready))
+
     def nas(self) -> Item:
         pvc = self.kube.get("pvc", "nas")
         if pvc is None:
@@ -194,7 +235,8 @@ class Scanner:
             return Item("nas", "NAS", "PVC nas", BAD, "PVC 状态 %s(没有绑定到 PV)" % phase)
         r = self._probe(PROBE_NAS)
         if r is None:
-            return Item("nas", "NAS", "PVC nas", OK, "已绑定(还没有池子,写入在首次部署后核对)")
+            return Item("nas", "NAS", "PVC nas", OK, "已绑定(Fuyao 模式由状态服务读写,写入在冒烟时核对)" if self.mode == FUYAO
+                        else "已绑定(还没有池子,写入在首次部署后核对)")
         if not r["ok"]:
             return Item("nas", "NAS", "PVC nas", BAD, "uid %s 写入失败:%s · 请存储团队把 users/ 的属主改为 1000" % (r["uid"], r["err"]))
         return Item("nas", "NAS", "PVC nas", OK, "uid %s 可写 · 剩余 %s GiB" % (r["uid"], r["free_gib"]))
@@ -202,7 +244,7 @@ class Scanner:
     def model(self) -> Item:
         r = self._probe(PROBE_MODEL)
         if r is None:
-            return Item("model", "模型服务", "", WARN, "还没有池子:首次部署后由冒烟验证核对")
+            return Item("model", "模型服务", "", WARN, FUYAO_LATER if self.mode == FUYAO else "还没有池子:首次部署后由冒烟验证核对")
         addr, code, err = r.get("model") or "", r["code"], (" · 服务方原话:%s" % r["err"]) if r.get("err") else ""
         if code == 200:
             return Item("model", "模型服务", addr, OK, "从集群里对话通 · %d ms" % r["ms"])
@@ -222,7 +264,7 @@ class Scanner:
     def grmp(self) -> Item:
         r = self._probe(PROBE_GRMP)
         if r is None:
-            return Item("grmp", "中间件", "", WARN, "还没有池子:首次部署后由冒烟验证核对")
+            return Item("grmp", "中间件", "", WARN, FUYAO_LATER if self.mode == FUYAO else "还没有池子:首次部署后由冒烟验证核对")
         if not r["has_prefix"]:
             return Item("grmp", "中间件", "", BAD, "agent-config 缺 GRMP_PATH_PREFIX")
         if not r["ok"]:

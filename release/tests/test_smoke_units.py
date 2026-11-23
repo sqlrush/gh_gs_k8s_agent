@@ -18,10 +18,12 @@ TRUST = "t" * 24
 
 
 class FakeGateway:
-    def __init__(self, warmup=2, check_trust=True, kb_grows=True, chat_error=None, asks=False):
+    def __init__(self, warmup=2, check_trust=True, kb_grows=True, chat_error=None, asks=False, reports=0,
+                 keep=None, report_grows=True):
         self.warmup, self.check_trust, self.kb_grows, self.chat_error = warmup, check_trust, kb_grows, chat_error
+        self.keep, self.report_grows = keep, report_grows
         self.asks, self.aborted = asks, []
-        self.reports, self.kb_lines, self.titles = 0, 1, []
+        self.reports, self.kb_lines, self.titles = reports, 1, []
         gw = self
 
         class H(http.server.BaseHTTPRequestHandler):
@@ -62,14 +64,16 @@ class FakeGateway:
                         import time as _t
                         _t.sleep(2)                       # 模型在等人回答:请求不返回
                         return self._send(200, {})
-                    if "健康检查" in text:
+                    if "健康检查" in text and gw.report_grows:
                         gw.reports += 1
                     if "知识库" in text and gw.kb_grows:
                         gw.kb_lines += 1
                     return self._send(200, {"info": {"error": gw.chat_error}, "parts": [
                         {"type": "tool", "tool": "bash"}, {"type": "text", "text": "冒烟通过"}]})
                 if self.path == "/reports/health/targets.json":
-                    return self._send(200, [{"key": "og5", "label": "og5", "count": gw.reports}])
+                    count = gw.reports if gw.keep is None else min(gw.reports, gw.keep)   # 每个实例只留最近 keep 份
+                    return self._send(200, [{"key": "og5", "label": "og5", "count": count,
+                                             "last_at": "20261106T%06dZ" % gw.reports}])
                 if self.path == "/reports/kb/queries.jsonl":
                     return self._send(200, raw=b"".join(b'{"q":"x"}\n' for _ in range(gw.kb_lines)))
                 self._send(404)
@@ -156,5 +160,26 @@ def test_a_model_waiting_for_the_user_is_named_and_the_session_aborted():
         c = next(c for c in s.results if c.name == "只读诊断报告")
         assert not c.ok and "等人回答" in c.detail and "og5" in c.detail
         assert g.aborted and g.aborted[0].endswith("/abort")
+    finally:
+        g.close()
+
+
+def test_a_new_report_counts_even_when_the_archive_is_full():
+    """每个实例只留最近 50 份:满了以后新报告挤掉最老的,份数 50 → 50,要看最新一份的时间(2026-11-06 测试环境撞到)。"""
+    g = FakeGateway(warmup=0, reports=50, keep=50)
+    try:
+        s = _smoke(g, instance="og5")
+        assert s.run("v")
+        c = s.results[2]
+        assert c.ok and "报告 50 → 50 份" in c.detail and "份数已到上限" in c.detail
+    finally:
+        g.close()
+
+
+def test_no_new_report_still_fails_when_the_archive_is_full():
+    g = FakeGateway(warmup=0, reports=50, keep=50, report_grows=False)
+    try:
+        s = _smoke(g, instance="og5")
+        assert not s.run("v") and not s.results[2].ok
     finally:
         g.close()

@@ -211,5 +211,92 @@ def compare(expected: Mapping[str, Script], registered: Iterable[Registered]) ->
     return rep
 
 
+# -- 增量:推断白名单导到了哪一份(2026-11-19) -------------------------------------------------------------
+# 演练环境回归:集群已是新版本,白名单却还停在更早的增量。按集群版本推算只会叫人导本版那一份,前面缺的照样缺;
+# 反过来多列一份已经导过、带 INSERT 的增量,重导会插出重名记录。所以按白名单本身推断:每条有问题的脚本,
+# 已登记的正文 / 参数等于哪一份增量导完后的样子,就从它下一份改到这条脚本的增量起导;推断不出来就不猜。
+
+_UPDATE = re.compile(r"UPDATE\s+grmp\.script_config\s+SET\s+(.*?)\s+WHERE\s+script_name\s*=\s*'([^']+)'", re.S | re.I)
+
+
+def _literal(text: str, key: str) -> Optional[str]:
+    """SET 子句里 key = '…' 的字符串值('' 还原成 ');没有这个字段返回 None。"""
+    m = re.search(r"\b%s\s*=\s*'" % re.escape(key), text)
+    if not m:
+        return None
+    buf, j = [], m.end()
+    while True:
+        k = text.find("'", j)
+        if k < 0:
+            raise WhitelistError("%s 的字符串没有闭合" % key)
+        buf.append(text[j:k])
+        if text[k + 1:k + 2] == "'":
+            buf.append("'")
+            j = k + 2
+            continue
+        return "".join(buf)
+
+
+def parse_delta(text: str) -> Dict[str, Dict]:
+    """一份增量 → {added: {名: md5}, changed: {名: md5}, params: {名: [[key, type], ...]}}(只记写了 parameter_config 的)。"""
+    added: Dict[str, str] = {}
+    params: Dict[str, List[List[str]]] = {}
+    if _INSERT.search(text):
+        for s in parse_dml(text).values():
+            added[s.name] = s.md5
+            params[s.name] = [list(p) for p in s.params]
+    changed: Dict[str, str] = {}
+    for body, name in _UPDATE.findall(text):
+        content = _literal(body, "script_content")
+        if content is not None:
+            changed[name] = hashlib.md5(content.encode("utf-8")).hexdigest()
+        pc = _literal(body, "parameter_config")
+        if pc is not None:
+            params[name] = [list(p) for p in param_keys(pc)]
+    return {"added": added, "changed": changed, "params": params}
+
+
+def deltas_from_dir(delivery) -> List[dict]:
+    """docs/delivery/ 下全部增量,从旧到新(文件名按日期)。打包时写进 release.yaml。"""
+    import pathlib
+    out = []
+    for f in sorted(pathlib.Path(delivery).glob("scripts-delta-*.sql")):
+        out.append(dict({"file": f.name}, **parse_delta(f.read_text(encoding="utf-8"))))
+    return out
+
+
+def suggest(deltas: List[Mapping], findings: Iterable[Finding], registered: Iterable[Registered]
+            ) -> Tuple[Optional[List[str]], str]:
+    """要按顺序导哪几份增量 → (文件名列表, "");推断不出 → (None, 原因)。只看未登记 / 正文 / 参数不一致的;
+    重名、未生效不是导增量能解决的,不影响结果。"""
+    if not deltas:
+        return None, "目标包里没有各份增量的内容(旧版本的包)"
+    by: Dict[str, Registered] = {}
+    for r in registered:
+        by.setdefault(r.name, r)
+    starts: List[int] = []
+    for f in findings:
+        if f.status == MISSING:
+            hit = [i for i, d in enumerate(deltas) if f.name in d["added"]]
+            if not hit:
+                return None, "%s 未登记,但它不是哪一份增量新增的" % f.name
+            starts.append(hit[0])
+        elif f.status in (CONTENT, PARAMS) and f.name in by:
+            got = by[f.name]
+            if f.status == CONTENT:
+                seen = [i for i, d in enumerate(deltas) if (d["added"].get(f.name) or d["changed"].get(f.name)) == got.md5]
+                later = lambda i: [j for j, d in enumerate(deltas) if j > i and (f.name in d["added"] or f.name in d["changed"])]
+            else:
+                seen = [i for i, d in enumerate(deltas) if tuple(tuple(p) for p in d["params"].get(f.name, [["?"]])) == got.params]
+                later = lambda i: [j for j, d in enumerate(deltas) if j > i and f.name in d["params"]]
+            if not seen or not later(max(seen)):
+                return None, "%s 已登记的%s对不上任何一份增量导完后的样子(可能是更早的版本或手工改过)" % (
+                    f.name, "正文" if f.status == CONTENT else "参数")
+            starts.append(later(max(seen))[0])
+    if not starts:
+        return [], ""
+    return [d["file"] for d in deltas[min(starts):]], ""
+
+
 def _fmt(params: Tuple[Tuple[str, str], ...]) -> str:
     return "[%s]" % ", ".join("%s:%s" % p for p in params) if params else "[]"

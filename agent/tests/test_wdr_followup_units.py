@@ -48,19 +48,19 @@ def _cmds(steps):
 
 # ---------------------------------------------------------------- 窗口要带对
 
-def test_the_wait_event_command_carries_this_windows_snapshots():
-    """**第一版的实打实的 bug:** 发的是裸 `waitevent.py` —— 它默认取最近几个快照,
-    跑出来是「现在」的等待构成,而报告分析的是另一段时间。命令对、窗口错,
-    输出看着完全正常,这种错最难发现。"""
+def test_the_wait_skew_command_looks_back_at_this_windows_time():
+    """等待类倾斜追到业务(2026-11-05):原先发 waitevent,它同样只到等待事件,是死胡同;改为回看同一时段谁持锁。
+    **命令必须带本次窗口的时间**:不带窗口的检查跑出来是「现在」,而报告分析的是另一段时间(第一版的实打实的 bug)。"""
     steps = F.plan([_f("WDR_WAIT_CLASS_SKEW")], _W)
-    cmd = next(c for c in _cmds(steps) if "waitevent" in c)
-    assert "--begin 2981" in cmd and "--end 2987" in cmd
-
-
-def test_a_window_without_snapshot_ids_drops_the_command_instead_of_guessing():
-    """填不出快照号就不发 —— 不带窗口的 waitevent 会给出另一段时间的答案。"""
-    steps = F.plan([_f("WDR_WAIT_CLASS_SKEW")], Window())
     assert not any("waitevent" in c for c in _cmds(steps))
+    cmd = next(c for c in _cmds(steps) if "lockwait" in c)
+    assert "--from '2026-10-17 10:46'" in cmd and "--to '" in cmd
+
+
+def test_a_window_without_times_drops_the_command_instead_of_guessing():
+    """填不出窗口时间就不发 —— 不带窗口的回看会给出另一段时间的答案。"""
+    steps = F.plan([_f("WDR_WAIT_CLASS_SKEW")], Window())
+    assert not any("lockwait" in c for c in _cmds(steps))
 
 
 def test_the_sql_id_is_filled_in():

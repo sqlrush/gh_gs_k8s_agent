@@ -97,3 +97,12 @@ def test_alias_errors_from_the_deployment_are_shown_on_list(home, capsys):
     assert "broken line" in out and "运维" in out
     # 这份脚本两条线共用:要同时指明容器版与非容器版各自改哪里,不能只说容器版的环境变量
     assert "GRMP_INSTANCE_ALIASES" in out and "config.yaml 的 instance_aliases" in out
+
+
+def test_login_without_target_lists_aliases_instead_of_asking_for_an_ip(home, capsys):
+    """2026-11-06 验收:模型直接跑不带参数的 login.py,脚本只说「需要 IP 和库名」,模型就去问用户要 IP(A1、B8、B11)。
+    登记了别名时,缺参数也把别名清单摆出来,并写明用 --alias 登录。"""
+    assert login.main([]) == 2
+    out = capsys.readouterr().out
+    assert "og5" in out and "--alias" in out and "不要向用户要 IP" in out
+    assert "10.0.0.9" not in out and "还需要" not in out

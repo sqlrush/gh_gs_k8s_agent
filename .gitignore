@@ -12,7 +12,7 @@ out/
 *.tar
 *.tar.gz
 *.log
-# 测试夹具里的日志样本是测试数据,要进仓库(漏了它 lockwait 的死锁日志测试收集期就报错)
+# 测试夹具里的日志样本要进仓库(全新克隆少了它,全量 pytest 收集阶段就报错)
 !agent/tests/fixtures/**/*.log
 !acceptance/fixtures/*.log
 
@@ -21,7 +21,6 @@ out/
 __pycache__/
 *.pyc
 .venv/
-.pytest_cache/
 
 # 本地构建产物
 docker/vendor/

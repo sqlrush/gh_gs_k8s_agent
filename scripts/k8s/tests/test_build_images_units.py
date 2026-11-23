@@ -74,7 +74,7 @@ def test_single_arch_push_is_refused_unless_acknowledged(run):
 def test_single_arch_push_goes_through_when_acknowledged(run):
     proc, calls = run("t1", "--push", "--registry", "ghcr.io/sqlrush", "--single-arch")
     assert proc.returncode == 0, proc.stderr
-    assert len(calls) == 4, calls          # runtime / kb-import / gateway / release
+    assert len(calls) == 5, calls          # runtime / kb-import / gateway / frontend / release
     for line in calls:
         assert "ghcr.io/sqlrush/gaussdb-agent-" in line and "--push" in line
 
@@ -83,8 +83,8 @@ def test_multiarch_push_tags_carry_the_registry(run):
     proc, calls = run("t1", "--push", "--registry", "ghcr.io/sqlrush",
                       "--platform", "linux/amd64,linux/arm64")
     assert proc.returncode == 0, proc.stderr
-    assert len(calls) == 4, calls
-    for name, line in zip(("runtime", "kb-import", "gateway", "release"), calls):
+    assert len(calls) == 5, calls
+    for name, line in zip(("runtime", "kb-import", "gateway", "frontend", "release"), calls):
         assert "-t ghcr.io/sqlrush/gaussdb-agent-%s:t1" % name in line, line
         assert "--platform linux/amd64,linux/arm64" in line
         assert "--push" in line and "--load" not in line
@@ -94,14 +94,14 @@ def test_local_build_keeps_plain_tags_and_loads(run):
     """本地构建不变:不带仓库前缀、--load 进本机镜像库。"""
     proc, calls = run("t1")
     assert proc.returncode == 0, proc.stderr
-    assert len(calls) == 4, calls
+    assert len(calls) == 5, calls
     for line in calls:
         assert "--load" in line and "--push" not in line
         assert "-t gaussdb-agent-" in line and "ghcr.io" not in line
 
 
 def test_kbstd_is_built_only_from_a_directory_that_holds_a_pack(run, tmp_path):
-    """标准知识库镜像的包不在代码仓库里:给了 --kbstd 才构建第 5 个,目录里没有包就拒绝;不给就照旧三个并说明。"""
+    """标准知识库镜像的包不在代码仓库里:给了 --kbstd 才构建第 5 个,目录里没有包就拒绝;不给就照旧四个并说明。"""
     empty = tmp_path / "empty"
     empty.mkdir()
     proc, calls = run("t1", "--kbstd", str(empty))
@@ -111,7 +111,7 @@ def test_kbstd_is_built_only_from_a_directory_that_holds_a_pack(run, tmp_path):
     (packs / "kb-std-G25132C-abc.tar.gz").write_bytes(b"x")
     proc, calls = run("t1", "--kbstd", str(packs))
     assert proc.returncode == 0, proc.stderr
-    assert len(calls) == 5 and "Dockerfile.kbstd" in calls[-1] and "--build-context kbstd=%s" % packs in calls[-1]
+    assert len(calls) == 6 and "Dockerfile.kbstd" in calls[-1] and "--build-context kbstd=%s" % packs in calls[-1]
     assert "-t gaussdb-agent-kbstd:t1" in calls[-1] and "--load" in calls[-1]
     proc, calls = run("t2")
     assert "没构建 gaussdb-agent-kbstd" in proc.stdout

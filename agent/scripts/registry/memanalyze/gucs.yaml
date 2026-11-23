@@ -3,7 +3,7 @@
 #
 # 2026-10-24 补 enable_resource_record:history 子命令靠它判断 WLM 历史表有没有数据,原来的列表里没有,
 # capability 把「没读到」当成 off,报告写「enable_resource_record = off(需设为 on)」—— og5 上它实际是 on
-# (配置文件里设的),faultlab 第二轮据此记成了「history 因参数关着不可用」,方向全错。
+# (配置文件里设的),故障演练第二轮据此记成了「history 因参数关着不可用」,方向全错。
 name: memanalyze.gucs
 description: 与内存相关的 GUC 参数
 sql: |

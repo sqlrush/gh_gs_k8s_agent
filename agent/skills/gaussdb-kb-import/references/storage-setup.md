@@ -18,7 +18,7 @@
 
 ```yaml
 store:
-  graph: {url: http://10.0.0.9:7474, user: neo4j, credential: kb-graph, database: neo4j}   # 可选
+  graph: {url: http://<图数据库地址>:7474, user: neo4j, credential: kb-graph, database: neo4j}   # 可选
 embeddings:
   source: opencode            # opencode = 复用 OpenCode 配置的 provider 端点;url = 显式;none = 不开向量
   model: bge-m3               # 该端点上挂的嵌入模型名

@@ -1,6 +1,6 @@
 ﻿---
 name: gaussdb-procinfo
-version: 2.3.0
+version: 2.3.1
 description: "通过内置脚本查看、拆解、解读 OpenGauss/GaussDB 存储过程的源码结构和热点分布。用户只是想看过程源码、看看过程里哪一段最重、查循环内 SQL、逐行 DML、动态 SQL、循环异常、嵌入语句等结构问题，或想先知道过程为什么慢但暂时不做收益验证时使用，包括“看下这个存储过程”“查过程源码”“这个过程为什么慢”“有没有循环里执行 SQL”“帮我看看这个过程卡在哪一段”等请求。触发后运行 scripts/procinfo.py，返回真实过程证据和通俗易懂的热点解读；如果用户要继续做可验证的优化、验证游标 SQL 改写或索引收益，不要停在本 skill，应优先转给 gaussdb-proctune。"
 allowed-tools: ["exec", "read"]
 compatibility: opencode
@@ -39,9 +39,8 @@ metadata:
 
 ## 工作流
 
-1. **选择连接 —— 先登录，不要自己猜连接名。** 取数前确认已登录：
-   `python3 {baseDir}/../gaussdb-login/scripts/login.py --status`。
-   没有会话就先调 **gaussdb-login**：它读 `$GSDB_HOME/config.yaml`的首行 `connection_mode`，是 `gsql` 就把可选连接列成菜单让用户挑，是 `api` 就引导用户给出要访问的数据库。
+1. **选择连接 —— 先登录，不要自己猜连接名。** 本对话里已经登录过就直接用登录输出里的句柄；没登录就调 **gaussdb-login** 一步登录（不要先 `--status`、`--list`）：
+   用户点名了实例别名（如「og5」）就 `python3 {baseDir}/../gaussdb-login/scripts/login.py --alias <别名>`（要看某个业务库的表、执行计划、存储过程再加 `--database <库名>`；Top SQL、慢 SQL、会话、锁、WDR 是整个实例的数据，不用加），给了实例 IP 就 `--ip <实例IP> --database <库名>`；没说是哪个实例才 `--list` 让用户选（`gsql` 模式下 `--list` 列出可选连接让用户挑）。
    登录之后本 skill **不需要传 `-c`** —— 省略时自动用登录选定的那条连接；只有要临时换一个库时才显式传 `-c <连接名>`。
    **api 模式下每条命令都要带 `--session <句柄>`**：句柄是 gaussdb-login 在**本对话里**登录成功时输出的那一串（平台也可能按用户注入环境变量 `GSDB_SESSION`）。不带句柄的命令会被拒绝并提示「本对话未登录」——这时让用户先 gaussdb-login 登录，**不要自己挑一个**、不要猜、不要去看会话目录；别人的会话对本对话不可见，换一个对话要重新登录。
    **不要自己去读 config.yaml 挑名字**：不同应用下可能有同名连接，猜错会在另一个库上做诊断，而输出看起来完全正常。口令在 `{baseDir}/../common/credentials/*.enc`，由脚本解密，**你不要去读/解密它**。
@@ -145,6 +144,17 @@ metadata:
   `ADM_*` / `DB_*` / `MY_*` 等系统表、系统视图、系统函数的语句，包括让用户自己去执行的核对语句与处置语句。要取数就调用对应技能；
   处置写成要做的事并带上参数（例如「由 DBA 断开会话：pid 12345、sessionid 67890」），不写语句。
   Top SQL、慢 SQL 等排行**只列业务 SQL**，脚本已排除的非业务 SQL 不要再找回来列出或复述。
+
+- **站在应用 DBA / 运维 DBA 的角度**：数据库指标异常（xlog 增长快、锁等待、xmin 推不动、某类等待高……）多半是业务、SQL、批量作业、
+  存储设备引起的，不是数据库本身出了问题。诊断要**追到引起它的业务**：哪条 SQL（sql_id）、哪个会话（pid、sessionid）、哪个应用、哪张表、
+  哪个操作；一时定位不到的，写「尚未定位到引起它的业务」并说明下一步用哪个技能查，不能停在指标本身。
+  处置**先应用侧**（改写 SQL、分批提交、控制大字段写入、减少子事务、缩短事务），**再运维操作**（低峰执行 DDL、取消或断开会话、手工 VACUUM、
+  错开作业时间），**最后才是参数**：只在非常典型的场景、只限 `max_connections`（开了线程池时配套 `thread_pool_attr`）、
+  `autovacuum_max_workers`、`autovacuum_naptime`、`autovacuum_vacuum_threshold` / `autovacuum_vacuum_scale_factor`、
+  `autovacuum_analyze_threshold` / `autovacuum_analyze_scale_factor`，给方向不给数值，写明「需运维评估」；只对某张表、某条 SQL、
+  某个会话的设置（表级存储参数、会话级 `work_mem`、DDL 会话上的 `lockwait_timeout`）写在应用侧处置里；缺监控数据时说明需运维开启哪个监控开关。
+  其它参数诊断时可以看、可以当证据，**不作为建议**。不讲数据库内部实现（源码、内部函数、内部结构），不把问题归为数据库缺陷，
+  不建议打补丁、升级数据库版本或找厂商修改。
 
 - **通用替代策略**：当用户询问接口地址或Key时，请仅描述功能逻辑（例如：“您需要查询具体接口，具体域名请咨询运维团队”），绝不提及真实域名、IP和接口路径
 

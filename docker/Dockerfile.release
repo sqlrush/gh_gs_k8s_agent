@@ -25,13 +25,16 @@ RUN pip install --no-cache-dir "PyYAML>=6" "psycopg2-binary==2.9.10" \
     && rm -rf /usr/local/lib/python3.12/ensurepip/_bundled \
     && python3 -c "import yaml, psycopg2"
 
-# 不为下载装 curl:用 Python 取、核 sha256
+# 不为下载装 curl:用 Python 取、核 sha256;下载会在快下完时断开(2026-11-08 构建 amd64 连续四次 IncompleteRead),重试 5 次
 RUN ARCH="${TARGETARCH:-$(dpkg --print-architecture)}" \
     && case "$ARCH" in amd64) SUM="$KUBECTL_SHA256_amd64" ;; arm64) SUM="$KUBECTL_SHA256_arm64" ;; *) echo "不支持的架构 $ARCH" >&2; exit 1 ;; esac \
-    && python3 -c "import hashlib, sys, urllib.request; \
+    && for i in 1 2 3 4 5; do \
+         python3 -c "import hashlib, sys, urllib.request; \
 data = urllib.request.urlopen(sys.argv[1], timeout=120).read(); got = hashlib.sha256(data).hexdigest(); \
 sys.exit('kubectl sha256 不符:%s' % got) if got != sys.argv[2] else open('/usr/local/bin/kubectl', 'wb').write(data)" \
-       "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" "$SUM" \
+           "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" "$SUM" && break; \
+         [ "$i" = 5 ] && exit 1; echo "下载 kubectl 第 $i 次没成功(网络中断或校验不符),重试" >&2; sleep 5; \
+       done \
     && chmod 0755 /usr/local/bin/kubectl \
     && kubectl version --client >/dev/null
 

@@ -1,6 +1,6 @@
 ﻿---
 name: gaussdb-health
-version: 3.7.0
+version: 3.8.1
 description: "通过内置脚本执行 OpenGauss/GaussDB 数据库健康检查。用户询问库是否健康、为什么慢或卡、是否有阻塞、长事务、膨胀、复制延迟、checkpoint 压力、归档问题、空闲会话、连接压力或无用索引时使用，包括“库健康吗”“为什么卡”“有没有阻塞”“有没有长事务”“有没有膨胀”“复制有没有延迟”“最近半小时库怎么样”“昨天 10 点到 11 点库出了什么问题”等请求；支持最近 N 分钟与指定时间段的时段体检。触发后运行 scripts/health.py，采集真实证据和确定性发现，不要只给泛化排查建议。"
 allowed-tools: ["exec", "read"]
 compatibility: opencode
@@ -14,7 +14,7 @@ metadata:
 
 一次性、只读、可信的数据库健康检查。**确定性归脚本（采集 + 阈值发现），判断归你（LLM），但你的判断必须对脚本的 `## Deterministic Findings` 做证据锚定校验。** 报告抬头用确定性状态带，不编造单一分数。
 
-**本技能是汇总层，不是唯一的证据来源。** `{baseDir}/scripts/health.py` 自己只读采集 9 个本地维度（Overview / Slow SQL / 长事务 / 连接 / Checkpoint·WAL·归档 / 复制 / Schema / 占用量 / 并发），另外以子进程方式各跑一次 `gaussdb-lockwait`、`gaussdb-waitevent`、`gaussdb-vacuum` 三个 skill 的 `--format json` 输出，把它们的 `Deterministic Findings` 并入本报告——锁堵塞、等待事件/DB time、死元组/膨胀这三块的**完整证据、原始表、阻塞链/下钻分析都在对应子 skill 里**，本技能只搬运它们已经算出来的风险结论，并在每条这样的 finding 后面标注来源（`（详见 gaussdb-xxx）`）。**要看某一块的全部细节，直接单独跑那个子 skill，不要指望 health 的报告重现它。** 连接元数据读取 `$GSDB_HOME/config.yaml`，凭据由脚本从 `{baseDir}/../common/credentials/` 自动解密。
+**本技能是汇总层，不是唯一的证据来源。** `{baseDir}/scripts/health.py` 自己只读采集 10 个本地维度（Overview / Slow SQL / 长事务 / 连接 / Checkpoint·WAL·归档 / WAL 写入来源 / 复制 / Schema / 占用量 / 并发），另外以子进程方式各跑一次 `gaussdb-lockwait`、`gaussdb-waitevent`、`gaussdb-vacuum` 三个 skill 的 `--format json` 输出，把它们的 `Deterministic Findings` 并入本报告——锁堵塞、等待事件/DB time、死元组/膨胀这三块的**完整证据、原始表、阻塞链/下钻分析都在对应子 skill 里**，本技能只搬运它们已经算出来的风险结论，并在每条这样的 finding 后面标注来源（`（详见 gaussdb-xxx）`）。**要看某一块的全部细节，直接单独跑那个子 skill，不要指望 health 的报告重现它。** 连接元数据读取 `$GSDB_HOME/config.yaml`，凭据由脚本从 `{baseDir}/../common/credentials/` 自动解密。
 
 命中以下请求时，必须使用本 skill 并实际执行脚本，不要只做概念解释：
 
@@ -34,9 +34,8 @@ metadata:
 
 ## 工作流
 
-1. **选择连接 —— 先登录，不要自己猜连接名。** 取数前确认已登录：
-   `python3 {baseDir}/../gaussdb-login/scripts/login.py --status`。
-   没有会话就先调 **gaussdb-login**：它读 `$GSDB_HOME/config.yaml`的首行 `connection_mode`，是 `gsql` 就把可选连接列成菜单让用户挑，是 `api` 就引导用户给出要访问的数据库。
+1. **选择连接 —— 先登录，不要自己猜连接名。** 本对话里已经登录过就直接用登录输出里的句柄；没登录就调 **gaussdb-login** 一步登录（不要先 `--status`、`--list`）：
+   用户点名了实例别名（如「og5」）就 `python3 {baseDir}/../gaussdb-login/scripts/login.py --alias <别名>`（要看某个业务库的表、执行计划、存储过程再加 `--database <库名>`；Top SQL、慢 SQL、会话、锁、WDR 是整个实例的数据，不用加），给了实例 IP 就 `--ip <实例IP> --database <库名>`；没说是哪个实例才 `--list` 让用户选（`gsql` 模式下 `--list` 列出可选连接让用户挑）。
    登录之后本 skill **不需要传 `-c`** —— 省略时自动用登录选定的那条连接；只有要临时换一个库时才显式传 `-c <连接名>`。
    **api 模式下每条命令都要带 `--session <句柄>`**：句柄是 gaussdb-login 在**本对话里**登录成功时输出的那一串（平台也可能按用户注入环境变量 `GSDB_SESSION`）。不带句柄的命令会被拒绝并提示「本对话未登录」——这时让用户先 gaussdb-login 登录，**不要自己挑一个**、不要猜、不要去看会话目录；别人的会话对本对话不可见，换一个对话要重新登录。
    **不要自己去读 config.yaml 挑名字**：不同应用下可能有同名连接，猜错会在另一个库上做诊断，而输出看起来完全正常。口令在 `{baseDir}/../common/credentials/*.enc`，由脚本解密，**你不要去读/解密它**。
@@ -46,7 +45,7 @@ metadata:
    python3 {baseDir}/scripts/health.py -c <conn>
    ```
 
-   只读。本地 8 个采集器产固定小节：`## Overview`、`## Slow SQL`、`## Long & Idle Transactions`、`## Connections`、`## Checkpoint / WAL / Archiving`、`## Replication / Standby`、`## Schema / Objects`、`## Transactions / Concurrency`；另外后台跑三个子 skill，把它们的风险并入下面两个固定小节：
+   只读。本地 8 个采集器产固定小节：`## Overview`、`## Slow SQL`、`## Long & Idle Transactions`、`## Connections`、`## Checkpoint / WAL / Archiving`、`## WAL / Write Sources`、`## Replication / Standby`、`## Schema / Objects`、`## Transactions / Concurrency`；另外后台跑三个子 skill，把它们的风险并入下面两个固定小节：
    - **`## Deterministic Findings`**：本地 8 维 + 三个子 skill 的确定性发现按严重度合并排序（严重度/Code/指标/值/阈值/证据）；子 skill 来源的那些行证据末尾带 `（详见 gaussdb-lockwait / gaussdb-waitevent / gaussdb-vacuum）`，`维度` 列用的是对应子 skill 自己的维度名（`Locks` / `DB Time` / `Dead Tuples`），不是已经退役的 `Transaction Locks & Blocking Chains` / `Wait Events` / `Dead Tuples & Bloat` 这几个旧名字。
    - **`## Collection Notes`**：哪些本地维度降级、哪个子 skill 采集失败，同一种形式呈现。
 
@@ -56,7 +55,7 @@ metadata:
 
    `## Slow SQL` 与 `## Window Top SQL` **只列业务 SQL**（内核与数据字典、会话设置与事务控制、运维管理、中间件自身的语句都已排除），标题行写着「已排除 N 条非业务 SQL」，转告这一句即可，不要列出或复述系统 SQL。
    `## Slow SQL` 的表只有**已完成**的执行；**还在跑的长 SQL** 由 `SLOWSQL_RUNNING` 报（标题里「执行中超过 5m0s 的 SQL …」，证据带 pid 与 SQL 摘要）。用户问「为什么卡」时先看这一条；标题里「另有 N 条…在等锁」的不是 SQL 慢，是被锁挡住，去锁阻塞那几条找根。
-   选项：`--include/--exclude <dims>` 裁剪维度。本地维度名：`overview,slowsql,xact,conn,logs,repl,schema,storage,concurrency`；另外 `locks`、`waits`、`lwlock`、`bloat` 这四个名字继续有效，只是不再对应本地 collector，而是路由到子 skill（`locks`→`gaussdb-lockwait`，`waits`/`lwlock`→`gaussdb-waitevent`，`bloat`→`gaussdb-vacuum`）——已有的命令行不受影响。`--top N` 调列表条数；`--format json` 取结构化（额外带 `sub_skills`、`uncovered_capabilities` 两个字段）。**不要**为某一维度单独多跑命令；也不要看到 `--include locks` 就自己再单独跑一遍 lockwait——health 已经替你跑过了。
+   选项：`--include/--exclude <dims>` 裁剪维度。本地维度名：`overview,slowsql,xact,conn,logs,wal,repl,schema,storage,concurrency`；另外 `locks`、`waits`、`lwlock`、`bloat` 这四个名字继续有效，只是不再对应本地 collector，而是路由到子 skill（`locks`→`gaussdb-lockwait`，`waits`/`lwlock`→`gaussdb-waitevent`，`bloat`→`gaussdb-vacuum`）——已有的命令行不受影响。`--top N` 调列表条数；`--format json` 取结构化（额外带 `sub_skills`、`uncovered_capabilities` 两个字段）。**不要**为某一维度单独多跑命令；也不要看到 `--include locks` 就自己再单独跑一遍 lockwait——health 已经替你跑过了。
 
    **时段体检（用户说了时间：「最近 30 分钟」「昨天 10 点到 11 点」「10:46 到 11:07」）：**
 
@@ -78,7 +77,7 @@ metadata:
      采样没开 / 过了保留期时这一维标「回看不了」并写明原因。要看全部阻塞对，单独跑同一时段的 lockwait。
      **这一维的处置不给 kill / terminate 语句**：时段已过，当时的会话多半已结束、会话号可能被复用 ——
      处置写「现在还堵着就先跑此刻的锁等待分析」和「改应用的事务边界（开事务不提交）」；
-     `idle_in_transaction_session_timeout` 这类参数只能写成「由 DBA 评估」，不要替行方定值。
+     `idle_in_transaction_session_timeout` 属配置基线，只能写成「请运维按配置基线核对」，不要替行方定值。
    - **回看不了的**（瞬时状态，当时没有采）：连接与线程池、长事务、死元组与膨胀、复制、占用量。
      终点在过去时它们逐项标「不可用：回看不了」，**照实说这几项看不了，不要拿此刻的值顶替**；
      终点是此刻时脚本会给**当前值**，标题前缀「【当前值，不是时段内的】」—— 转述时也要带上这个限定。
@@ -133,7 +132,7 @@ metadata:
 - **报告只呈现结论，不呈现推演。** 「等等 / 换个角度」这类自我纠正不得进入报告；若改了判断，回头同步矩阵里的严重度，使报告自洽。
 - **只读、绝不执行修复。** health 不执行 `kill` / `pg_terminate_backend` / `VACUUM` / 任何 DML；处置一律只给带风险级的建议，注明 `[需人工执行]`。
 - 不要编造统计：每个结论引用脚本输出里的某个数字。
-- **来自子 skill 的确定性发现，`（详见 gaussdb-xxx）` 指针是允许的落点，不必展开成全套上下文。** `## Deterministic Findings` 表里带这个后缀的行，是 `gaussdb-lockwait`/`gaussdb-waitevent`/`gaussdb-vacuum` 自己算出来的确定性证据——如实转述该行的 code/指标/值/证据，保留这个指针即可；**不要凭空替它扩写根因分析或具体改法**，那些内容在对应子 skill 自己的报告里，行方要看细节就直接单独跑那个 skill。下面这条「行动项必须自带结论正文」管的是另一种情形：你自己写的处置建议里引用了别的 skill 的结论（比如引用 sqltune 的改写建议），那种指针式引用才是不合格的。
+- **来自子 skill 的确定性发现，`（详见 gaussdb-xxx）` 指针是允许的落点，不必展开成全套上下文。** `## Deterministic Findings` 表里带这个后缀的行，是 `gaussdb-lockwait`/`gaussdb-waitevent`/`gaussdb-vacuum` 自己算出来的确定性证据——如实转述该行的 code/指标/值/证据，保留这个指针即可；**不要凭空编造它的根因或具体改法**，那些内容在对应子 skill 自己的报告里，行方要看细节就直接单独跑那个 skill。但这一行只到实例级指标（某类等待占比、轻量锁热点）、没指出是哪条 SQL / 哪个会话时，**不能停在指标**（安全红线「站在应用 DBA / 运维 DBA 的角度」）：写「尚未定位到引起它的业务」，并给出具体的下一步——锁类 → gaussdb-lockwait；IO / CPU 类 → gaussdb-topsql 按对应维度排；WAL / 写入类 → 本报告 WAL 维度的写入来源。下面这条「行动项必须自带结论正文」管的是另一种情形：你自己写的处置建议里引用了别的 skill 的结论（比如引用 sqltune 的改写建议），那种指针式引用才是不合格的。
 - **行动项必须自带结论正文，不能只留一个指针。** 「推动 sqlid 1136765424 的 sqltune 结论落地」这种写法是不合格的——读的人不知道结论是什么。凡引用别的 skill 或别处的结论，必须一并带上：**是哪条对象**（SQL 原文摘要 / 表名 / 索引名）、**当前状态**（计划形态与代价、扫描次数、页数）、**提议的改动**（哪条索引 / 哪种改写）、**预期效果**、**依据**。跨 skill 引用尤其如此：报告是要发给行方看的，sqlid 在那边解引用不了。
 - **累计型指标必须先给观测窗口。** `idx_scan` / `seq_scan` / `n_tup_*` 都是「自上次统计重置以来」的累计值。报告里出现它们时，先写出 `pg_stat_database.stats_reset` 的时间与至今时长——窗口 5 分钟的 `idx_scan=0` 和窗口 7 天的 `idx_scan=0` 是两回事，而两者长得一模一样。
 - **区分「观测到的」与「推断的」，措辞不要越界。** 「该索引在当前统计窗口内未被使用」是观测；「无用索引」是关于未来的断言，不要写。同理「统计陈旧」要说清凭哪两个数、差多少、阈值多少。建议删除索引前必须点明三条反例：统计重置或实例重启会让计数归零；月度/季度/年终报表用的索引可以数周为 0；主备分离时备机上的使用不计入本机计数器。
@@ -169,13 +168,19 @@ metadata:
 但库会挂住或盘会被填满。
 
 - **`SYNC_COMMIT_NO_STANDBY`（🔴）——「要求同步确认，却一个同步备都没有」。**
-  主库的提交会**一直等下去**，表现是写入全部挂住。处置：恢复备库，或由 DBA 临时把
-  `synchronous_commit` 降为 `local`。
+  主库的提交会**一直等下去**，表现是写入全部挂住。处置：由运维恢复备库；恢复前要先放行写入的，
+  由运维按配置基线评估临时把 `synchronous_commit` 降为 `local`。
   **反过来，在单机库上这一项会明说「不适用」，那不等于「健康」。**
   openGauss 的同步复制要靠 `replconninfo` 定义对端才生效 —— og5 实测
   `synchronous_commit=on` + `standby_names='*'` + 零个备库，写入完全正常。
   所以看到「单机部署，同步提交不适用」时，**不要**替它补一句「配置有风险」。
 
+- **`WAL_RATE_HIGH`（🟡 / 🟠）——xlog 涨得快，WAL 维度给出写入来源。** 这一维隔 5 秒采两次 xlog 位置算每秒生成量，
+  同时给出采样期间写入最多的表（大字段写入折回所属业务表，单列「大字段(TOAST)」）、累计写入行数最多的业务 SQL，
+  库支持时（GaussDB）再给当前事务 xlog 用量最大的会话。回答时**落到这些业务对象**：哪张表、哪条 SQL、哪个会话 / 应用在写，
+  有没有大字段批量写入；处置写应用侧的（分批提交、控制大字段、移到低峰），再由运维确认归档与磁盘余量。
+  GaussDB 没有按语句记的 xlog 字节数，表与 SQL 用的是**写入行数**，照这个口径说，不要说成「这条 SQL 产生了多少 xlog」。
+  采样期间没有表级写入增量时，报告写「尚未定位到引起它的业务」，照转，并建议用 gaussdb-wdr 看同一时段。
 - **`WAL_SLOT_INACTIVE`（🟠）/ `WAL_SLOT_LAG`——复制槽钉住了 WAL 回收。**
   这和 `REPL_LAG` 是**两件事**，处置方向相反：`REPL_LAG` 是备库追不上（看备库），
   这两条是槽不消费、WAL 只增不减直到填满磁盘（看下游消费端，或删掉废槽）。
@@ -215,10 +220,11 @@ metadata:
 
 - **应用视角**(写给开发人员,对数据库不太熟):业务感受到什么(交易超时、接口变慢、批量跑不完),
   应用里哪类写法会导致它。不懂数据库的人也要能看懂。
-- **数据库机制**(写给数据库工程师):**接着同一件事、同一批对象**(同一条 SQL、同一张表、同一组会话)往下讲
-  为什么会这样 —— 锁、MVCC、WAL、执行计划、参数怎么起作用。不另起话题。
+- **数据库机制**(写给运维 DBA):**接着同一件事、同一批对象**(同一条 SQL、同一张表、同一组会话)往下讲
+  这个业务操作在库里怎么表现出来 —— 锁、事务、数据量、执行计划、写入量。不另起话题,不讲数据库内部实现(源码、内部函数、内部结构)。
 
-讲机制也要落到这次采到的数字上;没有证据,不提内核参数调整。
+讲机制也要落到这次采到的数字上。指标异常要说清是哪个业务操作引起的;参数只在安全红线「站在应用 DBA / 运维 DBA 的角度」
+列出的典型场景里提,写明「需运维评估」。
 
 ### 写法规矩(模板化之后照旧)
 
@@ -238,10 +244,11 @@ metadata:
 概览之后用两三句应用视角概括「哪几个方面出了问题」。
 
 **② 根因和证据链**:按级别从重到轻,对**每一个**现象逐个写「现象 → 证据(真实数字 vs 阈值;原始表放在这里当证据)→ 根因」。
-跨维度的因果写成一条链(例如空闲事务持锁 → 阻塞链 → 卡住 vacuum → 死元组膨胀)。
+跨维度的因果写成一条链(例如空闲事务持锁 → 阻塞链 → 卡住 vacuum → 死元组膨胀)。根因落到业务:报告里给出了 SQL、会话、
+应用或表的,照写;只给到实例级指标的,写「尚未定位到引起它的业务」并说明下一步用哪个技能查。
 
 **③ 解决方案**:按优先级列 —— P0(最优先)、P1(次优先)、P2……每条写清:改什么、为什么(回指 ② 的哪个现象)、
-详细做法、风险:低 / 中 / 高、`[需人工执行]`。不用严重度 emoji 当优先级。
+详细做法、风险:低 / 中 / 高、`[需人工执行]`。不用严重度 emoji 当优先级。先应用侧、再运维操作,参数放最后且只限典型场景。
 
 **④ 总结和结论**:两三句总结 + 下一步建议;需要用户配合的写明;最后是展开提议。
 <!-- ANSWER-TEMPLATE:END -->
@@ -267,6 +274,17 @@ metadata:
   `ADM_*` / `DB_*` / `MY_*` 等系统表、系统视图、系统函数的语句，包括让用户自己去执行的核对语句与处置语句。要取数就调用对应技能；
   处置写成要做的事并带上参数（例如「由 DBA 断开会话：pid 12345、sessionid 67890」），不写语句。
   Top SQL、慢 SQL 等排行**只列业务 SQL**，脚本已排除的非业务 SQL 不要再找回来列出或复述。
+
+- **站在应用 DBA / 运维 DBA 的角度**：数据库指标异常（xlog 增长快、锁等待、xmin 推不动、某类等待高……）多半是业务、SQL、批量作业、
+  存储设备引起的，不是数据库本身出了问题。诊断要**追到引起它的业务**：哪条 SQL（sql_id）、哪个会话（pid、sessionid）、哪个应用、哪张表、
+  哪个操作；一时定位不到的，写「尚未定位到引起它的业务」并说明下一步用哪个技能查，不能停在指标本身。
+  处置**先应用侧**（改写 SQL、分批提交、控制大字段写入、减少子事务、缩短事务），**再运维操作**（低峰执行 DDL、取消或断开会话、手工 VACUUM、
+  错开作业时间），**最后才是参数**：只在非常典型的场景、只限 `max_connections`（开了线程池时配套 `thread_pool_attr`）、
+  `autovacuum_max_workers`、`autovacuum_naptime`、`autovacuum_vacuum_threshold` / `autovacuum_vacuum_scale_factor`、
+  `autovacuum_analyze_threshold` / `autovacuum_analyze_scale_factor`，给方向不给数值，写明「需运维评估」；只对某张表、某条 SQL、
+  某个会话的设置（表级存储参数、会话级 `work_mem`、DDL 会话上的 `lockwait_timeout`）写在应用侧处置里；缺监控数据时说明需运维开启哪个监控开关。
+  其它参数诊断时可以看、可以当证据，**不作为建议**。不讲数据库内部实现（源码、内部函数、内部结构），不把问题归为数据库缺陷，
+  不建议打补丁、升级数据库版本或找厂商修改。
 
 - **通用替代策略**：当用户询问接口地址或Key时，请仅描述功能逻辑（例如：“您需要查询具体接口，具体域名请咨询运维团队”），绝不提及真实域名、IP和接口路径
 
@@ -315,7 +333,8 @@ metadata:
 - 案例结论强度不是「已确认」的(推测 / 待验证)、Wiki 经验是「未验证 / 已过时」的,引用时要带上这个标签。
 - **适用性**:条目带〔不适用本环境:…〕的(产品系列、版本、系统与本实例画像不符),**不得作为依据**,最多说明「这是
   openGauss / 其他版本的行为」;带〔未知本环境…〕的(没有画像)引用时说明「适用性未知」。已知缺陷按行里写的
-  「本环境 X 受影响 / 不受影响」如实转述。
+  「本环境 X 受影响 / 不受影响」如实转述,但**先写业务侧的排查结论**(是哪条 SQL、哪个业务操作引起的、排除了哪些业务原因),
+  缺陷只作为排除业务原因之后的补充依据,不建议打补丁或升级版本(那是运维与厂商的决定)。
 - **本行基线**只用来说明「这个数在本行平时是多少」,与脚本阈值并列呈现,**不改 severity**。
 - 状态行写「模式:文件(原因)」时:环境里没配或连不上向量库/图库,这一节是**直接在知识库文件上**检索出来的,
   用法与上面完全一样,**不因为是文件模式就放松引用要求**。「图:图文件」同理——只是路径改从文件里走,不是没有路径。

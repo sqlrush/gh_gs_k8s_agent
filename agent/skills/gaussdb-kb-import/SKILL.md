@@ -1,6 +1,6 @@
 ---
 name: gaussdb-kb-import
-version: 4.3.0
+version: 4.3.1
 description: "知识库导入(管理员用,原 kbimport;查询与引用核对在 gaussdb-kb):把 GaussDB 官方产品文档(CHM,导成标准知识库的官方文档集)、行方的 GaussDB/OpenGauss 规范文档(txt/md/docx/doc/pdf/pptx;扫描件 PDF 渲染成页面由你看图转录)与故障工单/问题分析报告(md/docx/csv/xlsx)导入知识库、需要登录的内网网页(Wiki / Confluence / 门户:管理员在浏览器里点书签「导入知识库」剪藏进来,第一次由你一步一步引导装书签)、手册 / Wiki / 产品文档 / 环境画像导入知识库——每条知识打上八类类型之一(规范、案例、画像、基线、缺陷、手册、产品文档、Wiki),规范条款化进 rules/errata,工单结构化成案例并抽成图谱关系,其余六类按模板写成类型化条目(index 同时生成 L0 总索引与 L1 专题导航),关键数据写入前一律生成编号选择列表交用户确认;向量进知识库目录里的 SQLite 索引(sqlite-vec,不用配)、关系写进图文件 graph/*.yaml(配了 Neo4j 再同步进图库,可选;没有图库时路径直接走图文件),各诊断 skill 按发现检索并优先引用本行先例。脚本负责转换、快照、校验、索引、检索、契约注入;你负责条款分类、案例抽取、呈现选择列表与收集确认。用户说「导入规范 / 导入工单 / 建知识库 / 把 xxx 加进知识库 / 导入这个网页 / 把这个链接加进知识库 / 剪藏 / 更新规范库 / 知识库里有没有类似案例 / 让 skill 按我们的经验来」即用。"
 allowed-tools: ["exec", "read", "write"]
 compatibility: opencode
@@ -270,6 +270,17 @@ python3 {baseDir}/scripts/kb.py contract --apply    # 用户确认后执行
   `ADM_*` / `DB_*` / `MY_*` 等系统表、系统视图、系统函数的语句，包括让用户自己去执行的核对语句与处置语句。要取数就调用对应技能；
   处置写成要做的事并带上参数（例如「由 DBA 断开会话：pid 12345、sessionid 67890」），不写语句。
   Top SQL、慢 SQL 等排行**只列业务 SQL**，脚本已排除的非业务 SQL 不要再找回来列出或复述。
+
+- **站在应用 DBA / 运维 DBA 的角度**：数据库指标异常（xlog 增长快、锁等待、xmin 推不动、某类等待高……）多半是业务、SQL、批量作业、
+  存储设备引起的，不是数据库本身出了问题。诊断要**追到引起它的业务**：哪条 SQL（sql_id）、哪个会话（pid、sessionid）、哪个应用、哪张表、
+  哪个操作；一时定位不到的，写「尚未定位到引起它的业务」并说明下一步用哪个技能查，不能停在指标本身。
+  处置**先应用侧**（改写 SQL、分批提交、控制大字段写入、减少子事务、缩短事务），**再运维操作**（低峰执行 DDL、取消或断开会话、手工 VACUUM、
+  错开作业时间），**最后才是参数**：只在非常典型的场景、只限 `max_connections`（开了线程池时配套 `thread_pool_attr`）、
+  `autovacuum_max_workers`、`autovacuum_naptime`、`autovacuum_vacuum_threshold` / `autovacuum_vacuum_scale_factor`、
+  `autovacuum_analyze_threshold` / `autovacuum_analyze_scale_factor`，给方向不给数值，写明「需运维评估」；只对某张表、某条 SQL、
+  某个会话的设置（表级存储参数、会话级 `work_mem`、DDL 会话上的 `lockwait_timeout`）写在应用侧处置里；缺监控数据时说明需运维开启哪个监控开关。
+  其它参数诊断时可以看、可以当证据，**不作为建议**。不讲数据库内部实现（源码、内部函数、内部结构），不把问题归为数据库缺陷，
+  不建议打补丁、升级数据库版本或找厂商修改。
 
 - **通用替代策略**：当用户询问接口地址或Key时，请仅描述功能逻辑（例如：“您需要查询具体接口，具体域名请咨询运维团队”），绝不提及真实域名、IP和接口路径
 

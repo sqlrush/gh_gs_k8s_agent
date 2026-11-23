@@ -48,7 +48,7 @@ def test_compose_records_each_images_platform_digest_per_arch(dist):
     assert doc["images"]["gaussdb-agent-runtime"]["arm64"]["digest"] == arm["gaussdb-agent-runtime"]
     assert doc["images"]["gaussdb-agent-gateway"]["amd64"]["ref"] == "gaussdb-agent-gateway:%s-amd64" % TAG
     assert set(doc["files"]["images"]) == {"amd64", "arm64"} and len(doc["files"]["k8s"]["sha256"]) == 64
-    assert doc["whitelist"]["count"] == 128 == len(doc["whitelist"]["scripts"])
+    assert doc["whitelist"]["count"] == 132 == len(doc["whitelist"]["scripts"])
     assert [v["version"] for v in doc["history"]] == ["agent-v1.4.4", "agent-v1.4.3"]
 
 

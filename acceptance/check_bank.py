@@ -29,9 +29,9 @@ ANSWER_CHECK = ROOT / "agent" / "tools" / "answer_check.py"
 
 ASPECTS = {"A": "健康检查", "B": "故障排查", "C": "SQL 优化", "D": "榜单", "E": "WDR", "F": "知识问答",
            "G": "知识引用", "H": "安全红线", "I": "不乱答", "J": "交互与路由", "K": "知识库导入"}
-# faultlab 的场景编号(技能仓库 tools/faultlab/expected.yaml 的 scenarios;那边增删场景时这里同步)
+# faultlab 的场景编号(agent/tools/faultlab/expected.yaml 的 scenarios;那边增删场景时这里同步)
 FAULTLAB = frozenset(["S%d" % i for i in range(1, 8)] + ["K%d" % i for i in range(1, 11)] + ["D"]
-                     + ["V%d" % i for i in range(1, 8)] + ["L%d" % i for i in range(1, 6)])
+                     + ["V%d" % i for i in range(1, 8)] + ["L%d" % i for i in range(1, 6)] + ["W1"])
 KB_IMPORT_ONLY = frozenset({"gaussdb-kb-import", "gaussdb-kb-init"})     # 诊断环境的镜像里删掉了这两个
 KB_IMPORT_SKILLS = frozenset({"gaussdb-kb", "gaussdb-kb-import", "gaussdb-kb-init"})
 ENVS, PHASES, MODES = ("runtime", "kb-import"), ("live", "after"), ("paste", "upload", "db", "clip")

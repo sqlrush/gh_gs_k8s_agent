@@ -17,6 +17,7 @@
 #
 # 同名列跨表类型冲突这里不裁决，原样多行返回，由调用方保守放弃该列。
 name: sqltune.column_types
+database_type: appbusiness
 description: 占位符比较列的真实类型（替换前探测，让合成值类型正确）
 sql: |
   SELECT n.nspname AS schema_name, c.relname AS table_name,

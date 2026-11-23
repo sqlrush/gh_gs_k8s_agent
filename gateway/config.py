@@ -28,14 +28,24 @@ DEFAULT_PORT = 8080
 ENV_PORT = "GATEWAY_LISTEN_PORT"
 
 # 用户的诊断容器怎么来(2026-10-23):ondemand = 按人现建 Pod(v1.3.x 的做法,默认);pool = 固定池化
-# (部署时建好的 StatefulSet,按槽位分配)。
+# (部署时建好的 StatefulSet,按槽位分配,docs/plans/2026-10-23-fixed-pool-steward.md)。
 # 知识库管理员的导入容器两种模式下都按需建。
 RUNTIME_ONDEMAND, RUNTIME_POOL = "ondemand", "pool"
+# fuyao(2026-11-17)= 每人每种环境(诊断 / 导入)一台 openFuyao 沙箱(OpenSandbox + E2B 微型虚拟机),
+# 导入环境也是沙箱;设计见 docs/specs/2026-11-17-fuyao-sandbox-design.md
+RUNTIME_FUYAO = "fuyao"
+RUNTIME_MODES = (RUNTIME_ONDEMAND, RUNTIME_POOL, RUNTIME_FUYAO)
+_TEMPLATE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./:-]{0,127}$")
+_K8S_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
+_QUANTITY_RE = re.compile(r"^[0-9]+(\.[0-9]+)?(m|Ki|Mi|Gi|Ti)?$")
 # 只给测试集群:把固定池化各时长的下限降到 5 秒(e2e 要在几分钟里走完闲置 → 保留 → 腾挪)。
 # **刻意不叫 GATEWAY_***,正式清单(gateway.yaml / ConfigMap)里不许出现它(守卫测试核对)。
 TEST_SHORT_TIMERS = "POOL_TEST_SHORT_TIMERS"
 # 网页剪藏单次上限(MB)的天花板:网关单请求上限 64 MB,图片按 base64 传要多三分之一
 KB_CLIP_MAX_MB_CEILING = 45
+# 产品名(大盘标题、logo、日报报头):交付给不同客户时改这一项,代码里不写死客户称谓
+DEFAULT_PRODUCT_NAME = "GaussDB 智能体"
+PRODUCT_NAME_MAX = 40
 
 
 class ConfigError(Exception):
@@ -60,6 +70,9 @@ class Config:
     activity_interval_s: int = 60
     ready_timeout_s: int = 120
     kb_admin_roles: Tuple[str, ...] = ("kb-admin",)
+    # 运维管理员(资源大盘):角色头里带其中之一,或工号登记在 ConfigMap agent-roles 的 ops-admins 里
+    ops_admin_roles: Tuple[str, ...] = ("ops-admin",)
+    product_name: str = DEFAULT_PRODUCT_NAME
     # 控制 API 的独立密钥。空 = 控制 API 关闭(只提供代理入口)。
     admin_token: str = ""
     # 大盘前端的 Service 名:/dash/* 代理到 <frontend_service>.<namespace>.svc:80。
@@ -77,6 +90,24 @@ class Config:
     # 网页剪藏(2026-10-27):允许剪藏的内网网站(源);空 = 关闭。与导入容器读同一份 agent-config
     kb_clip_origins: Tuple[str, ...] = ()
     kb_clip_max_mb: int = 30
+    # Fuyao 运行模式(RUNTIME_MODE=fuyao)
+    fuyao_api: str = ""                     # OpenSandbox 地址,如 http://opensandbox-server.flux-system.svc:80
+    fuyao_api_key: str = ""                 # 平台开认证后的 API Key(Secret,不进 ConfigMap)
+    fuyao_runtime_template: str = ""
+    fuyao_runtime_group: str = ""
+    fuyao_import_template: str = ""
+    fuyao_import_group: str = ""
+    fuyao_cpu: str = "2"
+    fuyao_memory: str = "4Gi"
+    fuyao_sandbox_timeout: int = 0          # 平台的沙箱寿命;0 = 不设(平台不自动删)。>0 时清扫器在到期前收尾后删除
+    fuyao_idle_seconds: int = 1800          # 闲置多久收尾并暂停
+    fuyao_retain_days: int = 7              # 暂停多久后删除
+    fuyao_pause: bool = True                # 平台不支持暂停时设 0:闲置即收尾后删除
+    fuyao_sweep_seconds: int = 30
+    fuyao_wait_seconds: int = 90
+    # 沙箱里访问的两个集群服务:虚拟机的 DNS 解析不了集群域名(平台实测),网关下发前解析成 ClusterIP
+    fuyao_state_url: str = ""
+    fuyao_credproxy_url: str = ""
 
     @property
     def trust_configured(self) -> bool:
@@ -151,12 +182,20 @@ def load(env: Mapping[str, str]) -> Config:
     idle = _int(env, "GATEWAY_IDLE_SECONDS", reaper.DEFAULT_IDLE_SECONDS, minimum=300)
 
     runtime_mode = (env.get("GATEWAY_RUNTIME_MODE") or RUNTIME_ONDEMAND).strip().lower()
-    if runtime_mode not in (RUNTIME_ONDEMAND, RUNTIME_POOL):
-        raise ConfigError("GATEWAY_RUNTIME_MODE=%r 不认识,只能是 %s / %s" % (runtime_mode, RUNTIME_ONDEMAND, RUNTIME_POOL))
+    if runtime_mode not in RUNTIME_MODES:
+        raise ConfigError("GATEWAY_RUNTIME_MODE=%r 不认识,只能是 %s" % (runtime_mode, " / ".join(RUNTIME_MODES)))
     pool_key = (env.get("GATEWAY_POOL_CONTROL_KEY") or "").strip()
     if runtime_mode == RUNTIME_POOL and len(pool_key) < 16:
         raise ConfigError("固定池化模式要 GATEWAY_POOL_CONTROL_KEY(Secret sandbox-control 的 KEY,与各 Pod 管家同一把),"
                           "没配或不足 16 个字符")
+    if runtime_mode == RUNTIME_FUYAO and len(pool_key) < 16:
+        raise ConfigError("Fuyao 模式要 GATEWAY_POOL_CONTROL_KEY(Secret sandbox-control 的 KEY,与状态服务、"
+                          "凭据代理服务同一把,用来签发沙箱令牌),没配或不足 16 个字符")
+    if runtime_mode == RUNTIME_FUYAO and not (env.get("GATEWAY_ADMIN_TOKEN") or "").strip():
+        # 运维接口 /admin/fuyao(回写、暂停、删除,发版台读换版进度与删冒烟沙箱)全靠它;没有它接口整体 404,
+        # 出了问题只能去平台上直接删沙箱(不回写、丢数据)—— 宁可不启动(2026-11-18)
+        raise ConfigError("Fuyao 模式要 GATEWAY_ADMIN_TOKEN(Secret gateway-auth 的 ADMIN_TOKEN,运维接口 /admin/fuyao 与"
+                          "发版台都要用),没配或为空:往 Secret gateway-auth 加 ADMIN_TOKEN(openssl rand -hex 24)后重启网关")
     short = (env.get(TEST_SHORT_TIMERS) or "").strip() == "1"
     clip_mb = _int(env, "GATEWAY_KB_CLIP_MAX_MB", 30, minimum=1)
     if clip_mb > KB_CLIP_MAX_MB_CEILING:
@@ -171,6 +210,11 @@ def load(env: Mapping[str, str]) -> Config:
         raise ConfigError("GATEWAY_POOL_EARLY_IDLE_SECONDS=%d 比 GATEWAY_POOL_IDLE_SECONDS=%d 还长:"
                           "满员时提前转保留就永远轮不到" % (early, idle))
 
+    fy = _fuyao(env, runtime_mode == RUNTIME_FUYAO, low, ns)
+    product = (env.get("GATEWAY_PRODUCT_NAME") or "").strip() or DEFAULT_PRODUCT_NAME
+    if len(product) > PRODUCT_NAME_MAX or any(ord(c) < 32 or c in "<>\"'&" for c in product):
+        raise ConfigError("PRODUCT_NAME=%r 不对:至多 %d 个字符,不含控制字符与 < > \" ' &" % (product, PRODUCT_NAME_MAX))
+
     return Config(
         namespace=ns, image_tag=tag, image_registry=registry,
         pull_policy=(env.get("GATEWAY_PULL_POLICY") or "IfNotPresent").strip(),
@@ -184,6 +228,9 @@ def load(env: Mapping[str, str]) -> Config:
         ready_timeout_s=_int(env, "GATEWAY_READY_TIMEOUT_SECONDS", 120, minimum=10),
         kb_admin_roles=tuple(r.strip().lower() for r in
                              (env.get("GATEWAY_KB_ADMIN_ROLES") or "kb-admin").split(",") if r.strip()),
+        ops_admin_roles=tuple(r.strip().lower() for r in
+                              (env.get("GATEWAY_OPS_ADMIN_ROLES") or "ops-admin").split(",") if r.strip()),
+        product_name=product,
         admin_token=(env.get("GATEWAY_ADMIN_TOKEN") or "").strip(),
         frontend_service=(env.get("GATEWAY_FRONTEND_SERVICE") or "frontend").strip(),
         runtime_mode=runtime_mode,
@@ -197,4 +244,65 @@ def load(env: Mapping[str, str]) -> Config:
         pool_wait_seconds=_int(env, "GATEWAY_POOL_WAIT_SECONDS", 60, minimum=low(10)),
         kb_clip_origins=_clip_origins(env.get("GATEWAY_KB_CLIP_ORIGINS") or ""),
         kb_clip_max_mb=clip_mb,
+        **fy,
     )
+
+
+def _http_url(key: str, raw: str) -> str:
+    u = urlsplit(raw)
+    if u.scheme not in ("http", "https") or not u.hostname or u.query or u.fragment or "@" in u.netloc:
+        raise ConfigError("%s=%r 不对:要写成 http(s)://主机[:端口]" % (key, raw))
+    return raw.rstrip("/")
+
+
+# 两个集群服务的默认地址:按网关所在的命名空间推导(k8s/fuyao 的 Service 与网关在同一个命名空间)。
+# 换命名空间部署时不用再手工改这两项;显式填了的照用(2026-11-18)
+STATE_URL_DEFAULT = "http://statesvc.%s.svc:8090"
+CREDPROXY_URL_DEFAULT = "http://credproxy.%s.svc:8091"
+
+
+def _fuyao(env: Mapping[str, str], on: bool, low, ns: str = "gaussdb-agent") -> dict:
+    """Fuyao 模式的配置。不在这个模式时只解析、不强制;在这个模式时缺一项都拒绝启动。
+    状态服务、凭据代理服务的地址没填时按命名空间 ns 推导。"""
+    out = {
+        "fuyao_api": (env.get("GATEWAY_FUYAO_API") or "").strip(), "fuyao_api_key": (env.get("GATEWAY_FUYAO_API_KEY") or "").strip(),
+        "fuyao_runtime_template": (env.get("GATEWAY_FUYAO_RUNTIME_TEMPLATE") or "").strip(), "fuyao_runtime_group": (env.get("GATEWAY_FUYAO_RUNTIME_GROUP") or "").strip(),
+        "fuyao_import_template": (env.get("GATEWAY_FUYAO_IMPORT_TEMPLATE") or "").strip(), "fuyao_import_group": (env.get("GATEWAY_FUYAO_IMPORT_GROUP") or "").strip(),
+        "fuyao_cpu": (env.get("GATEWAY_FUYAO_CPU") or "2").strip(), "fuyao_memory": (env.get("GATEWAY_FUYAO_MEMORY") or "4Gi").strip(),
+        "fuyao_state_url": (env.get("GATEWAY_FUYAO_STATE_URL") or "").strip() or STATE_URL_DEFAULT % ns,
+        "fuyao_credproxy_url": (env.get("GATEWAY_FUYAO_CREDPROXY_URL") or "").strip() or CREDPROXY_URL_DEFAULT % ns,
+    }
+    pause = (env.get("GATEWAY_FUYAO_PAUSE") or "1").strip().lower()
+    if pause not in ("1", "0", "true", "false", "yes", "no"):
+        raise ConfigError("GATEWAY_FUYAO_PAUSE=%r 不认识,只能是 1 / 0" % pause)
+    out["fuyao_pause"] = pause in ("1", "true", "yes")
+    out["fuyao_sandbox_timeout"] = _int(env, "GATEWAY_FUYAO_SANDBOX_TIMEOUT", 0)
+    if 0 < out["fuyao_sandbox_timeout"] < 1800:
+        raise ConfigError("GATEWAY_FUYAO_SANDBOX_TIMEOUT=%d 太小:0 表示不设,否则至少 1800(到期前 15 分钟要收尾)"
+                          % out["fuyao_sandbox_timeout"])
+    out["fuyao_idle_seconds"] = _int(env, "GATEWAY_FUYAO_IDLE_SECONDS", 1800, minimum=low(300))
+    out["fuyao_retain_days"] = _int(env, "GATEWAY_FUYAO_RETAIN_DAYS", 7, minimum=1)
+    out["fuyao_sweep_seconds"] = _int(env, "GATEWAY_FUYAO_SWEEP_SECONDS", 30, minimum=5)
+    out["fuyao_wait_seconds"] = _int(env, "GATEWAY_FUYAO_WAIT_SECONDS", 90, minimum=low(10))
+    if not on:
+        return out
+    missing = [k for k, v in (("GATEWAY_FUYAO_API", out["fuyao_api"]),
+                              ("GATEWAY_FUYAO_RUNTIME_TEMPLATE", out["fuyao_runtime_template"]),
+                              ("GATEWAY_FUYAO_RUNTIME_GROUP", out["fuyao_runtime_group"]),
+                              ("GATEWAY_FUYAO_IMPORT_TEMPLATE", out["fuyao_import_template"]),
+                              ("GATEWAY_FUYAO_IMPORT_GROUP", out["fuyao_import_group"])) if not v]
+    if missing:
+        raise ConfigError("Fuyao 模式缺配置:%s(见《参数手册》Fuyao 一节)" % "、".join(missing))
+    out["fuyao_api"] = _http_url("GATEWAY_FUYAO_API", out["fuyao_api"])
+    out["fuyao_state_url"] = _http_url("GATEWAY_FUYAO_STATE_URL", out["fuyao_state_url"])
+    out["fuyao_credproxy_url"] = _http_url("GATEWAY_FUYAO_CREDPROXY_URL", out["fuyao_credproxy_url"])
+    for k in ("fuyao_runtime_template", "fuyao_import_template"):
+        if not _TEMPLATE_RE.match(out[k]):
+            raise ConfigError("%s=%r 不像模板名" % ("GATEWAY_" + k.upper(), out[k]))
+    for k in ("fuyao_runtime_group", "fuyao_import_group"):
+        if not _K8S_NAME_RE.match(out[k]):
+            raise ConfigError("%s=%r 不是合法的沙箱组名(小写字母、数字、连字符)" % ("GATEWAY_" + k.upper(), out[k]))
+    for k, name in (("fuyao_cpu", "GATEWAY_FUYAO_CPU"), ("fuyao_memory", "GATEWAY_FUYAO_MEMORY")):
+        if not _QUANTITY_RE.match(out[k]):
+            raise ConfigError("%s=%r 不是合法的资源量(如 2、500m、4Gi)" % (name, out[k]))
+    return out

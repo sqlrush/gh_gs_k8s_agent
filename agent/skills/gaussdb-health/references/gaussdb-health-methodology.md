@@ -31,12 +31,12 @@
 - `pg_stat_user_tables`，dead_ratio 高且 n_dead_tup 大（> 10 万）才计，避免小表噪声。
 - Astore（默认堆）靠 vacuum 回收死元组；Ustore（in-place 更新）膨胀语义不同，回滚段/旧版本压力点不一样。
 - **先看证据里的 `autovacuum=on/off`（采集器已在发现证据与表里标出）**：
-  - `autovacuum=off` → 膨胀真因是该表 autovacuum 被关闭（或全局关闭），**与长事务无关**；建议开启 autovacuum 或人工 `VACUUM`，**不要**归因于"长事务卡 vacuum"。
+  - `autovacuum=off` → 膨胀真因是该表 autovacuum 被关闭（或全局关闭），**与长事务无关**；表级关闭的，属应用侧（该表的表级存储参数改回）；全局关闭的属配置基线问题，请运维核对；当下由 DBA 人工 `VACUUM` 该表。**不要**归因于"长事务卡 vacuum"。
   - `autovacuum=on` 且 dead 高 + last_autovacuum 久未跑 → 才考虑是否被长事务/IIT 的旧快照卡住：看 Overview 的"最老事务"年龄，足够大且死元组晚于其快照时该归因才成立；先处置那个事务，膨胀常自愈一部分。
 
 ### Lightweight Locks (LWLock)（轻量锁）
 - `pg_thread_wait_status` 里 lwlock 类等待。同一 lwlock ≥ 5 会话持续等待为热点。
-- WALWriteLock 热 → WAL 写瓶颈（结合 checkpoint）；buffer mapping / clog 热 → 缓冲区或事务状态争用。
+- 轻量锁热点是实例级指标，要追到业务：WALWriteLock 热 → 写入量大，看 WAL 维度的写入来源（哪些表、哪些 SQL、哪些会话在写，有没有大字段批量写入）；buffer mapping / clog 热 → 大量会话并发访问同一批数据或大量短事务，用 gaussdb-topsql 找对应的 SQL。
 
 ### Transaction Locks & Blocking Chains（事务锁与阻塞链）
 - `pg_locks` 自连接递归构链（GaussDB 无 `pg_blocking_pids()`）。看**根阻塞者**、链深、被阻会话数、阻塞时长。
@@ -48,7 +48,7 @@
 - idle 堆积 → 连接池过大或未回收；IIT 计数高 → 与 Xact/Locks 维交叉印证。
 
 ### Checkpoint / WAL / Archiving（日志类纯 SQL 信号）
-- `pg_stat_bgwriter`：checkpoints_req 占比高（> 30%/50%）= checkpoint 被频繁强制触发（WAL 涨太快 / `checkpoint_segments` 偏小），关注 IO 抖动。
+- `pg_stat_bgwriter`：checkpoints_req 占比高（> 30%/50%）= checkpoint 被频繁强制触发，也就是 xlog 涨得快，关注 IO 抖动。要追到写入来源（WAL 维度：xlog 每秒生成量、写入最多的表 / SQL / 会话、有没有大字段）；checkpoint 相关参数不作为建议。
 - `archive_mode`：来自 `pg_settings`。注：PG 9.2 内核的 GaussDB 无 `pg_stat_archiver`，归档失败计数不可得，本维只报开关与 checkpoint 压力。
 
 ### Replication / Standby（复制 / 主备）
@@ -73,8 +73,8 @@
 ## 跨维度关联（健康检查的价值所在）
 
 - **IIT → 阻塞链 + 膨胀**：一个 `idle in transaction` 会话同时出现在 Xact（XACT_IDLE）、Locks（根阻塞）、并可能间接抬高 Bloat（旧快照卡 vacuum）。**膨胀这条关联有前提守卫**：仅当目标表 `autovacuum=on` 且 Overview 的"最老事务"年龄足够大时，膨胀才归因于该 IIT；若 `autovacuum=off`，膨胀是**独立问题**（autovacuum 关了），不要硬串成一条因果。满足前提时把阻塞+膨胀点成**单一根因**，而不是孤立问题。
-- **WALWriteLock 热 + checkpoint_req 高**：指向 WAL/落盘压力，而非单纯锁问题。
-- **缓存命中率低 + Slow SQL 大表扫**：互相印证 buffer 不足或缺索引，导流 `/sqltune`。
+- **WALWriteLock 热 + checkpoint_req 高**：指向业务写入量大（批量写入、大字段），追到 WAL 维度的写入来源，而非单纯锁问题。
+- **缓存命中率低 + Slow SQL 大表扫**：互相印证大表全扫（缺索引、SQL 写法），导流 `/sqltune`；不归因于缓冲区参数。
 
 ## 证据锚定校验（复述要点）
 

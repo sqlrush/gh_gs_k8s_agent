@@ -1,0 +1,24 @@
+# 当前事务用了多少 xlog 的会话(2026-11-05 加):GaussDB 的 pg_stat_activity 有 xlog_quantity(当前事务已用的 xlog 字节,
+# 官方文档「PG_STAT_ACTIVITY」)。openGauss 没有这一列,这条在那里会报「列不存在」—— 由脚本接住,说明本库不支持,
+# 写入来源改看表与 SQL 两路。能拿到时它是最直接的证据:哪个会话、哪个应用、正在执行哪条 SQL 写了多少 xlog。
+name: health.xlog_by_session
+description: 当前事务 xlog 用量最大的会话（GaussDB）
+readonly: true
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限
+sql: |
+  SELECT sessionid::text AS sessionid,
+         pid::text AS pid,
+         usename,
+         application_name,
+         state,
+         xlog_quantity,
+         unique_sql_id::text AS unique_sql_id,
+         substr(query, 1, 120) AS query
+    FROM pg_stat_activity
+   WHERE xlog_quantity > 0
+     AND pid <> pg_backend_pid()
+   ORDER BY xlog_quantity DESC
+   LIMIT {{limit}};

@@ -7,3 +7,6 @@ agent/grmp_middleware/fixtures
 **/__pycache__
 **/*.pyc
 release/tests
+# 测试仓库专用:转化脚本与验收题库不进镜像
+delivery
+acceptance

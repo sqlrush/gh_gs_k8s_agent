@@ -45,9 +45,8 @@ COLUMN_STATS_SCRIPT = "sqltune.column_stats"
 KEY_GUCS_SCRIPT = "sqltune.key_gucs"
 STATS_FRESHNESS_SCRIPT = "sqltune.stats_freshness"
 PLAN_JSON_SCRIPT = "sqltune.plan_json"
-# 带 search_path 的两语句模板(common/search_path.py 按 base + "_schema" 拼名;交付闸按全串检索,故写全):
-#   sqltune.plan_text_schema / sqltune.plan_text_analyze_schema / sqltune.plan_json_schema
-#   探测脚本 explain.multi_stmt_probe(与 explain skill 共用)
+# 带 schema 时:v1.4.13 起不再用两语句模板(行方中间件拦截两段 SQL),表名按 schema 补全后走单语句模板,
+#   见 common/search_path.py
 
 
 # --- 协议取值：所有列值都是字符串，NULL 是空串 ------------------------------
@@ -87,8 +86,8 @@ from common.grmp.statement import is_dml  # noqa: E402,F401  (verify.py 从本�
 def explain_plan_via_script(runner, sql_text: str, analyze: bool, schema: str = "") -> tuple:
     """走已注册的 EXPLAIN 模板 —— 没有原始会话时用这条。返回 (计划, 实际切到的 schema, 说明)。
 
-    有 schema 就走「SET search_path; EXPLAIN」两语句模板(现场 400 的修法),中间件不支持两条语句时
-    退回单语句模板并说明,见 common/search_path.py。
+    有 schema 就把不带 schema 的表名按它补全后走单语句模板(现场 400 的修法;v1.4.13 起不发两段 SQL,
+    行方中间件会拦截),见 common/search_path.py。
     调用前必须先过 ensure_explainable()：模板是文本替换，参数位就是注入面。
     """
     script = "sqltune.plan_text_analyze" if analyze else "sqltune.plan_text"
@@ -168,7 +167,8 @@ def scan_plan(plan_text: str) -> list[Finding]:
         elif trimmed.startswith("sort"):
             out.append(Finding("sort", "warn", detail,
                 "Explicit sort; an index matching ORDER BY may remove it. "
-                "Check work_mem if the sort spills to disk."))
+                "If it spills to disk, first cut the rows this SQL sorts (filters, paging); "
+                "raise work_mem only for this SQL's session if still needed."))
     if "nested loop" in lower and "seq scan" in lower:
         out.append(Finding("nestloop_seqscan", "warn",
             "Nested Loop combined with Seq Scan",
@@ -176,7 +176,8 @@ def scan_plan(plan_text: str) -> list[Finding]:
             "consider an index on the join key."))
     if "hash join" in lower:
         out.append(Finding("hash_join", "info", "Hash Join present",
-            "Usually fine for large joins; verify hash memory fits work_mem."))
+            "Usually fine for large joins; if the hash spills, reduce the rows feeding the join first "
+            "(session-level work_mem for this SQL only if needed)."))
     return out
 
 
@@ -363,7 +364,7 @@ def collect(runner, db, sql_text: str, do_analyze: bool, schema: str = "") -> Ev
     这时 EXPLAIN 走已注册模板 —— 单条 EXPLAIN 本来就零状态，不需要会话。
     真正需要会话的只有 hypopg 索引验证，由调用方跳过并标注。
     schema 是这条 SQL 原本执行时的 schema(statement_history.schema_name 等):有原始会话就在会话上
-    SET search_path,没有就走两语句模板——业务 SQL 的表名不带 schema,不切的话中间件执行账号解析不到。
+    SET search_path,没有就把表名按 schema 补全后走单语句模板——业务 SQL 的表名不带 schema,不处理的话中间件执行账号解析不到。
     """
     rows = runner.run(VERSION_SCRIPT)
     version = rows[0]["version"] if rows else ""

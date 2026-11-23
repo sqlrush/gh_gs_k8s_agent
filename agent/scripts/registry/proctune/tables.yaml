@@ -19,6 +19,7 @@
 # STRING_PARAM）。防线在调用方 —— evidence.extract_tables() 只产出
 # [a-z_][\w.]* 形态的标识符，再由 _quoted_list() 双写单引号。
 name: proctune.tables
+database_type: appbusiness
 description: 游标 SQL 涉及的表的页数/行数/大小（证据包 ## Tables）
 sql: |
   SELECT n.nspname, c.relname, c.relpages,

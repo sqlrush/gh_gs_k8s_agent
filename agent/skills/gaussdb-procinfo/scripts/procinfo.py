@@ -51,8 +51,8 @@ for parent in _HERE.parents:
 # Key planner/memory GUCs (same whitelist as the proctune evidence collector).
 
 
-_RUNTIME_NOTE = ("运行时归因（embedded SQL 的真实 calls/avg/total）需实例开启 "
-                 "track_stmt_stat_level 捕获嵌套语句；当前按纯静态分析。"
+_RUNTIME_NOTE = ("运行时归因（embedded SQL 的真实 calls/avg/total）需运维开启 "
+                 "track_stmt_stat_level 捕获嵌套语句后才能取到；当前按纯静态分析。"
                  "要拿到经验证（cost + 等价 + hypopg 索引）的优化，对同一过程运行 gaussdb-proctune。")
 
 

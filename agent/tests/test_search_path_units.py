@@ -1,10 +1,10 @@
-"""common.search_path —— EXPLAIN 前把 search_path 切到 SQL 原本的 schema。
+"""common.search_path —— 业务 SQL 的表名不带 schema 时怎么取执行计划。
 
 现场 sqltune 400 的成因:业务 SQL 的表名不带 schema,靠应用账号的 search_path 解析;中间件执行账号的
-search_path 是 "$user", public,解析不到 → relation does not exist → HTTP 400。修法是注册一条
-「SET search_path TO "<schema>", public; EXPLAIN …」的两语句模板。中间件能不能跑两条语句不确定,
-所以先用一条探测脚本验一次(每个 runner 只验一次),不行就退回单语句模板并说明——不让它变成新的 400。
-schema 名同时进 SET 语句的引号里,形状不是合法标识符一律不用。
+search_path 是 "$user", public,解析不到 → relation does not exist → HTTP 400。
+原先注册「SET search_path …; EXPLAIN …」两语句模板、先探测中间件能不能跑两条语句;行方中间件拦截一条脚本里的
+两段 SQL(2026-11-12),v1.4.13 起一律把不带 schema 的表名补全后走单语句模板,不再探测、不再交付两语句脚本。
+schema 名进 SQL 前照旧要过合法标识符检查。
 """
 import pathlib
 import sys
@@ -19,23 +19,17 @@ from common.grmp.errors import QueryError  # noqa: E402
 
 
 class FakeRunner:
-    def __init__(self, probe_ok=True, probe_exc=None):
-        self.probe_ok, self.probe_exc, self.calls = probe_ok, probe_exc, []
+    def __init__(self):
+        self.calls = []
 
     def run(self, script, values=None):
         self.calls.append((script, dict(values or {})))
-        if script == sp.PROBE_SCRIPT:
-            if self.probe_exc:
-                raise QueryError(self.probe_exc)
-            return [{"ok": "1"}] if self.probe_ok else []
         return [{"QUERY PLAN": "Seq Scan on orders"}]
 
 
-@pytest.fixture(autouse=True)
-def _fresh_cache():
-    sp.reset_probe_cache()
-    yield
-    sp.reset_probe_cache()
+def _no_two_statement_scripts(calls):
+    """不再有探测、不再有 *_schema 两语句模板。"""
+    return all("multi_stmt_probe" not in c[0] and not c[0].endswith("_schema") for c in calls)
 
 
 def test_valid_schema_is_a_plain_identifier():
@@ -51,46 +45,28 @@ def test_no_schema_runs_the_plain_template():
     assert r.calls == [("sqltune.plan_text", {"sql": "select 1"})]
 
 
-def test_schema_uses_the_schema_template_when_the_middleware_runs_two_statements():
+def test_schema_qualifies_tables_and_sends_one_statement():
+    """有 schema:把不带 schema 的表名补全,走单语句模板;不探测、不发两段 SQL(行方中间件会拦截)。"""
     r = FakeRunner()
-    plan, applied, note = sp.explain_plan(r, "sqltune.plan_text", "select 1", "app_trade")
-    assert plan == "Seq Scan on orders" and applied == "app_trade" and note == ""
-    assert r.calls[0][0] == sp.PROBE_SCRIPT
-    assert r.calls[1] == ("sqltune.plan_text_schema", {"sql": "select 1", "schema": "app_trade"})
-
-
-def test_probe_failure_falls_back_to_the_plain_template_with_a_note():
-    """探测脚本没注册(白名单没灌)/ 中间件拒绝两条语句:退回单语句模板,把原因和**可照做的配置命令**写进 note——
-    用户看到就知道该让 DBA 做什么,不用再来问。"""
-    r = FakeRunner(probe_exc="脚本 explain.multi_stmt_probe 不存在")
-    plan, applied, note = sp.explain_plan(r, "sqltune.plan_text", "select 1", "app_trade")
+    plan, applied, note = sp.explain_plan(r, "sqltune.plan_text", "SELECT COUNT(1) FROM batch_job_status WHERE x = 1", "gmag")
     assert plan == "Seq Scan on orders" and applied == ""
-    assert r.calls[1] == ("sqltune.plan_text", {"sql": "select 1"})
-    assert "search_path" in note and "app_trade" in note and "不存在" in note
-    assert "白名单" in note and "explain.multi_stmt_probe" in note          # 原因一:探测脚本没灌进白名单
-    assert "ALTER ROLE" in note and "SET search_path = app_trade, public" in note   # 可照做的 DBA 命令
-    assert "app_trade.<表>" in note                                         # 备选:表名写全
+    assert r.calls == [("sqltune.plan_text", {"sql": "SELECT COUNT(1) FROM gmag.batch_job_status WHERE x = 1"})]
+    assert "补全" in note and "gmag.batch_job_status" in note and "等价" in note
+    assert "ALTER ROLE" not in note and "DBA" not in note, "生产环境权限与配置固定(11-12 行方):不把改执行账号当办法"
 
 
-def test_probe_returning_nothing_counts_as_unsupported():
-    r = FakeRunner(probe_ok=False)
-    _, applied, note = sp.explain_plan(r, "explain.plan_text", "select 1", "app_trade")
-    assert applied == "" and note and r.calls[1][0] == "explain.plan_text"
-
-
-def test_probe_runs_once_per_runner():
+def test_joined_tables_are_all_qualified():
     r = FakeRunner()
-    sp.explain_plan(r, "sqltune.plan_text", "select 1", "a1")
-    sp.explain_plan(r, "sqltune.plan_json", "select 2", "a1")
-    assert [c[0] for c in r.calls].count(sp.PROBE_SCRIPT) == 1
-    assert r.calls[-1][0] == "sqltune.plan_json_schema"
+    _, applied, note = sp.explain_plan(r, "explain.plan_text", "select * from t1 join t2 on t1.id = t2.id", "app")
+    assert applied == "" and r.calls == [("explain.plan_text", {"sql": "select * from app.t1 join app.t2 on t1.id = t2.id"})]
+    assert _no_two_statement_scripts(r.calls)
 
 
-def test_invalid_schema_never_reaches_a_template():
+def test_invalid_schema_never_reaches_the_sql():
     r = FakeRunner()
     _, applied, note = sp.explain_plan(r, "x.plan_text", "select 1", "app;drop")
     assert applied == "" and "不是合法" in note
-    assert all(c[0] != "x.plan_text_schema" for c in r.calls)
+    assert r.calls == [("x.plan_text", {"sql": "select 1"})]
 
 
 def test_set_search_path_on_a_raw_session_quotes_the_identifier():
@@ -109,91 +85,45 @@ def test_set_search_path_on_a_raw_session_quotes_the_identifier():
         sp.set_search_path(db, 'app"; drop schema x')
 
 
-def test_executor_refusing_two_statements_gets_the_same_dba_command():
-    """原因二:探测脚本在、但中间件不支持一条脚本跑两条语句——说明要写明这是执行器的限制,并给同一条 DBA 命令。"""
-    r = FakeRunner(probe_ok=False)
-    _, applied, note = sp.explain_plan(r, "explain.plan_text", "select 1", "gbatch")
-    assert applied == "" and "两条语句" in note and "白名单" not in note
-    assert "ALTER ROLE" in note and "SET search_path = gbatch, public" in note
+def test_nothing_to_qualify_runs_the_original_sql_with_a_note():
+    """SQL 里的表名本来就带 schema(或没有表):没什么可补,原 SQL 走单语句模板,说明里只给「表名写全」这一条能调的路。"""
+    r = FakeRunner()
+    _, applied, note = sp.explain_plan(r, "explain.plan_text", "select * from other.t", "gmag")
+    assert applied == "" and r.calls == [("explain.plan_text", {"sql": "select * from other.t"})]
+    assert "补全" in note and "gmag.<表>" in note and "不影响其余部分" in note and "ALTER ROLE" not in note
 
 
-def test_fallback_explain_failure_carries_the_note_in_the_error():
-    """探测没通过、退回单语句模板后 EXPLAIN 又因为表不在 search_path 里失败:这时没有报告可以放说明,
-    说明必须跟在报错后面——用户看到的那一段就得写清是白名单没灌还是执行器不支持,以及 DBA 该跑的命令。"""
-    class _R(FakeRunner):
-        def run(self, script, values=None):
-            if script == "sqltune.plan_text":
-                raise QueryError('执行脚本 sqltune.plan_text 失败：ERROR: relation "orders" does not exist')
-            return super().run(script, values)
+class _FailUnqualified(FakeRunner):
+    """原文失败、补全后成功 / 补全后失败、原文成功 —— 两种都要照样出计划。"""
 
-    r = _R(probe_exc="脚本 explain.multi_stmt_probe 不存在")
-    with pytest.raises(QueryError) as ei:
-        sp.explain_plan(r, "sqltune.plan_text", "select 1", "app_trade")
-    msg = str(ei.value)
-    assert 'relation "orders" does not exist' in msg and "补充" in msg
-    assert "白名单" in msg and "ALTER ROLE" in msg and "SET search_path = app_trade, public" in msg
-
-
-# ---------------------------------------------------------------- 切不成 search_path → 脚本自己补全表名(09-09 早截图)
-
-class _QualRunner(FakeRunner):
-    """记下单语句模板收到的 SQL;可指定「原文失败、补全后成功」。"""
-
-    def __init__(self, fail_unqualified=False, **kw):
-        super().__init__(**kw)
-        self.fail_unqualified = fail_unqualified
+    def __init__(self, fail_marker):
+        super().__init__()
+        self.fail_marker = fail_marker
 
     def run(self, script, values=None):
-        if script != sp.PROBE_SCRIPT and self.fail_unqualified and "gmag." not in (values or {}).get("sql", ""):
-            self.calls.append((script, dict(values or {})))
+        self.calls.append((script, dict(values or {})))
+        if self.fail_marker((values or {}).get("sql", "")):
             raise QueryError('执行脚本失败：ERROR: relation "batch_job_status" does not exist')
-        return super().run(script, values)
+        return [{"QUERY PLAN": "Seq Scan on orders"}]
 
 
-def test_unsupported_two_statements_qualifies_table_names_instead():
-    """执行器跑不了两条语句:不再把原 SQL 原样发过去等 400,先把不带 schema 的表名补全再走单语句模板。"""
-    r = _QualRunner(probe_ok=False)
-    plan, applied, note = sp.explain_plan(r, "sqltune.plan_text", "SELECT COUNT(1) FROM batch_job_status WHERE x = 1", "gmag")
-    assert plan == "Seq Scan on orders"
-    assert r.calls[1] == ("sqltune.plan_text", {"sql": "SELECT COUNT(1) FROM gmag.batch_job_status WHERE x = 1"})
-    assert applied == ""                                   # search_path 确实没切,不假装
-    assert "补全" in note and "gmag.batch_job_status" in note and "两条语句" in note
-    assert "ALTER ROLE" in note and "SET search_path = gmag, public" in note
+def test_qualified_sql_failing_falls_back_to_the_original_sql():
+    """补全规则漏了某种语法时(2026-11-08 行方报告 Bug 1 那类),原 SQL 往往本来就能跑:用原 SQL 再试一次。"""
+    r = _FailUnqualified(lambda sql: "gmag." in sql)
+    plan, applied, note = sp.explain_plan(r, "explain.plan_text", "select 1 from batch_job_status", "gmag")
+    assert plan == "Seq Scan on orders" and [c[1]["sql"] for c in r.calls] == [
+        "select 1 from gmag.batch_job_status", "select 1 from batch_job_status"]
+    assert "已改用原 SQL 取计划" in note
 
 
-def test_missing_probe_script_also_qualifies_and_says_which_cause():
-    r = _QualRunner(probe_exc="脚本 explain.multi_stmt_probe 不存在")
-    _, applied, note = sp.explain_plan(r, "explain.plan_text", "select * from t1 join t2 on t1.id = t2.id", "app")
-    assert applied == "" and r.calls[1][1]["sql"] == "select * from app.t1 join app.t2 on t1.id = t2.id"
-    assert "补全" in note and "白名单" in note and "explain.multi_stmt_probe" in note
-
-
-def test_nothing_to_qualify_keeps_the_old_fallback():
-    """SQL 里的表名本来就带 schema(或没有表):没什么可补,行为与之前一样——原文单语句模板 + 原因说明。"""
-    r = _QualRunner(probe_ok=False)
-    _, applied, note = sp.explain_plan(r, "explain.plan_text", "select * from other.t", "gmag")
-    assert applied == "" and r.calls[1][1]["sql"] == "select * from other.t"
-    assert "补全" not in note and "ALTER ROLE" in note
-
-
-def test_qualified_explain_failure_still_carries_the_note():
-    class _R(_QualRunner):
-        def run(self, script, values=None):
-            if script != sp.PROBE_SCRIPT:
-                raise QueryError('ERROR: relation "gmag.batch_job_status" does not exist')
-            return super().run(script, values)
-
+def test_both_failing_carries_the_note_in_the_error():
+    """补全后与原文都失败:没有报告可以放说明,说明跟在报错后面——能调的只有 SQL,写清这一条的计划取不到、不影响其余。"""
+    r = _FailUnqualified(lambda sql: True)
     with pytest.raises(QueryError) as ei:
-        sp.explain_plan(_R(probe_ok=False), "explain.plan_text", "select 1 from batch_job_status", "gmag")
+        sp.explain_plan(r, "explain.plan_text", "select 1 from batch_job_status", "gmag")
     msg = str(ei.value)
-    assert "补充" in msg and "补全" in msg and "ALTER ROLE" in msg
-
-
-def test_two_statement_path_still_preferred_when_it_works():
-    r = _QualRunner(probe_ok=True)
-    _, applied, note = sp.explain_plan(r, "explain.plan_text", "select * from t", "gmag")
-    assert applied == "gmag" and note == ""
-    assert r.calls[1] == ("explain.plan_text_schema", {"sql": "select * from t", "schema": "gmag"})
+    assert 'relation "batch_job_status" does not exist' in msg and "补充" in msg and "补全" in msg
+    assert "ALTER ROLE" not in msg and _no_two_statement_scripts(r.calls)
 
 
 # ---------------------------------------------------------------- schema_name 是搜索路径串(2026-10-21 现场:`fl, public`)
@@ -237,24 +167,22 @@ def test_primary_and_dba_paths():
     assert sp.dba_search_path("a, b") == "a, b, public"
 
 
-def test_search_path_string_goes_through_the_schema_template():
-    """`fl, public` 不再被当成一个 schema 名拒掉:整串切过去,末尾的 public 由模板自己补。"""
+def test_search_path_string_qualifies_with_the_first_segment():
+    """`fl, public` 不再被当成一个 schema 名拒掉:按第一段补全,说明如实写「表在第一段下才等价」。"""
     r = FakeRunner()
-    plan, applied, note = sp.explain_plan(r, "sqltune.plan_text", "select 1", "fl, public")
-    assert plan == "Seq Scan on orders" and applied == "fl, public" and note == ""
-    assert r.calls[1] == ("sqltune.plan_text_schema", {"sql": "select 1", "schema": "fl"})
+    plan, applied, note = sp.explain_plan(r, "sqltune.plan_text", "select * from orders", "fl, public")
+    assert plan == "Seq Scan on orders" and applied == ""
+    assert r.calls == [("sqltune.plan_text", {"sql": "select * from fl.orders"})]
+    assert "fl.orders" in note and "第一个 schema fl" in note and "ALTER ROLE" not in note
 
 
-def test_rendered_template_sets_every_segment_quoted():
-    """真实模板渲染后的文本:`fl, public` 与原先单 schema 的那条逐字相同;多段各自加引号、常量连接。"""
-    sql = "select * from orders"
-    out = _render_registry_template("sqltune.plan_text_schema", {"sql": sql, "schema": sp.template_value(["fl", "public"])})
-    assert out.startswith('SET search_path TO "fl", public; EXPLAIN')
-    out = _render_registry_template("sqltune.plan_text_schema", {"sql": sql, "schema": sp.template_value(["a", "b"])})
-    assert out.startswith('SET search_path TO "a", "b", public; EXPLAIN')
-    out = _render_registry_template("sqltune.plan_text_schema", {"sql": sql, "schema": sp.template_value(["public"])})
-    assert out.startswith('SET search_path TO "public", public; EXPLAIN')
-    assert out.count(";") == 1                                       # 只有模板自己那一个分号
+def test_no_registered_script_has_two_statements():
+    """守卫(2026-11-12 行方):中间件拦截一条脚本里的两段 SQL —— 白名单里每条脚本都只能是一条语句。"""
+    from common.grmp.registry import Registry
+    from common.grmp.statement import split_statements
+    reg = Registry()
+    bad = [n for n in sorted(reg.names()) if len(split_statements(reg.find(n).script_content)) != 1]
+    assert not bad, "这些脚本含多段 SQL,行方中间件会拦截:%s" % bad
 
 
 def test_template_value_refuses_unchecked_segments():
@@ -268,8 +196,7 @@ def test_one_bad_segment_switches_nothing_and_names_it():
     r = FakeRunner()
     _, applied, note = sp.explain_plan(r, "sqltune.plan_text", "select 1", 'fl, public"; drop schema fl; --')
     assert applied == "" and "不是合法" in note and "整串不切" in note and "未切换 search_path" in note
-    assert all(not c[0].endswith(sp.SCHEMA_SUFFIX) for c in r.calls)
-    assert r.calls == [("sqltune.plan_text", {"sql": "select 1"})]      # 连探测都不做,原 SQL 走单语句模板
+    assert r.calls == [("sqltune.plan_text", {"sql": "select 1"})]      # 原 SQL 走单语句模板
 
 
 def test_set_search_path_on_a_raw_session_takes_a_path():
@@ -282,15 +209,19 @@ def test_set_search_path_on_a_raw_session_takes_a_path():
     assert "$user" in str(ei.value) and "拒绝" in str(ei.value) and len(db.executed) == 2
 
 
-def test_unsupported_two_statements_qualifies_with_the_first_segment():
-    """执行器跑不了两条语句时按路径第一段补全表名;说明如实写「表在第一段下才等价」,DBA 命令不叠 public。"""
-    r = FakeRunner(probe_ok=False)
-    _, applied, note = sp.explain_plan(r, "sqltune.plan_text", "select * from orders", "fl, public")
-    assert applied == "" and r.calls[1] == ("sqltune.plan_text", {"sql": "select * from fl.orders"})
-    assert "fl.orders" in note and "第一个 schema fl" in note and "fl, public" in note
-    assert "SET search_path = fl, public;" in note and "public, public" not in note
-
-
 def test_fallback_note_for_a_path_names_the_first_segment_for_qualified_names():
-    note = sp.fallback_note("fl, public", "探测脚本没有返回 1")
-    assert "SET search_path = fl, public;" in note and "fl.<表>" in note and "public, public" not in note
+    note = sp.fallback_note("fl, public")
+    assert "fl.<表>" in note and "不影响其余部分" in note and "ALTER ROLE" not in note
+
+
+def test_business_path_drops_the_default_user_segment():
+    """statement_history 记的默认路径 `"$user",public`:原先整串判不合法、一段都不切,业务表找不到(2026-11-06)。
+    现在 `"$user"` 去掉、合法名外的引号去掉;只剩 public 时返回空串,由调用方按表名在目录里找 schema。"""
+    assert sp.business_path('"$user",public') == ""
+    assert sp.business_path('"$user", public') == ""
+    assert sp.business_path('"$user", gmag, public') == "gmag, public"
+    assert sp.business_path('"Gmag", public') == "Gmag, public"
+    assert sp.business_path("fl, public") == "fl, public"
+    assert sp.business_path("") == "" and sp.business_path(None) == ""
+    # 注入防线不变:不合法的段原样留着,照旧由 parse_search_path 判掉
+    assert not sp.valid_search_path(sp.business_path('fl, x;drop'))

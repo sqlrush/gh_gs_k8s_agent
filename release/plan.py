@@ -2,6 +2,10 @@
 
 当前版本看三处:gateway-config 的 USER_IMAGE_TAG、网关 Deployment 的镜像、池子每个容器的 spec 镜像。
 三处一致 = 正常;不一致 = 上次发布没走完(只能接着发同一个目标,或回滚);网关不存在 = 首次部署。
+
+运行模式看 gateway-config 的 RUNTIME_MODE。Fuyao 模式(docs/specs/2026-11-17-fuyao-sandbox-design.md)没有池子、
+没有按需的导入容器:第三处换成状态服务、凭据代理服务两个 Deployment 的镜像;步骤表里不走池子替换与导入容器,
+改为网关之前「模板核对」、网关之后「沙箱换版」。
 """
 from __future__ import annotations
 
@@ -28,6 +32,27 @@ STEPS = [  # id, 名字, 子步骤
     ("done", "完成", ["记录版本", "生成发布报告"]),
 ]
 
+FUYAO = "fuyao"                                     # gateway-config 的 RUNTIME_MODE
+FUYAO_DEPLOYS = ("statesvc", "credproxy")           # Fuyao 模式的两个集群服务(k8s/fuyao),镜像与网关同一个版本
+FUYAO_TEMPLATE_STEP = ("template", "模板核对", ["算出模板名", "探测诊断模板", "探测导入模板", "清理探测沙箱"])
+FUYAO_SANDBOX_STEP = ("sandbox", "沙箱换版", ["读取换版进度", "核对网关的模板名", "记录旧版沙箱"])
+FUYAO_DROPPED = ("pool", "kbimport")                # 没有池子;导入环境也是沙箱,不删导入容器
+
+
+def step_table(mode: str) -> List[tuple]:
+    """按运行模式的步骤表。Fuyao:去掉池子与导入容器,网关前加「模板核对」、网关后加「沙箱换版」。"""
+    if mode != FUYAO:
+        return list(STEPS)
+    out: List[tuple] = []
+    for row in STEPS:
+        if row[0] in FUYAO_DROPPED:
+            continue
+        if row[0] == "gateway":
+            out += [FUYAO_TEMPLATE_STEP, row, FUYAO_SANDBOX_STEP]
+        else:
+            out.append(row)
+    return out
+
 
 @dataclass(frozen=True)
 class Current:
@@ -35,6 +60,7 @@ class Current:
     tag: str = ""                   # gateway-config 的 USER_IMAGE_TAG(上次发布的目标)
     registry: str = ""
     tags: Dict[str, str] = field(default_factory=dict)    # 位置 → 标签(例如 deploy/gateway、agent-pool-0/slot-1)
+    mode: str = ""                  # gateway-config 的 RUNTIME_MODE(ondemand / pool / fuyao;空 = 按需)
 
     @property
     def version(self) -> str:
@@ -51,6 +77,7 @@ class Plan:
     to_v: str
     to_tag: str
     pool_mode: str                  # slot(按槽位在线)/ pod(按 Pod 整体)/ fresh(首次部署)
+    mode: str = ""                  # 集群的运行模式(Current.mode);fuyao 时步骤表不同
     steps: List[dict] = field(default_factory=list)
     required: List[dict] = field(default_factory=list)
     special: List[str] = field(default_factory=list)
@@ -72,20 +99,39 @@ def _registry(image: str) -> str:
     return name.rsplit("/", 1)[0] if "/" in name else ""
 
 
+def runtime_mode(kube) -> str:
+    """集群的运行模式:gateway-config 的 RUNTIME_MODE(没有这个 ConfigMap / 没填 = 空,按需)。"""
+    cm = kube.get("configmap", "gateway-config") or {}
+    return str((cm.get("data") or {}).get("RUNTIME_MODE") or "").strip()
+
+
+def _pool_tags(kube) -> Dict[str, str]:
+    return {"%s/%s" % (pod["metadata"]["name"], c["name"]): _image_tag(c["image"])
+            for pod in kube.list("pods", "app=gaussdb-agent,role=pool") for c in pod["spec"]["containers"]}
+
+
+def _fuyao_tags(kube) -> Dict[str, str]:
+    """Fuyao 模式不看池子 Pod(没有池子):看状态服务、凭据代理服务的镜像。还没建的不算(由这次发布建)。"""
+    out: Dict[str, str] = {}
+    for name in FUYAO_DEPLOYS:
+        d = kube.get("deploy", name)
+        if d is not None:
+            out["deploy/" + name] = _image_tag(d["spec"]["template"]["spec"]["containers"][0]["image"])
+    return out
+
+
 def detect(kube) -> Current:
     gw = kube.get("deploy", "gateway")
     if gw is None:
         return Current(state="none")
-    cm = kube.get("configmap", "gateway-config") or {}
-    tag = str((cm.get("data") or {}).get("USER_IMAGE_TAG") or "")
+    data = (kube.get("configmap", "gateway-config") or {}).get("data") or {}
+    tag = str(data.get("USER_IMAGE_TAG") or "")
+    mode = str(data.get("RUNTIME_MODE") or "").strip()
     image = gw["spec"]["template"]["spec"]["containers"][0]["image"]
-    tags = {"deploy/gateway": _image_tag(image)}
-    for pod in kube.list("pods", "app=gaussdb-agent,role=pool"):
-        for c in pod["spec"]["containers"]:
-            tags["%s/%s" % (pod["metadata"]["name"], c["name"])] = _image_tag(c["image"])
+    tags = dict({"deploy/gateway": _image_tag(image)}, **(_fuyao_tags(kube) if mode == FUYAO else _pool_tags(kube)))
     tag = tag or tags["deploy/gateway"]
     state = "ok" if all(v == tag for v in tags.values()) else "partial"
-    return Current(state=state, tag=tag, registry=_registry(image), tags=tags)
+    return Current(state=state, tag=tag, registry=_registry(image), tags=tags, mode=mode)
 
 
 def _span(history: Dict[str, dict], lo: str, hi: str) -> List[dict]:
@@ -103,7 +149,8 @@ def build(current: Current, target: Package, history: Dict[str, dict]) -> Plan:
         kind, from_v = "rollback", current.version
     else:
         kind, from_v = "upgrade", current.version
-    p = Plan(kind=kind, from_v=from_v, to_v=to_v, to_tag=to_tag, pool_mode="fresh" if kind == "deploy" else "pod")
+    p = Plan(kind=kind, from_v=from_v, to_v=to_v, to_tag=to_tag, pool_mode="fresh" if kind == "deploy" else "pod",
+             mode=current.mode)
     if not target.ok:
         p.problems += ["目标包有问题:%s" % x for x in target.problems]
     if current.state == "partial" and kind != "resume" and kind != "rollback":
@@ -143,13 +190,19 @@ WHY = {
     "config": "按「集群现值 + 新版本新增项 + 资源配置」迁移,渲染清单", "review": "改动集群前必须由运维确认",
     "whitelist": "白名单由白名单团队手工执行,这里按内容逐条核对", "gateway": "网关与用户镜像标签换到目标版本",
     "smoke": "每次都做", "done": "每次都做",
+    "template": "Fuyao 模式:按目标版本的模板名各建一台探测沙箱再删掉,确认模板已在平台上构建好(网关换模板名之前)",
+    "sandbox": "Fuyao 模式:旧版沙箱由网关在闲置时逐步换成新模板(在用的不打断),这里核对网关已用新模板名并记录进度",
+}
+FUYAO_WHY = {
+    "gateway": "网关、状态服务、凭据代理服务换到目标版本;gateway-config 的模板名换成目标版本的",
+    "smoke": "每次都做(经网关为冒烟工号建新模板的沙箱,首次进入要多等一会儿)",
 }
 
 
 def _steps(p: Plan) -> List[dict]:
     out = []
-    for sid, name, subs in STEPS:
-        skip, why = False, WHY.get(sid, "")
+    for sid, name, subs in step_table(p.mode):
+        skip, why = False, (FUYAO_WHY.get(sid) if p.mode == FUYAO else None) or WHY.get(sid, "")
         if sid == "gateway" and p.kind == "deploy":
             name, subs, why = "部署基础资源", ["应用配置与密钥", "网络策略与权限", "网关与前端", "等待就绪"], "首次部署"
         if sid == "pool":

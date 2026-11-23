@@ -56,13 +56,18 @@ _PLAN: Dict[str, Tuple[str, List[str], bool]] = {
         "这条在等（CPU 近零），要查谁挡着它；**不要**去调它的执行计划",
         ["python3 ../gaussdb-lockwait/scripts/lockwait.py"],
         True),
+    # 等待类倾斜是实例级指标,要追到业务(2026-11-05:站在应用 / 运维 DBA 角度)。原先发 waitevent,
+    # 它同样只到等待事件、给不出 SQL 与会话,是死胡同:元凶请求在本报告的 Top SQL 里按等待类找,
+    # 锁类再回看同一时段谁持锁(lockwait 的时段回看读活跃会话采样,对历史窗口有效)。
     "WDR_WAIT_CLASS_SKEW": (
-        "等待集中在某一类，要按本次窗口拆开看是哪个事件在争",
-        ["python3 ../gaussdb-waitevent/scripts/waitevent.py --begin {begin} --end {end}"],
+        "等待集中在某一类，这是实例级指标：先在本报告 Top SQL 里按等待类找元凶请求（IO → 物理读冠军；"
+        "LOCK → CPU 近零而耗时高的被阻塞语句），锁类再回看这段时间谁持锁",
+        ["python3 ../gaussdb-lockwait/scripts/lockwait.py --from '{begin_ts}' --to '{end_ts}'"],
         False),
     "WDR_DBTIME_WAIT_HEAVY": (
-        "时间主要花在等待上，真凶在等待事件里，不是 CPU 不够",
-        ["python3 ../gaussdb-waitevent/scripts/waitevent.py --begin {begin} --end {end}"],
+        "时间主要花在等待上，不是 CPU 不够：先在本报告 Top SQL 里找 CPU 近零而耗时高的语句（它们在等），"
+        "锁类再回看这段时间谁挡着它们",
+        ["python3 ../gaussdb-lockwait/scripts/lockwait.py --from '{begin_ts}' --to '{end_ts}'"],
         False),
     # **死锁不发 lockwait 当"看死锁对"的手段。** lockwait 是在 Python 里对
     # pg_thread_wait_status 的边做环检测 —— 它只能抓**正在发生**的环,而 og5 的
@@ -76,7 +81,7 @@ _PLAN: Dict[str, Tuple[str, List[str], bool]] = {
         [],
         False),
     "WDR_TEMP_SPILL": (
-        "临时文件溢出，要定位落盘的语句并评估会话级 work_mem",
+        "临时文件溢出，要定位落盘的语句：先改 SQL（加过滤、分页、用索引免大排序），确有必要时只对这条 SQL 的会话级调大 work_mem",
         ["python3 ../gaussdb-sqltune/scripts/sqltune.py {sql_id}"],
         False),
 }
@@ -140,6 +145,8 @@ def plan(findings, window, top_sql_headers=(), top_sql_rows=(),
     """
     begin = str(getattr(window, "begin_id", "") or "")
     end = str(getattr(window, "end_id", "") or "")
+    begin_ts = str(getattr(window, "begin_ts", "") or "")[:16]       # lockwait 的 --from/--to 到分钟
+    end_ts = str(getattr(window, "end_ts", "") or "")[:16]
     spill = _spill_sql_id(list(top_sql_headers or []), list(top_sql_rows or []))
 
     steps: List[Step] = []
@@ -166,7 +173,9 @@ def plan(findings, window, top_sql_headers=(), top_sql_rows=(),
                 continue    # 填不出 sql_id 的命令不发 —— 带占位符的命令跑不起来
             if ("{begin}" in tpl or "{end}" in tpl) and not (begin and end):
                 continue
-            add(f.code, why, tpl.format(sql_id=sid, begin=begin, end=end), now_only)
+            if ("{begin_ts}" in tpl or "{end_ts}" in tpl) and not (begin_ts and end_ts):
+                continue
+            add(f.code, why, tpl.format(sql_id=sid, begin=begin, end=end, begin_ts=begin_ts, end_ts=end_ts), now_only)
 
     for why, cmd, now_only in _ALWAYS:
         if now_only and not fresh:

@@ -59,6 +59,8 @@ def format_items(fmt: Mapping[str, Any], answer: str) -> List[Item]:
         checks.append(ac.check_followup(answer, kind if kind in ac.SECTIONS else ""))
     bad = [c for c in ac.citation_checks(answer, kind if kind in ac.SECTIONS else "any") if not c.ok]
     checks.append(ac.Check(not bad, "引用写法", ";".join("%s:%s" % (c.name, c.detail) for c in bad) or "无问题"))
+    # 视角(2026-11-05):不归为数据库缺陷、建议的参数在允许清单里、根因落到业务对象 —— 合成一项,知识问答也查说法
+    checks.append(ac.perspective(answer, kind if kind in ac.SECTIONS else "any"))
     checks = [c for c in checks if c is not None]
     extras = [str(e) for e in fmt.get("extra") or []]
     share = float(fmt.get("w") or 0) / max(1, len(checks) + len(extras))

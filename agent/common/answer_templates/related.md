@@ -11,4 +11,4 @@
 | 连接数满、连不上 | 事务里空闲的会话;会话来源分布;锁等待导致会话堆积;长事务 | health(conn、xact)、lockwait |
 | 表膨胀、空间涨得快 | 长事务与 xmin 持有;复制槽;未提交的两阶段事务;autovacuum 跟不跟得上 | vacuum、health(xact、repl、storage) |
 | 内存高 | 内存上下文分布;会话数;大排序 / 哈希;存储过程 | memanalyze、health(conn) |
-| WAL 多、主备延迟 | WAL 生成量;大事务;checkpoint;复制槽 | health(logs、repl) |
+| WAL(xlog)增长快、主备延迟 | xlog 生成速度与写入来源(哪些表、哪些 SQL、哪些会话在写,有没有大字段);大事务;checkpoint;复制槽 | health(wal、repl)、topsql(按写入) |

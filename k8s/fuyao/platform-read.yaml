@@ -1,0 +1,24 @@
+# 资源大盘读平台的沙箱组、子组与沙箱(2026-11-18):sandbox.flux.io 在平台命名空间 flux-system,
+# 网关的 Role 只管本命名空间,所以这里要一个集群级的 ClusterRole —— **只读、只这三种资源**,不给平台命名空间的 Pod:
+# 承载 Pod 的规格里可能带平台组件的环境变量,大盘要的就绪数子组(subsandboxgroups)已经上报了。
+# 读不到(没 apply 这个文件)时大盘那一块标「需授权只读」,其他照常;网关本身的功能不依赖它。
+#
+# ClusterRoleBinding 的 subject 命名空间跟着 overlay 走(kustomize 与发版台都会改,守卫测试核对)。
+# 集群级对象的名字全集群唯一:同一个集群里只能有一套 Fuyao 模式部署用这两个名字,多套时给每套改名。
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gaussdb-agent-sandbox-read
+rules:
+  - apiGroups: ["sandbox.flux.io"]
+    resources: ["sandboxgroups", "subsandboxgroups", "sandboxes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gaussdb-agent-sandbox-read
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: gaussdb-agent-sandbox-read}
+subjects:
+  - {kind: ServiceAccount, name: gateway, namespace: gaussdb-agent}

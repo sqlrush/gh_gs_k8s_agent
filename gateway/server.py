@@ -31,6 +31,7 @@ DIAG_EVERY = 4                      # 每轮询这么多次读一次 Pod 状态:
 
 
 ROUTE_DASH, ROUTE_REPORTS, ROUTE_OPENCODE = "dash", "reports", "opencode"
+DASH_API = "/dash/api/"      # 大盘的数据接口由网关自己答(其余 /dash/* 是前端静态页)
 REPORTS_PORT = 4097          # 用户 Pod 里 podctl serve-reports 的端口(docker/entrypoint.sh)
 
 # 对话请求转到哪个容器(知识库管理员才有 kb-import)。路径前缀走不通 —— opencode 网页用根绝对路径,
@@ -40,6 +41,9 @@ TARGET_COOKIE = "gsa_target"
 SWITCH_PATHS = {"/kb-import": pods.KIND_KB_IMPORT, "/runtime": pods.KIND_RUNTIME}
 # 切换后落到 opencode 的项目页:base64url("/data/state/workspace"),两个容器同一个工作目录(docker/entrypoint.sh)
 LANDING = "/L2RhdGEvc3RhdGUvd29ya3NwYWNl"
+# Fuyao 沙箱里工作区在本地盘 base64url("/data/me/workspace")(docker/fuyao.py:STATE_LOCAL 指向 ME)。
+# opencode 网页按 URL 里的目录分项目,目录不对就进到空项目、看不到会话(2026-11-18 鲲鹏现场实测)
+LANDING_FUYAO = "/L2RhdGEvbWUvd29ya3NwYWNl"
 
 
 # 固定池化:这些请求**不算交互、也不为它分配槽位** —— opencode 网页开着就每 10 秒探一次活、事件流一直挂着
@@ -89,10 +93,12 @@ class _Handler(BaseHTTPRequestHandler):
     def _peer(self) -> str:
         return self.client_address[0] if self.client_address else ""
 
-    def _json(self, code: int, payload: dict) -> None:
+    def _json(self, code: int, payload: dict, no_store: bool = False) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        if no_store:
+            self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -182,6 +188,8 @@ class _Handler(BaseHTTPRequestHandler):
         parts = [p for p in path.split("/") if p]        # ['admin','pods',...]
         if len(parts) >= 2 and parts[1] == "pool":
             return self._admin_pool(parts)
+        if len(parts) >= 2 and parts[1] == "fuyao":
+            return self._admin_fuyao(parts)
         if len(parts) == 2 and parts[1] == "pods" and self.command == "GET":
             return self._json(200, {"pods": self.app.list_pods()})
         if len(parts) == 3 and parts[1] == "pods":
@@ -218,6 +226,29 @@ class _Handler(BaseHTTPRequestHandler):
                                         "note": "NAS 上的会话/历史/上传文件保留,下次登录挂回来即恢复"})
         self._json(404, {"error": "没有这个控制接口"})
 
+    def _admin_fuyao(self, parts) -> None:
+        adm = self.app.fuyao_admin
+        if adm is None:
+            return self._json(404, {"error": "网关不是 Fuyao 模式(GATEWAY_RUNTIME_MODE=fuyao)"})
+        from . import opensandbox
+        try:
+            if len(parts) == 2 and self.command == "GET":
+                return self._json(200, adm.summary())
+            if len(parts) == 3 and self.command == "POST":
+                raw = self._read_body() or b"{}"
+                try:
+                    doc = json.loads(raw)
+                    sid, force = str(doc["sandbox"]), doc.get("force", False)
+                except (ValueError, KeyError, TypeError, AttributeError):
+                    return self._json(400, {"error": "请求体要是 {\"sandbox\": 沙箱 ID}"})
+                if not isinstance(force, bool):
+                    return self._json(400, {"error": "force 只能是 true 或 false"})
+                code, body = adm.act(parts[2], sid, force=force)
+                return self._json(code, body)
+        except opensandbox.OpenSandboxError as exc:
+            return self._json(502, {"error": str(exc)})
+        self._json(404, {"error": "没有这个控制接口"})
+
     def _admin_pool(self, parts) -> None:
         adm = self.app.pool_admin
         if adm is None:
@@ -237,6 +268,25 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(code, body)
         self._json(404, {"error": "没有这个控制接口"})
 
+    # -- 大盘的数据接口(2026-11-18) --------------------------------------------
+
+    def _dash_api(self, who: idt.Identity, bare: str) -> None:
+        """/dash/api/me:我是谁、是不是运维 / 知识库管理员、产品名(导航与标题用);
+        /dash/api/resources:资源大盘的数据,只给运维管理员。身份已在 _proxy 里核过(不可信的请求到不了这里)。"""
+        if self.command not in ("GET", "HEAD"):
+            return self._json(405, {"error": "只支持 GET"}, no_store=True)
+        if bare == DASH_API + "me":
+            return self._json(200, {"user_id": who.user_id, "ops_admin": self.app.is_ops_admin(who),
+                                    "kb_admin": self.app.is_kb_admin(who), "product_name": self.app.cfg.product_name,
+                                    "mode": self.app.cfg.runtime_mode, "chat_home": self.app.landing}, no_store=True)
+        if bare == DASH_API + "resources":
+            if not self.app.is_ops_admin(who):
+                return self._json(403, {"error": "资源大盘只给运维管理员看"}, no_store=True)
+            if self.app.dash is None:
+                return self._json(503, {"error": "资源大盘的数据汇总没有启动"}, no_store=True)
+            return self._json(200, self.app.dash.get(), no_store=True)
+        return self._json(404, {"error": "没有这个接口"}, no_store=True)
+
     # -- 代理 ---------------------------------------------------------------
 
     def _proxy(self) -> None:
@@ -251,6 +301,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._text(403, "无法确认身份。请经统一认证入口访问。")
 
         bare = self.path.split("?", 1)[0]
+        if bare.startswith(DASH_API):
+            return self._dash_api(who, bare)            # 大盘的数据接口:网关自己答,不转前端、不建沙箱、不记活动
         if kbclip.handles(bare):
             return kbclip.handle(self, who, bare)        # 网页剪藏的安装页 / 剪藏页 / 上传(只给知识库管理员)
         switch = SWITCH_PATHS.get(bare.rstrip("/"))
@@ -272,8 +324,10 @@ class _Handler(BaseHTTPRequestHandler):
             kb_admin = self.app.is_kb_admin(who)
             # 报告只在诊断容器里;对话按目标选
             kind = self._target(who, kb_admin) if route == ROUTE_OPENCODE else pods.KIND_RUNTIME
-            if kind == pods.KIND_RUNTIME and self.app.pool is not None:
-                return self._proxy_pool(who, route, body)      # 固定池化;导入容器照旧按需建
+            if self.app.pool is not None and (kind == pods.KIND_RUNTIME
+                                              or getattr(self.app.pool, "handles_kb_import", False)):
+                # 固定池化:导入容器照旧按需建;Fuyao:导入环境也是沙箱
+                return self._proxy_pool(who, route, body, kind)
             try:
                 password = self.app.ensure_ready(who.user_id, kb_admin, kind)
             except pods.PrerequisiteMissing as exc:
@@ -358,19 +412,23 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- 固定池化 -------------------------------------------------------------
 
-    def _proxy_pool(self, who: idt.Identity, route: str, body: Optional[bytes]) -> None:
+    def _proxy_pool(self, who: idt.Identity, route: str, body: Optional[bytes],
+                    kind: str = pods.KIND_RUNTIME) -> None:
         """槽位由 poolrouter 分配。活动只按交互请求记一次(不按转发字节:事件流的心跳不算在用)。"""
         interactive = pool_interactive(self.command, self.path, self.headers)
         pool = self.app.pool
         for attempt in (0, 1):
             try:
-                t = pool.target(who.user_id, interactive)
+                t = (pool.target(who.user_id, interactive) if kind == pods.KIND_RUNTIME
+                     else pool.target(who.user_id, interactive, kind=kind))
             except poolrouter.NotActive:
                 return self._json_retry(503, {"reason": "not_active", "error": "您的环境当前未在运行,有操作时自动恢复"}, 30)
             except poolrouter.PoolFull as exc:
                 return self._waiting("当前使用人数已满", "已为您排队:有人空出来就会自动进入。", exc.retry_after)
             except poolrouter.PoolWait as exc:
                 self.app.log("为 %s 分配槽位还在等(%s)" % (who.user_id, exc.reason))
+                if exc.reason == "platform_busy":            # 平台满员(建沙箱回 5xx):与 PoolFull 同一句话,别说「马上就好」
+                    return self._waiting("当前使用人数已满", "已为您排队:有人空出来就会自动进入。", exc.retry_after)
                 return self._waiting("正在为您准备环境", "马上就好。", exc.retry_after)
             except pods.PrerequisiteMissing as exc:
                 self.app.log("为 %s 准备环境失败(前置条件):%s" % (who.user_id, exc))
@@ -379,7 +437,12 @@ class _Handler(BaseHTTPRequestHandler):
                 self.app.log("为 %s 分配槽位失败:%s" % (who.user_id, exc))
                 return self._text(502, "环境准备失败,请联系管理员。")
             if interactive:
-                pool.note_activity(who.user_id)
+                if kind == pods.KIND_RUNTIME:
+                    pool.note_activity(who.user_id)
+                else:
+                    pool.note_activity(who.user_id, kind=kind)
+                if self.app.counter is not None and attempt == 0:
+                    self.app.counter.hit(who.user_id, kind)      # 资源大盘的请求计数(与记活动同一个口径)
             if route == ROUTE_REPORTS:
                 up = proxy.Upstream(t.host, t.reports_port, retries=1)
                 headers = proxy.forward_headers(self.headers.items(), None, who.user_id) + \
@@ -466,7 +529,7 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             cookie = "%s=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0" % TARGET_COOKIE
         self.send_response(303)
-        self.send_header("Location", LANDING)
+        self.send_header("Location", self.app.landing)
         self.send_header("Set-Cookie", cookie)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", "0")
@@ -485,8 +548,25 @@ class App:
         self.log = log
         self.pool = pool                    # 固定池化时是 poolrouter.PoolRouter;按需模式 None
         self.pool_admin = pool_admin        # 固定池化的运维接口(/admin/pool)
+        self.fuyao_admin = None             # Fuyao 模式的运维接口(/admin/fuyao)
+        self.dash = None                    # 资源大盘的数据汇总(dashdata.Collector)
+        self.counter = None                 # 交互请求计数(opsreport.RequestCounter;Fuyao 模式才有状态服务可报)
+        self.state_ops = None               # 状态服务的统计接口(opsreport.StateOps)
+        self.reporter = None                # 请求计数的上报线程(opsreport.Reporter)
         self._waiters: dict = {}
         self._lock = threading.Lock()
+
+    @property
+    def landing(self) -> str:
+        """对话页落地(切换环境、剪藏后打开会话):编码本模式下 opencode 的工作目录。"""
+        from .config import RUNTIME_FUYAO
+        return LANDING_FUYAO if self.cfg.runtime_mode == RUNTIME_FUYAO else LANDING
+
+    def is_ops_admin(self, who: idt.Identity) -> bool:
+        """运维管理员(资源大盘):角色头里带 OPS_ADMIN_ROLES 之一,**或**工号登记在 agent-roles 的 ops-admins 里。"""
+        if any(r in self.cfg.ops_admin_roles for r in who.roles):
+            return True
+        return who.user_id in self.mgr.ops_admins()
 
     def is_kb_admin(self, who: idt.Identity) -> bool:
         """角色头里带 KB_ADMIN_ROLES 之一,**或**工号登记在 ConfigMap agent-roles 里(SSO 不传角色时用)。"""

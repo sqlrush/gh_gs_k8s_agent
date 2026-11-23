@@ -28,6 +28,7 @@ DIM_CONCURRENCY = "Transactions / Concurrency"
 # 占用量,不是「剩余水位」—— 剩余空间在这个内核上取不到
 # (pg_stat_file 要 initial account,实测被拒),维度名也要如实反映这一点。
 DIM_STORAGE = "Storage Usage"
+DIM_WAL = "WAL / Write Sources"          # xlog 生成速度与写入来源(2026-11-05)
 # 时段体检(window.py)的维度。与上面的「此刻」维度分开命名:同一份报告里两种口径并存时
 # (终点是此刻,瞬时维度给当前值),大盘按维度名区分哪些是窗口内的增量。
 DIM_WIN_COVER = "Evaluation Window"

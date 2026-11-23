@@ -6,6 +6,7 @@
 # 包内过程不单独成行:取的是整个 package body,由调用方切出目标过程。
 # 一行源码一条记录;名字不分大小写比对。LIMIT 比调用方的上限多一行:超限时调用方报「源码过长」,不静默截断。
 name: procinfo.source_adm
+database_type: appbusiness
 description: 按名字从 ADM_SOURCE 逐行取过程 / 函数 / 包体源码(pg_proc 取不到时的兜底,需 ADM_SOURCE 读权限)
 sql: |
   SELECT owner, name, type, line, text

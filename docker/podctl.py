@@ -633,6 +633,17 @@ def _parser() -> argparse.ArgumentParser:
     # 网页剪藏接收(2026-10-27,只在导入容器):网关把管理员剪藏的网页转到这里,落进知识库收件目录。参数来自环境变量
     p = sub.add_parser("serve-clip")
     p.add_argument("--port", type=int, default=4095)
+    # Fuyao 运行模式(2026-11-17,docs/specs/2026-11-17-fuyao-sandbox-design.md):
+    # 沙箱里(root,网关经 envd 调)启动器与收尾、后台同步、凭据中继;集群里的状态服务与凭据代理服务
+    sub.add_parser("fuyao-start")
+    p = sub.add_parser("fuyao-stop")
+    p.add_argument("--release", action="store_true", help="同时放开本人目录的独占(删除沙箱之前)")
+    sub.add_parser("fuyao-syncloop")
+    sub.add_parser("serve-credrelay")
+    sub.add_parser("serve-credproxy-net")
+    p = sub.add_parser("serve-statesvc")
+    p.add_argument("--nas", default="/nas")
+    p.add_argument("--listen", default="0.0.0.0:8090")
     return ap
 
 
@@ -677,6 +688,24 @@ def main(argv: Optional[List[str]] = None) -> int:
         elif a.cmd == "pool-steward":
             import poolsteward
             return poolsteward.serve()
+        elif a.cmd == "fuyao-start":
+            import fuyao
+            return fuyao.start()
+        elif a.cmd == "fuyao-stop":
+            import fuyao
+            return fuyao.stop(release=a.release)
+        elif a.cmd == "fuyao-syncloop":
+            import fuyao
+            return fuyao.syncloop()
+        elif a.cmd == "serve-credrelay":
+            import credproxy
+            return credproxy.main_relay()
+        elif a.cmd == "serve-credproxy-net":
+            import credproxy
+            return credproxy.main_network()
+        elif a.cmd == "serve-statesvc":
+            import statesvc
+            return statesvc.main(["--nas", a.nas, "--listen", a.listen])
         elif a.cmd in ("state-load", "state-sync", "state-finish"):
             import statesync
             lay = statesync.Layout(nas=pathlib.Path(a.nas), local=pathlib.Path(a.local))

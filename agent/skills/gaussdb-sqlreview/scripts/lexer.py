@@ -128,6 +128,9 @@ def mask(sql: str) -> str:
     """Same-length view: comments blanked, literal bodies filled, newlines kept.
 
     Safe to scan for top-level ';' and to count lines against the original.
+    Quoted identifiers are filled like string bodies: `"a;b"` is one name, and the
+    GRMP side (common/grmp/statement.split_statements) already treats it so — before
+    2026-11-08 (bank QA report, Bug 2) the ';' inside it split the statement in two here.
     """
     buf = list(sql)
     for sp in spans(sql):
@@ -135,7 +138,7 @@ def mask(sql: str) -> str:
             for k in range(sp.start, sp.end):
                 if buf[k] != "\n":
                     buf[k] = " "
-        elif sp.kind == "string":
+        elif sp.kind in ("string", "ident"):
             for k in range(sp.start + 1, max(sp.start + 1, sp.end - 1)):
                 if buf[k] != "\n":
                     buf[k] = _FILL
@@ -221,9 +224,15 @@ def _bare(name: str) -> str:
 _RE_CREATE_TABLE = re.compile(
     r"\bCREATE\s+(?:(?:GLOBAL|LOCAL)\s+)?(?:(?:TEMP|TEMPORARY|UNLOGGED)\s+)?TABLE\s+"
     r"(?:IF\s+NOT\s+EXISTS\s+)?([\w.\"]+)", re.I)
+# 列清单用 _index_items 按括号配对取:原先 `ON t (…)` 紧挨着,`USING btree/gin (…)`(gs_dump 与各种建表工具导出的
+# DDL 默认都带)整条匹配不上,IDX001 / IDX002 静默失效;函数索引 `(lower(name))` 被 [^)]* 截断、列取成了函数名
+# (2026-11-08 行方报告 M1 / M2)。
 _RE_CREATE_INDEX = re.compile(
     r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"
-    r"([\w.\"]+)?\s*ON\s+([\w.\"]+)\s*\(([^)]*)\)", re.I)
+    r"([\w.\"]+)?\s*ON\s+(?:ONLY\s+)?([\w.\"]+)\s*(?:USING\s+(\w+)\s*)?\(", re.I)
+_PLAIN_COL = re.compile(r'[\w$]+|"(?:[^"]|"")+"')
+_RE_INDEX_ITEM_TAIL = re.compile(
+    r"(?:\s+COLLATE\s+\S+)?(?:\s+[A-Za-z_]\w*_ops)?(?:\s+(?:ASC|DESC))?(?:\s+NULLS\s+(?:FIRST|LAST))?\s*$", re.I)
 _RE_ALTER_TABLE = re.compile(
     r"\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?([\w.\"]+)", re.I)
 _RE_DELETE = re.compile(r"\bDELETE\s+FROM\s+(?:ONLY\s+)?([\w.\"]+)", re.I)
@@ -232,17 +241,41 @@ _RE_INSERT = re.compile(r"\bINSERT\s+INTO\s+([\w.\"]+)", re.I)
 _RE_FROM = re.compile(r"\bFROM\s+([\w.\"]+)", re.I)
 
 
+def _index_items(text: str, open_paren: int) -> list:
+    """`(a, b DESC, lower(name), (x + y))` → ['a', 'b', 'lower(name)', '(x + y)']:按括号配对取到收尾的「)」,
+    顶层逗号分项;每项去掉排序 / 排序规则 / 操作符类后缀。普通列就是列名,表达式原样保留(不再取成函数名)。"""
+    depth, start, items = 0, open_paren + 1, []
+    for i in range(open_paren, len(text)):
+        c = text[i]
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                items.append(text[start:i])
+                break
+        elif c == "," and depth == 1:
+            items.append(text[start:i])
+            start = i + 1
+    out = []
+    for it in items:
+        it = _RE_INDEX_ITEM_TAIL.sub("", it.strip()).strip()
+        if it:
+            out.append(re.sub(r"\s+", " ", it))
+    return out
+
+
 def _names(verb: str, text: str) -> dict:
     """Best-effort object names for a normalized statement (folded + as-written)."""
     if verb == "create_index":
         m = _RE_CREATE_INDEX.search(text)
         if not m:
             return {}
-        cols = [_WORD.search(c).group(0) for c in m.group(3).split(",") if _WORD.search(c)]
+        cols = _index_items(text, m.end() - 1)
         return {
             "table": _bare(m.group(2)), "table_raw": _written(m.group(2)),
             "index_name": _bare(m.group(1) or ""), "index_raw": _written(m.group(1) or ""),
-            "index_cols": tuple(_bare(c) for c in cols),
+            "index_cols": tuple(_bare(c) if _PLAIN_COL.fullmatch(c) else c.lower() for c in cols),   # 表达式不拆
         }
 
     single = {

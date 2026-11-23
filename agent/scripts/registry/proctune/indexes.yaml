@@ -10,6 +10,7 @@
 #
 # ⚠️ 顺带修掉的既有缺陷同 proctune.tables（Python 列表拼进 IN，语法错误）。
 name: proctune.indexes
+database_type: appbusiness
 description: 游标 SQL 涉及的表上的索引定义（证据包 ## Indexes）
 sql: |
   SELECT n.nspname AS schema_name, t.relname AS table_name, i.relname AS index_name,

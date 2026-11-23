@@ -648,3 +648,67 @@ def test_operator_layer_does_not_read_average_peak_as_spill():
                              _catalog(wlm_operator="gs_wlm_operator_statistics"), cap, TH, 10)
     codes = [f.code for f in d.findings]
     assert "MEM_OP_HOG" in codes and "MEM_OP_SPILL" not in codes
+
+
+# ---- L4 退路:WLM 取不到时改从 SQL 执行历史取(2026-11-12 行方:生产权限与参数固定,能调的只有 SQL) ----
+
+_HIST = [
+    {"queryid": "11", "user_name": "app", "start_time": "2026-11-12 09:00:01.123", "duration_ms": "3200",
+     "used_memory": "900", "query": "select * from orders o join items i on o.id = i.oid order by o.ts"},
+    {"queryid": "12", "user_name": "rdsAdmin", "start_time": "2026-11-12 09:01:00", "duration_ms": "10",
+     "used_memory": "800", "query": "select * from orders"},
+    {"queryid": "13", "user_name": "app", "start_time": "2026-11-12 09:02:00", "duration_ms": "20",
+     "used_memory": "50", "query": "select relname from pg_class"},
+]
+
+
+def _wlm_off_cap():
+    return capability.assess({"resource_track_level": "none", "enable_resource_track": "off"},
+                             _catalog(wlm_session="gs_wlm_session_statistics"))
+
+
+def test_sql_layer_falls_back_to_statement_history_when_wlm_is_off():
+    r = _FakeRunner(canned={"sql_mem_history": _HIST})
+    d = wlm.collect_sql(r, _catalog(wlm_session="v"), _wlm_off_cap(), TH, 10)
+    assert d.available is True and [row[0] for row in d.rows] == ["11"], "平台运维账号与查系统表的 SQL 不进榜"
+    assert "按 SQL 执行历史" in d.headline and "statement_history.used_memory" in d.note and "近一天" in d.note
+    assert ("memanalyze.sql_mem_history", {"limit": 30}) in r.calls, "多取几倍留给系统 SQL 筛选"
+    assert all("wlm_sql" not in c[0] for c in r.calls), "参数没开就不去撞 WLM 视图"
+
+
+def test_sql_layer_falls_back_when_the_wlm_query_fails():
+    cap = capability.assess({"resource_track_level": "query", "enable_resource_track": "on"},
+                            _catalog(wlm_session="gs_wlm_session_statistics"))
+    r = _FakeRunner(canned={"sql_mem_history": _HIST}, fail=("wlm_sql",))
+    d = wlm.collect_sql(r, _catalog(wlm_session="v"), cap, TH, 10)
+    assert d.available is True and d.rows[0][0] == "11" and "取不到" in d.note
+
+
+def test_sql_layer_without_any_source_says_this_part_cannot_be_queried():
+    """openGauss 没有 used_memory 列:两条路都取不到 → 如实写「这一项无法查询,不影响其余结论」,不报错退出。"""
+    r = _FakeRunner(fail=("sql_mem_history",))
+    d = wlm.collect_sql(r, _catalog(wlm_session="v"), _wlm_off_cap(), TH, 10)
+    assert d.available is False and "这一项无法查询" in d.note and "不影响其余结论" in d.note
+
+
+def test_empty_wlm_view_uses_history_and_otherwise_stays_available_but_empty():
+    cap = capability.assess({"resource_track_level": "operator", "enable_resource_track": "on"},
+                            _catalog(wlm_session="gs_wlm_session_statistics"))
+    d = wlm.collect_sql(_FakeRunner(canned={"sql_mem_history": _HIST}), _catalog(wlm_session="v"), cap, TH, 10)
+    assert d.available is True and d.rows[0][0] == "11" and "视图可用,但无 SQL 级数据" in d.note
+    d = wlm.collect_sql(_FakeRunner(), _catalog(wlm_session="v"), cap, TH, 10)
+    assert d.available is True and d.rows == [] and "这一项无法查询" in d.note
+
+
+def test_history_hog_finding_uses_the_threshold():
+    rows = [dict(_HIST[0], used_memory=str(int(TH.session_hog_mb) + 1))]
+    d = wlm.collect_sql(_FakeRunner(canned={"sql_mem_history": rows}), _catalog(wlm_session="v"), _wlm_off_cap(), TH, 10)
+    assert [x.code for x in d.findings] == ["MEM_SQL_HOG"] and "执行历史" in d.findings[0].evidence
+
+
+def test_operator_layer_without_source_says_this_part_cannot_be_queried():
+    cap = capability.assess({"resource_track_level": "query", "enable_resource_track": "on"},
+                            _catalog(wlm_operator="gs_wlm_operator_statistics"))
+    d = wlm.collect_operator(_FakeRunner(), _catalog(wlm_operator="v"), cap, TH, 10)
+    assert d.available is False and "这一项无法查询" in d.note and "不影响其余结论" in d.note
+    assert "resource_track_level" in d.note

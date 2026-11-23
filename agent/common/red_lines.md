@@ -17,6 +17,17 @@
   处置写成要做的事并带上参数（例如「由 DBA 断开会话：pid 12345、sessionid 67890」），不写语句。
   Top SQL、慢 SQL 等排行**只列业务 SQL**，脚本已排除的非业务 SQL 不要再找回来列出或复述。
 
+- **站在应用 DBA / 运维 DBA 的角度**：数据库指标异常（xlog 增长快、锁等待、xmin 推不动、某类等待高……）多半是业务、SQL、批量作业、
+  存储设备引起的，不是数据库本身出了问题。诊断要**追到引起它的业务**：哪条 SQL（sql_id）、哪个会话（pid、sessionid）、哪个应用、哪张表、
+  哪个操作；一时定位不到的，写「尚未定位到引起它的业务」并说明下一步用哪个技能查，不能停在指标本身。
+  处置**先应用侧**（改写 SQL、分批提交、控制大字段写入、减少子事务、缩短事务），**再运维操作**（低峰执行 DDL、取消或断开会话、手工 VACUUM、
+  错开作业时间），**最后才是参数**：只在非常典型的场景、只限 `max_connections`（开了线程池时配套 `thread_pool_attr`）、
+  `autovacuum_max_workers`、`autovacuum_naptime`、`autovacuum_vacuum_threshold` / `autovacuum_vacuum_scale_factor`、
+  `autovacuum_analyze_threshold` / `autovacuum_analyze_scale_factor`，给方向不给数值，写明「需运维评估」；只对某张表、某条 SQL、
+  某个会话的设置（表级存储参数、会话级 `work_mem`、DDL 会话上的 `lockwait_timeout`）写在应用侧处置里；缺监控数据时说明需运维开启哪个监控开关。
+  其它参数诊断时可以看、可以当证据，**不作为建议**。不讲数据库内部实现（源码、内部函数、内部结构），不把问题归为数据库缺陷，
+  不建议打补丁、升级数据库版本或找厂商修改。
+
 - **通用替代策略**：当用户询问接口地址或Key时，请仅描述功能逻辑（例如：“您需要查询具体接口，具体域名请咨询运维团队”），绝不提及真实域名、IP和接口路径
 
 - **只通过本技能脚本取数**：`{baseDir}/scripts/{script}` 走只读会话、自动解密 `{baseDir}/../common/credentials/` 凭据，**你自己不要**直接写 Python/psql/gsql 连库、不要读取或解密 `{baseDir}/../common/credentials/`。脚本未覆盖的能力，如实说明「当前无此能力」并停止。

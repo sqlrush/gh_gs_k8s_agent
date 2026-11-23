@@ -10,6 +10,7 @@
 #
 # 实测注入载荷全部被拒:多语句 DROP、直接 DDL、括号逃逸。
 name: proctune.plan_text_analyze
+database_type: appbusiness
 description: 取一条只读 SQL 的执行计划（TEXT 格式；现场按行方只读要求把 ANALYZE 固定关闭，不执行该 SQL，结果与 plan_text 相同，是估算计划；保留此名只为兼容）
 readonly: true
 sql: |

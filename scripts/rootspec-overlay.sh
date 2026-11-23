@@ -2,6 +2,7 @@
 # 把镜像里预留的三份根规范模板换成行内正式规范(行内部署时用)。在离线包上做,原包不动,另出一个新包目录:
 #   runtime 与 kb-import 两个镜像各加一层,/workspace/docs/ 里的模板换成你给的文件;标签不变,其余镜像原样;
 #   重新导出镜像包,用包里的发版台镜像刷新 release.yaml(镜像 digest、sha256)。新包手工部署(docker load)与发版台都能用。
+#   包里有 Fuyao 模板镜像(<包名>-e2b-<架构>.oci.tar)时一并按新镜像重建 —— 模板里是镜像的整份文件系统,不重建就还是模板规范。
 #
 # 用法: <离线包目录>/rootspec-overlay.sh --docs <放根规范的目录> [--package <离线包目录>] [--arch amd64|arm64] [--out <新包目录>]
 #   --package 默认本脚本所在目录(脚本随离线包发出)
@@ -91,9 +92,29 @@ for img in "${IMGS[@]}"; do
 done
 
 echo "== 3/4 导出新包 $OUT …"
+ETAR="$PKG/$NAME-e2b-$ARCH.oci.tar"
 mkdir -p "$OUT"
-for f in "$PKG"/*; do [ "$f" = "$TAR" ] || [ "$f" = "$TAR.sha256" ] || cp -p "$f" "$OUT/"; done
+for f in "$PKG"/*; do
+  case "$f" in "$TAR"|"$TAR.sha256"|"$ETAR"|"$ETAR.sha256") continue ;; esac
+  cp -Rp "$f" "$OUT/"
+done
 docker save "${IMGS[@]}" | gzip -6 > "$OUT/$(basename "$TAR")"
+if [ -f "$ETAR" ]; then
+  [ -f "$PKG/e2b/docker/Dockerfile.e2b" ] || { echo "包里有 $(basename "$ETAR") 却没有 e2b/docker/Dockerfile.e2b" >&2; exit 1; }
+  img_of() { for i in "${IMGS[@]}"; do case "$i" in *"gaussdb-agent-$1:"*) echo "$i"; return ;; esac; done; }
+  RI=$(img_of runtime); KI=$(img_of kb-import); SI=$(img_of kbstd)
+  [ -n "$RI" ] && [ -n "$KI" ] && [ -n "$SI" ] || { echo "重建 Fuyao 模板要 runtime、kb-import、kbstd 三个镜像" >&2; exit 1; }
+  EIMGS=()
+  for K in runtime:runtime-e2b kb-import:kbimport-e2b; do
+    T="gaussdb-agent-${K%%:*}-e2b:${RI##*:}"
+    docker build -q --platform "linux/$ARCH" -f "$PKG/e2b/docker/Dockerfile.e2b" --target "${K#*:}" \
+      --build-arg "RUNTIME_IMAGE=$RI" --build-arg "KBIMPORT_IMAGE=$KI" --build-arg "KBSTD_IMAGE=$SI" -t "$T" "$CTX" >/dev/null
+    EIMGS+=("$T")
+  done
+  docker save --platform "linux/$ARCH" -o "$OUT/$(basename "$ETAR")" "${EIMGS[@]}"
+  (cd "$OUT" && shasum -a 256 "$(basename "$ETAR")" > "$(basename "$ETAR").sha256")
+  echo "  Fuyao 模板镜像已按新规范重建:$(basename "$ETAR")(在模板构建主机上重新注册模板,见部署手册)"
+fi
 
 echo "== 4/4 刷新 release.yaml …"
 RIMG=$(gunzip -c "$RTAR" | docker load | sed -n 's/^Loaded image: //p' | tail -1)

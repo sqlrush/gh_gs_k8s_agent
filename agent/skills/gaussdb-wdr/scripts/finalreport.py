@@ -20,7 +20,7 @@ import kbrefs
 from interp import PRIORITIES, Interp, Suggestion
 from model import (
     DIM_CACHE, DIM_CHECKPOINT, DIM_DBSTAT, DIM_FILEIO, DIM_LOADPROFILE,
-    DIM_TOPSQL, DIM_WAITS, Evidence, Severity, dim_severity,
+    DIM_TOPSQL, DIM_WAITS, DIM_WRITES, Evidence, Severity, dim_severity,
 )
 from recheck import Rechecked, recheck
 from appendix import (  # noqa: F401  (测试与旧调用方仍按 finalreport.xxx 取)
@@ -32,7 +32,7 @@ from util import trunc
 
 # Top-down presentation order in 全景分析 (global load → waits → SQL → ...).
 _REPORT_ORDER = [DIM_LOADPROFILE, DIM_DBSTAT, DIM_WAITS, DIM_TOPSQL,
-                 DIM_CHECKPOINT, DIM_CACHE, DIM_FILEIO]
+                 DIM_CHECKPOINT, DIM_WRITES, DIM_CACHE, DIM_FILEIO]
 
 
 def _dim_rank(name: str) -> int:

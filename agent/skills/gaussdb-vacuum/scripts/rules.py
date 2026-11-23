@@ -27,6 +27,7 @@ information_schema，故意把它留 NULL 而不是编造一个秒数）。
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 _HERE = pathlib.Path(__file__).resolve()
@@ -63,6 +64,7 @@ _BLOCK_NOTE_TEMPLATE = (
 )
 
 _BLOCKER_LABELS = {
+    "xmin_holder": "%s",                 # 标识已是整句(会话、应用、用户),见 blockers()
     "long_xact": "会话 %s 的长事务",
     "prepared_xact": "两阶段事务 %s",
     "replication_slot": "复制槽 %s",
@@ -133,6 +135,65 @@ def _blocker_age_text(x: dict) -> str:
     return "已持续 %.0f 秒" % as_float(age)
 
 
+_PROC_CALL = re.compile(r"^\s*(call|select|exec(ute)?|perform)\s+[\w.\"]+\s*\(", re.I)
+
+
+def _holder_label(h: dict) -> str:
+    """会话 4840（应用 batch_job，用户 app_user，后台 / 作业线程）的事务。"""
+    bits = []
+    app = str(h.get("application_name") or "").strip()
+    if app:
+        bits.append("应用 " + app)
+    user = str(h.get("usename") or "").strip()
+    if user:
+        bits.append("用户 " + user)
+    if as_bool(h.get("background")):
+        bits.append("后台 / 作业线程")
+    sid = h.get("sessionid") or h.get("pid") or h.get("xact_id") or "?"
+    return "会话 %s%s的事务" % (sid, ("（%s）" % "，".join(bits)) if bits else " ")
+
+
+def _holder_detail(h: dict) -> str:
+    q = str(h.get("query") or "").strip()
+    parts = ["state=%s" % (h.get("state") or "")]
+    if not is_null(h.get("unique_sql_id")) and str(h.get("unique_sql_id")) not in ("", "0"):
+        parts.append("sql_id=%s" % h.get("unique_sql_id"))
+    if q:
+        parts.append("query=" + q[:160])
+    if _PROC_CALL.match(q):
+        parts.append("正在执行存储过程:用 gaussdb-proctune 看过程里有没有循环内的 EXCEPTION 块"
+                     "(每进入一次就建一个子事务,事务越拖越长)")
+    return " ".join(parts)
+
+
+def blockers(holders, oldest_xmin: list, th: Thresholds) -> list:
+    """卡住回收的来源。
+
+    holders 是 vacuum.xmin_holder 的行(None = 没取到,白名单还没导入新脚本时):取到了就用它精确定位
+    「持有 xmin 超过 th.xmin_hold_s 的事务」,长事务那一路不再从 oldest_xmin 里取(那一路只能列出
+    「此刻有哪些长事务」,指不出持有者);两阶段事务与复制槽仍从 oldest_xmin 取。没取到时退回原口径。
+    """
+    if holders is None:
+        return list(oldest_xmin)
+    out = []
+    for h in holders:
+        age = h.get("xact_age_s")
+        if is_null(age) or as_float(age) < th.xmin_hold_s:
+            continue                     # 正常并发里的短事务,不算卡住
+        out.append({"source": "xmin_holder", "identifier": _holder_label(h), "xmin_age_s": age,
+                    "detail": _holder_detail(h), "is_oldest": as_bool(h.get("is_oldest"))})
+    return out + [x for x in oldest_xmin if x.get("source") != "long_xact"]
+
+
+def _writes_text(table: dict) -> str:
+    """死元组从哪来:这张表上的更新 / 删除次数(站在应用 DBA 角度:是哪类业务操作造成的)。"""
+    if all(is_null(table.get(k)) for k in ("n_tup_upd", "n_tup_del")):
+        return ""
+    upd, hot, dele = (int(as_float(table.get(k))) for k in ("n_tup_upd", "n_tup_hot_upd", "n_tup_del"))
+    return ("死元组来自这张表上的更新与删除:统计窗口内 UPDATE %d 次(其中 HOT %d 次)、DELETE %d 次 —— "
+            "要看是哪个业务在批量更新 / 删除,用 gaussdb-topsql --by writes。" % (upd, hot, dele))
+
+
 def _block_note(oldest_xmin: list) -> str:
     labels = "、".join(_blocker_label(x) for x in oldest_xmin)
     return _BLOCK_NOTE_TEMPLATE % labels
@@ -190,6 +251,7 @@ def _r1_finding(table: dict, trigger: float, th: Thresholds,
             as_float(last_autovac_age), th.autovac_overdue_s)
     n_dead = as_float(table.get("n_dead_tup"))
     evidence = _tname(table) + "死元组 %d 已超过触发线 %.0f；%s。" % (int(n_dead), trigger, history)
+    evidence += _writes_text(table)
     if note:
         evidence += note
     return Finding(
@@ -223,6 +285,7 @@ def _r3_finding(table: dict, th: Thresholds, note: str) -> Finding:
                     table_bytes / (1024 * 1024),
                     th.dead_ratio_warn * 100,
                     th.min_table_bytes / (1024 * 1024)))
+    evidence += _writes_text(table)
     if note:
         evidence += note
     return Finding(
@@ -241,6 +304,9 @@ def _r4_finding(oldest_xmin: list) -> Finding:
     evidence = ("存在更老的事务/复制槽挡着回收：%s。这些快照可能还用得到这些"
                 "死元组，回收不掉——现在跑 VACUUM 也没用，先处理这些事务/"
                 "复制槽。" % detail)
+    if any(x.get("source") == "xmin_holder" for x in oldest_xmin):
+        evidence += ("处置在应用侧:让应用方结束或拆短这个事务(批量分段提交、循环里的 EXCEPTION 挪出循环、"
+                     "ORM 关掉自动 savepoint);要先放行回收的,由 DBA 断开该会话(写明会话号)。")
     return Finding(
         dimension=DIMENSION, code=_CODES["R4"], severity=Severity.WARN,
         metric="阻塞回收的事务/复制槽数", value=str(len(oldest_xmin)),

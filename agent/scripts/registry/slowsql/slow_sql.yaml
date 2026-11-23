@@ -4,6 +4,8 @@
 #
 # 注意 begin_time 的引号由脚本作者写（CAST('{{begin_time}}' AS TIMESTAMP)），
 # 这是决策表第 5 项定下的约定：中间件只做纯文本替换，不按类型补引号。
+# **多取执行账号 user_name(2026-11-08)。** 行方测试报告:榜首是云平台运维账号 rdsAdmin 的 ASP 采样 SQL,
+# 查的是它自己 schema 下的表,按对象认不出是非业务;按账号认(common/syssql.platform_accounts)。
 name: slowsql.slow_sql
 description: 查询平均耗时超阈值的 SQL（dbe_perf.statement）
 sql: |
@@ -14,7 +16,8 @@ sql: |
     ROUND((total_elapse_time/NULLIF(n_calls,0))/1000::numeric, 2) AS avg_ms,
     ROUND(total_elapse_time/1000000::numeric, 2) AS total_sec,
     ROUND(cpu_time/1000000::numeric, 2) AS cpu_sec,
-    n_returned_rows AS rows
+    n_returned_rows AS rows,
+    user_name
   FROM dbe_perf.statement
   WHERE (total_elapse_time/NULLIF(n_calls,0))/1000 > {{threshold_ms}}
     AND n_calls > 0 AND last_updated >= CAST('{{begin_time}}' AS TIMESTAMP)

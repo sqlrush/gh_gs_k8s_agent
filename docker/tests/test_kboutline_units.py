@@ -126,3 +126,4 @@ def test_topic_list_puts_parameters_first(tmp_path):
 def test_images_normalize_file_permissions():
     """构建目录里的文件可能是 0600;镜像里必须统一成人人可读,否则槽位(uid 2000+)读不到 /opt/agent 下的脚本。"""
     assert "chmod -R a+rX /opt/agent" in (_ROOT / "docker" / "Dockerfile").read_text(encoding="utf-8")
+    assert "chmod -R a+rX /usr/share/nginx/html/dash" in (_ROOT / "docker" / "Dockerfile.frontend").read_text(encoding="utf-8")

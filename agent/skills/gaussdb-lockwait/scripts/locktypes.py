@@ -1,7 +1,7 @@
 """按锁类型解释「为什么会被挡」—— 8 级矩阵与「典型语句」只适用于表级锁(locktype=relation)。
 
 **为什么要分开说。** pg_locks 里所有锁类型共用同一组模式名,但「哪些语句会取这个模式」只对表锁成立。
-faultlab K7(2026-10-24 og5):三个会话插同一个主键,等待者在 transactionid 上等
+故障演练 K7(2026-10-24 og5):三个会话插同一个主键,等待者在 transactionid 上等
 (waiter ShareLock ← holder ExclusiveLock),报告照表锁写了「持有者取这把锁的典型语句:
 REFRESH MATERIALIZED VIEW CONCURRENTLY」—— 事务号上的 ExclusiveLock 是每个事务对**自己的事务号**
 持有的锁,与表锁的 ExclusiveLock 同名不同物;读的人会去找一条根本不存在的物化视图刷新。

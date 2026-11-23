@@ -40,8 +40,8 @@ from common import catalog_scope as cs  # noqa: E402
 
 # SQL 已迁到 scripts/registry/proctune/ —— 两条路径共用同一份定义
 DB_VERSION_SCRIPT = "proctune.db_version"
-# 带 search_path 的两语句模板(common/search_path.py 按 base + "_schema" 拼名;交付闸按全串检索,故写全):
-#   proctune.plan_text_schema / proctune.plan_text_analyze_schema;探测脚本 explain.multi_stmt_probe
+# 带 schema 时:v1.4.13 起不再用两语句模板(行方中间件拦截两段 SQL),表名按 schema 补全后走单语句模板,
+#   见 common/search_path.py
 TABLES_SCRIPT = "proctune.tables"
 INDEXES_SCRIPT = "proctune.indexes"
 COLUMN_STATS_SCRIPT = "proctune.column_stats"
@@ -69,8 +69,8 @@ from common.grmp.statement import is_dml  # noqa: E402,F401  (verify.py 从本�
 def explain_plan_via_script(runner, sql_text: str, analyze: bool, schema: str = "") -> tuple:
     """走已注册的 EXPLAIN 模板 —— 没有原始会话时用这条。返回 (计划, 实际切到的 schema, 说明)。
 
-    游标 SELECT 的表名多半不带 schema——它们本来就在过程所在的 schema 下解析。有 schema 就走
-    「SET search_path; EXPLAIN」两语句模板,中间件不支持时退回单语句模板并说明(common/search_path.py)。
+    游标 SELECT 的表名多半不带 schema——它们本来就在过程所在的 schema 下解析。有 schema 就把不带 schema 的
+    表名按它补全后走单语句模板(v1.4.13 起不发两段 SQL,行方中间件会拦截;common/search_path.py)。
     调用前必须先过 ensure_explainable()：模板是文本替换，参数位就是注入面。
     """
     script = "proctune.plan_text_analyze" if analyze else "proctune.plan_text"
@@ -124,7 +124,8 @@ def scan_plan(plan_text: str) -> list[Finding]:
         elif trimmed.startswith("sort"):
             out.append(Finding("sort", "warn", detail,
                 "Explicit sort; an index matching ORDER BY may remove it. "
-                "Check work_mem if the sort spills to disk."))
+                "If it spills to disk, first cut the rows this SQL sorts (filters, paging); "
+                "raise work_mem only for this SQL's session if still needed."))
     if "nested loop" in lower and "seq scan" in lower:
         out.append(Finding("nestloop_seqscan", "warn",
             "Nested Loop combined with Seq Scan",
@@ -132,7 +133,8 @@ def scan_plan(plan_text: str) -> list[Finding]:
             "consider an index on the join key."))
     if "hash join" in lower:
         out.append(Finding("hash_join", "info", "Hash Join present",
-            "Usually fine for large joins; verify hash memory fits work_mem."))
+            "Usually fine for large joins; if the hash spills, reduce the rows feeding the join first "
+            "(session-level work_mem for this SQL only if needed)."))
     return out
 
 

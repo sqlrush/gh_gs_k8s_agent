@@ -73,7 +73,7 @@ GaussDB/PG 的计划里**父节点 `total_cost` 累积了所有子节点的成�
 | ≤ 8 表（默认 8） | 动态规划全排列 | 全局最优 |
 | > 8 表 | GEQO 遗传算法（`geqo_threshold` 默认 12） | 局部最优、不稳定 |
 
-复杂 SQL（> 8 表 join）计划忽好忽坏时，`SET from_collapse_limit=20; SET join_collapse_limit=20;` 让 DP 完整跑。这是「计划不稳定」类问题的常见根因，纯 SQL 改写解决不了。
+复杂 SQL（> 8 表 join）计划忽好忽坏是「计划不稳定」类问题的常见根因：连接表数超过 collapse 上限后优化器不再穷举连接顺序。处置在应用侧：把大 join 拆成几步（先过滤出小结果集再关联）、用 hint 固定连接顺序；collapse 类参数不作为建议。
 
 ### 2.3 `[GaussDB]` Streaming 算子（与原生 PG 最大的不同）
 
@@ -171,7 +171,7 @@ Streaming(type: BROADCAST dop: 2/1)
 ## 6. 正反例（带 GaussDB 数字）
 
 **❌ 含糊**：「Hash join 内存不够可能溢出，建议加 work_mem。」
-**✅ 带证据**：「Hash 节点 #5 `Sort Method: external merge`，当前 `work_mem=16MB`，hash 表估算需 ~48MB。`SET work_mem='64MB'` 后该节点回内存 hash，`## Execution Plan` 复跑 cost 8500 → 1200（7.08×）。」
+**✅ 带证据**：「Hash 节点 #5 `Sort Method: external merge`，当前 `work_mem=16MB`，hash 表估算需 ~48MB。只在本会话 `SET work_mem='64MB'` 后该节点回内存 hash，`## Execution Plan` 复跑 cost 8500 → 1200（7.08×）。」
 
 **❌ 泛泛**：「建议加索引优化查询。」
 **✅ 具体**：「`orders.order_date` n_distinct=730、谓词命中约 1 天 ≈ 0.14%，但 `Filter: to_char(order_date,'YYYY-MM-DD')='2024-01-15'` 函数包裹使索引失效。改写为 `order_date >= '2024-01-15' AND order_date < '2024-01-16'` 并建 `orders(order_date)`，`verify.py` 实测 cost 29165 → 4030（7.24×），结果集等价。」

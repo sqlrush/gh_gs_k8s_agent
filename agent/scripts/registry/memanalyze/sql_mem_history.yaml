@@ -1,0 +1,26 @@
+# memanalyze L4(SQL 级)的退路(2026-11-12 行方:生产环境权限与参数固定,能调的只有发出去的 SQL)。
+# WLM 资源跟踪(gs_wlm_session_*)取不到时 —— resource_track 没开、视图不在、或内核不填 —— 改从 SQL 执行历史
+# 按单条语句的内存用量排。
+#
+# used_memory:GaussDB STATEMENT_HISTORY「单条语句内存使用量(单位:MB)」(25.1.32 产品文档)。openGauss 没有这一列,
+# 执行会报列不存在,由 skills/gaussdb-memanalyze/scripts/wlm.py 按「这一项无法查询」处理,不影响其余结论。
+# statement_history 只在 postgres 库有数据(官方文档),所以本脚本留在 postgres、不切库。
+# 多取的行(limit 由调用方给成展示条数的数倍)留给 common/syssql 筛掉内核 / 诊断工具 / 平台运维账号的 SQL。
+name: memanalyze.sql_mem_history
+description: 近一天单条 SQL 内存用量排行(SQL 执行历史 used_memory;WLM 资源跟踪不可用时的退路)
+sql: |
+  SELECT unique_query_id AS queryid,
+         user_name,
+         start_time,
+         ROUND(EXTRACT(EPOCH FROM (finish_time - start_time)) * 1000) AS duration_ms,
+         used_memory,
+         substr(query, 1, 300) AS query
+    FROM dbe_perf.statement_history
+   WHERE start_time > now() - interval '1 day'
+     AND used_memory > 0
+   ORDER BY used_memory DESC
+   LIMIT {{limit}};
+params:
+  - key: limit
+    type: INTEGER
+    description: 返回条数上限

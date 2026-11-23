@@ -23,9 +23,9 @@ from .diagnose import NotReady
 
 CLIP_PORT = 4095            # 导入容器里的剪藏接收(k8s/templates/kb-import.yaml)
 PATHS = frozenset({pages.CLIP_PATH, pages.INSTALL_PATH, pages.UPLOAD_PATH})
-# 剪藏完落到导入环境里那个新会话:opencode 网页的会话地址是 /<base64url(工作目录)>/session/<会话号>
-# (前半段就是 server.LANDING,测试核对两处一致)
-SESSION_URL = "/L2RhdGEvc3RhdGUvd29ya3NwYWNl/session/%s"
+# 剪藏完落到导入环境里那个新会话:opencode 网页的会话地址是 /<base64url(工作目录)>/session/<会话号>,
+# 前半段 = 网关的对话页落地(App.landing:K8s 是 /data/state/workspace,Fuyao 沙箱是 /data/me/workspace)
+SESSION_PATH = "/session/%s"
 TARGET_COOKIE = "gsa_target=kb-import; Path=/; HttpOnly; SameSite=Lax"
 OFF = "网页剪藏还没有开启:请平台在 agent-config 里配 KB_CLIP_ORIGINS(允许剪藏的内网网站),重启网关后再用"
 
@@ -87,10 +87,18 @@ def _upload(h, who: idt.Identity) -> None:
         if origin not in cfg.kb_clip_origins:
             return _reject(h, 403, "来源网站 %s 不在允许剪藏的名单里(KB_CLIP_ORIGINS):请平台把它加进 agent-config"
                            % (origin or "(不是 http(s) 地址)"))
-    password = _ready(h, who)
-    if password is None:
-        return
-    host = "%s-%s.%s.svc" % (pods.KIND_KB_IMPORT, who.user_id, cfg.namespace)
+    sandbox = _in_sandbox(h)
+    if sandbox:
+        # Fuyao 模式:导入环境是沙箱,地址由路由器给(虚拟机在集群网络里的地址)
+        t = _sandbox_target(h, who)
+        if t is None:
+            return
+        password, host = t.password, t.host
+    else:
+        password = _ready(h, who)
+        if password is None:
+            return
+        host = "%s-%s.%s.svc" % (pods.KIND_KB_IMPORT, who.user_id, cfg.namespace)
     headers = [("Content-Type", "application/json"), ("Authorization", proxy.basic_auth(password)),
                ("X-Forwarded-User", who.user_id)]
     try:
@@ -112,9 +120,12 @@ def _upload(h, who: idt.Identity) -> None:
     if status != 200:
         h.app.log("剪藏:%s 被导入容器拒收(%d):%s" % (who.user_id, status, out.get("error")))
         return h._json(status if 400 <= status < 600 else 502, {"error": str(out.get("error") or "导入环境拒收")})
-    h.app.mgr.touch(who.user_id, kind=pods.KIND_KB_IMPORT)
+    if sandbox:
+        h.app.pool.note_activity(who.user_id, kind=pods.KIND_KB_IMPORT)
+    else:
+        h.app.mgr.touch(who.user_id, kind=pods.KIND_KB_IMPORT)
     sid = str(out.get("session") or "")
-    out["open_url"] = (SESSION_URL % sid) if sid else ""
+    out["open_url"] = (h.app.landing + SESSION_PATH % sid) if sid else ""
     h.app.log("剪藏:%s → %s(%s,%s 字节)" % (who.user_id, out.get("batch"), _origin(str(out.get("url") or "")) or "文件",
                                          out.get("bytes")))
     raw = json.dumps(out, ensure_ascii=False).encode("utf-8")
@@ -126,6 +137,26 @@ def _upload(h, who: idt.Identity) -> None:
     h.send_header("Content-Length", str(len(raw)))
     h.end_headers()
     h.wfile.write(raw)
+
+
+def _in_sandbox(h) -> bool:
+    return h.app.pool is not None and bool(getattr(h.app.pool, "handles_kb_import", False))
+
+
+def _sandbox_target(h, who: idt.Identity):
+    """Fuyao 模式:本人的导入沙箱(没有就建、暂停了就恢复)。不行就回一个剪藏页看得懂的 JSON 错误并返回 None。"""
+    from . import poolrouter
+    try:
+        return h.app.pool.target(who.user_id, True, kind=pods.KIND_KB_IMPORT)
+    except pods.PrerequisiteMissing as exc:
+        h.app.log("剪藏:为 %s 准备导入沙箱失败(前置条件):%s" % (who.user_id, exc))
+        _reject(h, 503, "您的导入环境尚未开通,请联系管理员。")
+    except (poolrouter.PoolFull, poolrouter.PoolWait):
+        _reject(h, 503, "您的导入环境正在准备(或当前人数已满),请稍后再试。")
+    except Exception as exc:                        # noqa: BLE001
+        h.app.log("剪藏:为 %s 准备导入沙箱失败:%s" % (who.user_id, exc))
+        _reject(h, 502, "导入环境准备失败,请联系平台。")
+    return None
 
 
 def _ready(h, who: idt.Identity) -> Optional[str]:

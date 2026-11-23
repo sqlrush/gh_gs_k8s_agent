@@ -25,7 +25,7 @@ def _code_lines():
 def test_ships_with_the_package_and_the_docs_point_to_it():
     """离线包只打 k8s/ 与 docs/:脚本必须在 k8s/ 下,手册里要有入口,行方才找得到。"""
     assert _SCRIPT.is_file()
-    for name in ("从源码构建到K8s运行-完整手册.md",):
+    for name in ("部署手册-从零到上线.md", "仓库结构说明.md"):
         assert "runtime-doctor.sh" in (_ROOT / "docs" / name).read_text(encoding="utf-8"), name
 
 

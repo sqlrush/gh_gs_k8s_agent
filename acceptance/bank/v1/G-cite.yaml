@@ -67,7 +67,7 @@ questions:
   needs: {faultlab: [], kb: [PD-G25132C-02396, PD-G25132C-02410, GS-GUC-004]}
   ask: shared_buffers 和 work_mem 官方建议怎么设?跟我们行里的要求一样吗?
   rubric:
-    format: {w: 15, template: qa, followup: true, extra: ["第一行解答来源之后写「两者不一致,以贵行规范为准」(或说明哪里一致)"]}
+    format: {w: 15, template: qa, followup: true, extra: ["第一行解答来源之后写「两者不一致,以本行规范为准」(或说明哪里一致)"]}
     tools:
       w: 15
       must:

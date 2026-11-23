@@ -87,7 +87,8 @@ def test_slowsql_stmt_table_rows():
 
 def test_topsql_sort_keys_and_reject():
     # self / self_avg:2026-10-24 加的不含等待口径(CPU + 数据 IO),见 skills/gaussdb-topsql/scripts/waits.py
-    assert topsql.SORT_KEYS == ["time", "avg", "calls", "reads", "rows", "self", "self_avg"]
+    # writes:2026-11-05 加的写入行数(插入 + 更新 + 删除),xlog 与死元组追到写入的 SQL
+    assert topsql.SORT_KEYS == ["time", "avg", "calls", "reads", "rows", "self", "self_avg", "writes"]
     # Bad key must raise before touching the DB.
     try:
         topsql.top_sql(None, "bogus", 10)

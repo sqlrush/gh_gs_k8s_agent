@@ -64,7 +64,8 @@ def finding(samples, th: Thresholds):
             dimension=DIM_INSTANCE, code="MEM_TREND_LEAK", severity=sev,
             metric="动态内存趋势", value=f"净增长 {net_growth:.1f}%",
             threshold=f">{th.trend_flat_pct:.0f}% 且未回落",
-            evidence=detail + "；内存持续上升且未回落，疑似泄漏或缓存不释放",
+            evidence=detail + "；内存持续上升且未回落：先看是哪些应用的长连接一直不断开、会话 / 对象数是否在涨"
+                     "（gaussdb-health 的连接与会话来源），多是连接池与业务用法引起的",
         )
 
     return Finding(

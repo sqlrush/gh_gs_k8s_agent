@@ -18,10 +18,10 @@ GOOD_FAULT = """**总体状态:严重** 驱动:阻塞链
 数据库机制:4 个会话等锁,共 4 层,根会话 pid 4100。
 ## ② 根因
 应用视角:连接池没提交。
-数据库机制:idle in transaction。
+数据库机制:根会话 pid 4100 idle in transaction。
 ## ③ 解决方案
 应用视角:通知应用方。
-数据库机制:<font color=#2f6fdb>数据库侧不 kill 业务会话</font>(引用自贵行规范库 GS-XACT-001)
+数据库机制:<font color=#2f6fdb>数据库侧不 kill 业务会话</font>(引用自本行规范库 GS-XACT-001)
 ## ④ 总结
 需要就阻塞链展开说明吗?
 """
@@ -33,8 +33,9 @@ def test_format_items_score_each_check_and_leave_extras():
     out = rules.format_items({"w": 15, "template": "fault", "status_band": True, "both_views": True,
                               "followup": True, "extra": ["第一行写清时段"]}, GOOD_FAULT)
     decided = [i for i in out if i.decided]
-    assert {i.key for i in decided} == {"R:段落", "R:开头", "R:两种读者", "R:展开提议", "R:引用写法"}
-    assert all(i.score == 2.5 for i in decided)
+    assert {i.key for i in decided} == {"R:段落", "R:开头", "R:两种读者", "R:展开提议", "R:引用写法", "R:视角"}
+    share = 15 / 7                       # 6 项规则 + 1 项 extra 平分 15 分
+    assert all(abs(i.score - share) < 1e-9 for i in decided), [(i.key, i.score, i.evidence) for i in decided]
     assert [i.key for i in out if not i.decided] == ["X1"]
     bad = rules.format_items({"w": 10, "template": "fault", "followup": True}, "随便说说。根据知识库,没问题。")
     assert sum(i.score for i in bad) < 10 and any(i.cause == "提示词" for i in bad)

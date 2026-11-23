@@ -12,6 +12,7 @@
 # 七个列名原本就唯一且有意义，未加别名。
 # is_unique / is_primary 是布尔列，取回来是 't'/'f'，调用方用 _as_bool 判断。
 name: sqlreview.indexes
+database_type: appbusiness
 description: 某模式下的索引清单（列顺序/唯一性/扫描次数）
 sql: |
   SELECT

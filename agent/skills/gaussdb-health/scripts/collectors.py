@@ -25,6 +25,7 @@ from model import (
     DIM_SLOWSQL, DIM_STORAGE, DIM_XACT, DimResult, Finding, Severity, degraded,
 )
 import running_sql
+import wal
 from thresholds import Thresholds, go_duration
 from util import f2, human_bytes, i64, sev_by_duration, summarize_err, trunc
 
@@ -126,6 +127,7 @@ def collect_slowsql(runner, th: Thresholds, top: int) -> DimResult:
 def _completed_slowsql(runner, th: Thresholds, top: int, fetched) -> DimResult:
     # 2026-10-22 行方要求:排除 GaussDB 自己的系统 SQL(common/syssql.py),标题里写明排除了几条
     screening = syssql.screen(fetched, want=top, sql_id=lambda r: r["unique_sql_id"], text=lambda r: r["query"],
+                              user=lambda r: r.get("user_name"),
                               shown_chars=SLOWSQL_QUERY_CHARS, full_text=syssql.full_text_lookup(runner),
                               seconds=lambda r: _f(r["total_sec"]), cache=syssql.verdict_cache())
     rows = screening.kept
@@ -345,7 +347,9 @@ def collect_logs(runner, th: Thresholds, _top: int) -> DimResult:
         sev = Severity.NOTICE
     if sev != Severity.OK:
         d.findings.append(Finding(DIM_LOGS, "CKPT_PRESSURE", sev, "checkpoint 请求占比",
-                                  f2(req_pct) + "%", f">{thr:.0f}%", "pg_stat_bgwriter checkpoints_req"))
+                                  f2(req_pct) + "%", f">{thr:.0f}%",
+                                  "pg_stat_bgwriter checkpoints_req。checkpoint 被频繁强制触发 = xlog 涨得快,"
+                                  "多是业务写入引起的:写入来源(哪些表、哪些 SQL、有没有大字段)见本报告 WAL 维度"))
     am = "未知"
     try:
         _am = runner.run("health.archive_mode")
@@ -496,7 +500,7 @@ def _sync_commit(runner, d: DimResult, repl_rows: list) -> str:
             % (commit, trunc(names, 30)), "至少 1 个",
             "集群已配置 replconninfo（%d 个对端）且要求同步确认，而 pg_stat_replication 里"
             "没有 sync_state=sync 的备库 —— **主库的提交会一直等下去**，表现为写入全部挂住。"
-            "处置：恢复备库，或由 DBA 临时把 synchronous_commit 降为 local" % peers))
+            "处置：由运维恢复备库；恢复前要先放行写入的，由运维按配置基线评估临时把 synchronous_commit 降为 local" % peers))
         return "⚠ 要求同步确认但没有同步备"
     return "集群，%d 个同步备在线（%s）" % (synced, cfg)
 
@@ -746,14 +750,19 @@ def collect_storage(runner, th: Thresholds, top: int) -> DimResult:
                   headers=["类型", "名称", "占用"])
     dbs = tss = 0
     biggest = 0
+    hidden = []
     for row in rows or []:
         kind = str(row.get("kind") or "")
         name = str(row.get("name") or "")
-        n = as_int(row.get("bytes"))
         if kind == "database":
             dbs += 1
         else:
             tss += 1
+        if is_null(row.get("bytes")):          # 执行账号对这个库 / 表空间没有权限(脚本按权限只量能量的)
+            hidden.append(name)
+            d.rows.append([("库" if kind == "database" else "表空间"), trunc(name, 32), "无权限查看"])
+            continue
+        n = as_int(row.get("bytes"))
         biggest = max(biggest, n)
         d.rows.append([("库" if kind == "database" else "表空间"),
                        trunc(name, 32), human_bytes(n)])
@@ -776,6 +785,9 @@ def collect_storage(runner, th: Thresholds, top: int) -> DimResult:
         return d
     d.headline = ("%d 个库、%d 个表空间，最大 %s（剩余空间不可知，见证据）"
                   % (dbs, tss, human_bytes(biggest)))
+    if hidden:
+        d.note = ("执行账号对 %d 个库 / 表空间没有权限查看占用（%s），这几项未计入；需要时由运维用有权限的账号确认"
+                  % (len(hidden), "、".join(hidden[:5]) + ("等" if len(hidden) > 5 else "")))
     return d
 
 
@@ -792,6 +804,7 @@ def registry():
         ("xact", collect_xact),
         ("conn", collect_conn),
         ("logs", collect_logs),
+        ("wal", wal.collect_wal),
         ("repl", collect_repl),
         ("schema", collect_schema),
         ("storage", collect_storage),

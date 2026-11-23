@@ -19,6 +19,7 @@ DIM_DBSTAT = "Database Stat"
 DIM_TOPSQL = "Top SQL"
 DIM_WAITS = "Wait Events / Classes"
 DIM_CHECKPOINT = "Checkpoint / BgWriter / Redo"
+DIM_WRITES = "Write Sources"          # 窗口内的写入来源(2026-11-05)
 DIM_CACHE = "Cache / Memory"
 DIM_FILEIO = "File IO"
 

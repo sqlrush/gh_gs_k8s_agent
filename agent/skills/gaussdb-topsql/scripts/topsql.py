@@ -57,8 +57,10 @@ _SORT_COLS = {
     # 老白名单上按它排会报列不存在 —— top_sql() 里接住并说明。
     "self": "cpu_time + data_io_time DESC",
     "self_avg": "(cpu_time + data_io_time)/NULLIF(n_calls,0) DESC",
+    # 写入行数(插入 + 更新 + 删除):xlog 涨得快、表上死元组多时追到是哪些 SQL 在大量写。2026-11-05 进取数脚本。
+    "writes": "n_tuples_written DESC",
 }
-SORT_KEYS = ["time", "avg", "calls", "reads", "rows", "self", "self_avg"]
+SORT_KEYS = ["time", "avg", "calls", "reads", "rows", "self", "self_avg", "writes"]
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,8 @@ class StmtRow:
     # None = 取数脚本里没有这一列(行方还没重导白名单),不是 0 —— 当 0 会把每条都标成「全在等」
     cpu_sec: Optional[float] = None
     io_sec: Optional[float] = None
+    rows_written: Optional[int] = None     # None = 老白名单没有这一列
+    user: str = ""                         # 执行账号;空 = 老白名单没有这一列,或几个账号都跑过
 
     @property
     def self_sec(self) -> Optional[float]:
@@ -87,7 +91,7 @@ TOP_SQL_SCRIPT = "topsql.top_sql"
 # 脚本 SELECT 列表的列名。用名字取值而不是下标：列序变了会当场 KeyError，
 # 而不是安静地把 avg_ms 当成 total_sec。
 TOP_SQL_COLUMNS = (
-    "unique_sql_id", "query", "calls", "total_sec", "avg_ms", "rows", "cpu_sec", "io_sec",
+    "unique_sql_id", "query", "calls", "total_sec", "avg_ms", "rows", "cpu_sec", "io_sec", "rows_written",
 )
 
 
@@ -105,12 +109,17 @@ def top_sql(runner, by: str, limit: int) -> list[StmtRow]:
             raise ValueError("按自身耗时排要用 2026-10-24 起的 topsql.top_sql(聚合里带 cpu_time / data_io_time);"
                              "这套白名单里还是旧版本,请先重新注册。改用 --by time / avg 仍可用。原始报错:%s"
                              % exc) from exc
+        if by == "writes" and "n_tuples_written" in str(exc):
+            raise ValueError("按写入行数排要用 2026-11-05 起的 topsql.top_sql(聚合里带写入行数);"
+                             "这套白名单里还是旧版本,请先导入本版本的白名单增量。原始报错:%s" % exc) from exc
         raise
     return [
         StmtRow(r["unique_sql_id"], r["query"], as_int(r["calls"]),
                 as_float(r["total_sec"]), as_float(r["avg_ms"]), as_int(r["rows"]),
                 # 可选列用 get:老白名单没有它们,缺列要降级成「未知」,不能 KeyError
-                as_float(r.get("cpu_sec"), None), as_float(r.get("io_sec"), None))
+                as_float(r.get("cpu_sec"), None), as_float(r.get("io_sec"), None),
+                as_int(r["rows_written"]) if r.get("rows_written") not in (None, "") else None,
+                str(r.get("user_name") or ""))
         for r in rows
     ]
 
@@ -126,7 +135,7 @@ def _screener(runner, include_system: bool):
     lookup, cache = syssql.full_text_lookup(runner), syssql.verdict_cache()
 
     def run(rows, want):
-        return syssql.screen(rows, want=want, sql_id=lambda r: r.sql_id, text=lambda r: r.query,
+        return syssql.screen(rows, want=want, sql_id=lambda r: r.sql_id, text=lambda r: r.query, user=lambda r: getattr(r, "user", ""),
                              shown_chars=QUERY_CHARS, full_text=lookup, seconds=lambda r: r.total_sec,
                              cache=cache)
     return run
@@ -208,13 +217,15 @@ def stmt_table(title: str, rows: list[StmtRow], by: str = "time") -> str:
         return (f"## {title}\n\nNo matching statements. "
                 f"Check `enable_stmt_track` / lower --threshold.\n")
     # 等待占比 = 1 − (CPU + 数据 IO) / 总耗时:榜首被等锁语句占住时,读榜的人要一眼看出它不是自己慢(waits.py)
+    writes = by == "writes"              # 按写入排时多一列写入行数(插入 + 更新 + 删除)
     body = [[str(i + 1), r.sql_id, str(r.calls), f"{r.avg_ms:.2f}", f"{r.total_sec:.2f}",
              waits.sec_cell(r.self_sec), waits.share_cell(r.wait_ratio),
-             str(r.rows), render.truncate(r.query, QUERY_CHARS)]
+             str(r.rows)] + ([("未知" if r.rows_written is None else str(r.rows_written))] if writes else [])
+            + [render.truncate(r.query, QUERY_CHARS)]
             for i, r in enumerate(rows)]
-    return ("## " + title + "\n\n" +
-            render.table(["#", "SQL_ID", "CALLS", "AVG_MS", "TOTAL_S", "CPU+IO_S", "等待占比", "ROWS", "QUERY"],
-                         body) +
+    head = ["#", "SQL_ID", "CALLS", "AVG_MS", "TOTAL_S", "CPU+IO_S", "等待占比", "ROWS"] + \
+        (["写入行数"] if writes else []) + ["QUERY"]
+    return ("## " + title + "\n\n" + render.table(head, body) +
             waits.board_note(rows, by) + _QUERY_FOOT)
 
 
@@ -239,7 +250,8 @@ def _leave_baseline(runner, conn_name: str) -> None:
 
 
 _BY_CN = {"time": "耗时", "avg": "平均耗时", "calls": "调用次数", "rows": "返回行数",
-          "reads": "读块数", "self": "自身耗时(CPU+IO)", "self_avg": "平均自身耗时(CPU+IO)"}
+          "reads": "读块数", "self": "自身耗时(CPU+IO)", "self_avg": "平均自身耗时(CPU+IO)",
+          "writes": "写入行数"}
 
 
 def _run_span(runner, args, conn_name: str) -> Optional[int]:

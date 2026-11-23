@@ -27,6 +27,7 @@ for _anc in _HERE.parents:  # locate common/ (repo root or install dir)
 import common  # noqa: E402
 from common import access  # noqa: E402
 from common import cli  # noqa: E402
+from common import exec_db  # noqa: E402
 from common import kernel_funcs as kf  # noqa: E402
 from common import search_path as sp  # noqa: E402
 from common import schema_infer  # noqa: E402
@@ -52,10 +53,8 @@ RELATION_SCHEMAS_SCRIPT = "explain.relation_schemas"   # 贴文本没带 --schem
 #   explain.runtime_plan   gs_get_explain({{pid}}::bigint) —— GaussDB 私有的运行态计划(505.2.1 实测签名)
 #   explain.runtime_plan_int4  gs_get_explain({{pid}}::integer) —— 文档签名 (integer) 的老内核用
 #   explain.session_by_pid 按 pid 取该会话当前语句,内核没有 gs_get_explain 时退回 EXPLAIN 用
-# --schema 路径依赖的白名单脚本(common/search_path.py 按 base + "_schema" 拼名,交付闸按全串检索,故写全):
-#   explain.multi_stmt_probe          探测中间件能否一条脚本跑两条语句
-#   explain.plan_text_schema          SET search_path TO "{{schema}}", public; EXPLAIN … {{sql}}
-#   explain.plan_text_analyze_schema  同上,analyze 名下的那份(现场 ANALYZE 固定关闭)
+# --schema 路径:v1.4.13 起不再用两语句模板(行方中间件拦截两段 SQL),表名按 schema 补全后走单语句的
+#   explain.plan_text,见 common/search_path.py
 # --sql-id 路径依赖的白名单脚本(scripts/sqlfetch.py,与 sqltune 的同体):
 #   explain.from_history / explain.from_statement
 # 贴文本没带 --schema 时按表名查目录推断 schema(common/schema_infer.py):
@@ -175,7 +174,8 @@ def scan_plan(plan_text: str) -> list[Finding]:
         elif trimmed.startswith("sort"):
             out.append(Finding("sort", "warn", detail,
                                "Explicit sort; an index matching ORDER BY may remove it. "
-                               "Check work_mem if the sort spills to disk."))
+                               "If it spills to disk, first cut the rows this SQL sorts (filters, paging); "
+                               "raise work_mem only for this SQL's session if still needed."))
     if "nested loop" in lower and "seq scan" in lower:
         out.append(Finding("nestloop_seqscan", "warn",
                            "Nested Loop combined with Seq Scan",
@@ -183,7 +183,8 @@ def scan_plan(plan_text: str) -> list[Finding]:
                            "consider an index on the join key."))
     if "hash join" in lower:
         out.append(Finding("hash_join", "info", "Hash Join present",
-                           "Usually fine for large joins; verify hash memory fits work_mem."))
+                           "Usually fine for large joins; if the hash spills, reduce the rows feeding the join first "
+                           "(session-level work_mem for this SQL only if needed)."))
     return out
 
 
@@ -324,8 +325,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                   file=sys.stderr)
             return 2
         sql_text = fr.sql
-        if not schema and fr.schema and sp.valid_search_path(fr.schema):
-            schema = fr.schema
+        hist_path = sp.business_path(fr.schema)      # `"$user",public` 这类默认路径 → 空,下面按表名在目录里找
+        if not schema and hist_path and sp.valid_search_path(hist_path):
+            schema = hist_path
         label = {"statement_history": "statement_history 记录值", "user_name": "按执行账号 user_name 推测"}.get(
             getattr(fr, "schema_source", ""), "")
         fetch_source = f"sql_id={args.sql_id}({fr.source})" + (
@@ -375,16 +377,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         if args.sql_id is None:
             runner = access.for_conn(args.conn, timeout=args.timeout)
-        # 没有 schema(贴文本漏了 --schema)或只有按账号名推测的值:按表名在目录里找,唯一就用,歧义就停下来问,不猜。
+        # 没有 schema(贴文本漏了 --schema)或只有按账号名推测的值:按表名在目录里找,唯一就用;
+        # 多个候选按规则选一个并写进说明,不再停下来问(2026-11-06 行方:技能不要做跨 schema 的限制)。
         guessed = args.sql_id is not None and getattr(fr, "schema_source", "") == "user_name"
         if not schema or guessed:
             inf = schema_infer.infer(runner, RELATION_SCHEMAS_SCRIPT, sql_text, guess=schema)
-            if inf.ambiguous:
-                print(f"error: {schema_infer.describe(inf)}", file=sys.stderr)
-                return 2
             if inf.schema and not inf.via_guess:
                 schema = inf.schema
-                fetch_source = (fetch_source + ";" if fetch_source else "") + f"schema={schema}(按表名在目录里唯一匹配推断)"
+                how = "按表名在目录里选取,有多个候选" if inf.picked else "按表名在目录里唯一匹配推断"
+                fetch_source = (fetch_source + ";" if fetch_source else "") + f"schema={schema}({how})"
+                if inf.picked:
+                    fetch_notes = tuple(fetch_notes) + (inf.reason,)
         plan, applied, sp_note = explain_plan_via_script(runner, sql_text, args.analyze, schema)
     # access.QueryError 必须在列 —— 它是本项目归一化的「取数失败」类型，
     # runner.run() 在 SQL 本身执行失败时抛的就是它（打错字、表不存在、
@@ -393,6 +396,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     # 「syntax error at or near "SELEKT"」。而这是最常见的用户路径之一。
     except (common.ConfigError, common.CredentialError, common.DBError,
             access.AccessError, access.QueryError) as exc:
+        conn = exec_db.routed(args.conn) if exec_db.object_missing(str(exc)) else None
+        if conn is not None:
+            return _emit_misplaced(args, runner, fr, conn, str(exc))
         print(f"error: {exc}", file=sys.stderr)
         return 2
     script = "explain.plan_text_analyze" if args.analyze else "explain.plan_text"
@@ -401,15 +407,37 @@ def main(argv: Optional[list[str]] = None) -> int:
     return _emit(args, sql_text, plan, source, ((sp_note,) if sp_note else ()) + fetch_notes)
 
 
+def _history_source(args, hist) -> str:
+    return (f"sql_id={args.sql_id};SQL 历史里记下的真实执行计划(statement_history.query_plan),"
+            f"{hist.start_time} 那次执行,耗时 {hist.db_time_ms} ms,返回 {hist.rows} 行")
+
+
 def _emit_history(args, fr, hist) -> int:
     """SQL 历史里的真实执行计划:标明是哪次执行、不是此刻重新 EXPLAIN 的。"""
-    source = (f"sql_id={args.sql_id};SQL 历史里记下的真实执行计划(statement_history.query_plan),"
-              f"{hist.start_time} 那次执行,耗时 {hist.db_time_ms} ms,返回 {hist.rows} 行")
+    source = _history_source(args, hist)
     why = (f"文本被截断({fr.truncated_reason})" if fr.truncated
            else f"文本是归一化的(带 {fr.placeholders} 个占位符)")
     notes = (f"这是当时真实执行的计划(带 actual time / rows),不是此刻重新 EXPLAIN 的结果;{why},此刻 EXPLAIN 不了。"
              f"要看现在的估算计划或做调优,用 gaussdb-sqltune 按这个 id 调优(按列类型合成占位符值)。",)
     return _emit(args, fr.sql, hist.plan, source, notes)
+
+
+def _emit_misplaced(args, runner, fr, conn, message: str) -> int:
+    """目标库与取数库不同(中间件按实例 IP 固定连库):现取计划找不到对象时,按 id 退到 SQL 历史里的真实计划。
+
+    statement_history 只在系统库里有数据、覆盖实例上全部库(2026-11-06 og5 实测),取数库是 postgres 时正好取得到。
+    """
+    why = exec_db.misplaced(conn, message)
+    if fr is not None:
+        hist, hist_why = sqlfetch.history_plan(runner, int(args.sql_id))
+        if hist is not None:
+            return _emit(args, fr.sql, hist.plan, _history_source(args, hist),
+                         (f"这是当时真实执行的计划(带 actual time / rows),不是此刻重新 EXPLAIN 的结果。{why}",))
+        why += f"SQL 历史里也没有这条的执行计划({hist_why})。"
+    else:
+        why += "按 --sql-id 调用时可以改看 SQL 历史里记下的真实执行计划。"
+    print(f"error: {why}", file=sys.stderr)
+    return 2
 
 
 def _emit(args, sql_text: str, plan: str, source: str, notes: tuple) -> int:

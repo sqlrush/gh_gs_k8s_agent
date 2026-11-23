@@ -15,7 +15,7 @@
 # lock_object 只在锁标签能解析出本库的表时给出;等在事务号上(行锁冲突最常见的形态)
 # 没有表名,看等待语句。
 #
-# 实测(og5,10-21 18:32–18:52,faultlab 第一轮):5142→5141 等 transactionid 采到 115 次,
+# 实测(og5,10-21 18:32–18:52,故障演练第一轮):5142→5141 等 transactionid 采到 115 次,
 # 5144→5145 等 tuple(fl.acct)115 次,能连出 5146→…→5141 这条链。
 name: lockwait.asp_pairs
 description: 时段内的锁阻塞对(活跃会话采样:落表的 gs_asp + 内存里的 local_active_session):等待者、阻塞者、锁、锁对象、采到次数、首末次时间

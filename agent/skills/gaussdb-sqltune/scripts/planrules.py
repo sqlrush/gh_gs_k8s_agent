@@ -1,6 +1,6 @@
 """根因规则:计划节点 + SQL 正文都能确定的,才报。
 
-evidence.scan_plan 只看算子名 —— 有 Seq Scan 报 seq_scan、有 Sort 报 sort。2026-10-24 faultlab(og5)
+evidence.scan_plan 只看算子名 —— 有 Seq Scan 报 seq_scan、有 Sort 报 sort。2026-10-24 故障演练(og5)
 S1–S4 四条慢 SQL 拿到的全是这类通用警告:「相关子查询逐行执行」「NOT IN 退化成子计划」
 「索引列上套了类型转换」「LIKE 的模式取自另一张表」这些真正的根因一条都没点到,读报告的人
 还会被「consider an index on the Filter columns」带去建一个根本用不上的索引。

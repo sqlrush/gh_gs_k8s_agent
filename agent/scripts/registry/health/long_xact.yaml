@@ -3,11 +3,11 @@
 # 原来两列都叫 coalesce，协议按列名做键，后一个会把前一个覆盖 ——
 # query 顶掉 usename，且不报错。
 #
-# **改动（2026-10-24 faultlab）：「真实客户端会话」改按 client_port 认，不再按 connection_info。**
+# **改动（2026-10-24 故障演练）：「真实客户端会话」改按 client_port 认，不再按 connection_info。**
 # 原 SQL 用 COALESCE(connection_info,'') <> '' 排除内核后台线程（WLM 的 workload 线程
 # 一直 active、带 xact_start，不排除就是一条 35 小时的「长事务」）。但 connection_info
 # 只有 openGauss 自带的 libpq（gsql、gs 系驱动）会填；psycopg2 这类社区 libpq 系驱动、
-# 不少中间件不填 —— og5 实测 psycopg2 会话这一列是空串。faultlab 里 V2 的 1118 秒长事务、
+# 不少中间件不填 —— og5 实测 psycopg2 会话这一列是空串。故障演练里 V2 的 1118 秒长事务、
 # K1 的 16 分钟空闲事务因此整类看不见，报告写「无活动客户端事务」。
 # client_port：后台线程（workload、WDRSnapshot、Asp、JobScheduler 等）全是 NULL；
 # 客户端会话 TCP 是端口号、本地 Unix socket 是 -1，都非空（og5 逐个核对过）。

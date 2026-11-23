@@ -1,0 +1,9 @@
+# Fuyao 运行模式的两个集群服务(k8s/overlays/fuyao 引用本目录)。沙箱组 sandboxgroups.yaml 不在这里:
+# 它建在平台的命名空间 flux-system,由平台管理员单独 kubectl apply -f。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - statesvc.yaml
+  - credproxy.yaml
+  - networkpolicy.yaml
+  - platform-read.yaml

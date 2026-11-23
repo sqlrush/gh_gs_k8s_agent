@@ -41,12 +41,12 @@ GRANT USAGE ON SCHEMA dbe_perf TO tuner;
 GRANT SELECT ON ALL TABLES IN SCHEMA dbe_perf TO tuner;
 ```
 
-## 语句跟踪所需 GUC
+## 语句跟踪所需的监控开关
 
-```sql
-ALTER SYSTEM SET enable_stmt_track = on;        -- statement_history 行
-ALTER SYSTEM SET track_stmt_parameter = on;     -- 字面 SQL(否则归一化)
-```
+由运维开启后才能取到 SQL 历史(本工具只读,不代为开启):
+
+- `enable_stmt_track = on`:statement_history 才有行;
+- `track_stmt_parameter = on`:取到的是带字面值的 SQL(否则归一化)。
 
 ## 症状 → 处理
 
@@ -56,7 +56,7 @@ ALTER SYSTEM SET track_stmt_parameter = on;     -- 字面 SQL(否则归一化)
 | 退出码 2 / connection refused             | 查 host/port/防火墙;用脚本跑 `SELECT 1` 验证 |
 | 退出码 2 / password authentication        | 重建凭据(见「添加连接」),或设 `GSDB_PASSWORD`(旧 `GDAA_PASSWORD` 仍兼容) |
 | 退出码 3 / permission denied for dbe_perf | 授 monadmin(上面 SQL) |
-| gaussdb-sqlfetch 查不到                   | 开 `enable_stmt_track`,等有流量后重试 |
-| gaussdb-sqlfetch 返回归一化 SQL             | 开 `track_stmt_parameter`;或用 `--bind` 传真实值 |
+| gaussdb-sqlfetch 查不到                   | 缺数据:需运维开启 `enable_stmt_track`,有流量后才能取到 |
+| gaussdb-sqlfetch 返回归一化 SQL             | 需运维开启 `track_stmt_parameter` 才能取到字面值;或用 `--bind` 传真实值 |
 | 退出码 4 / syntax or object error         | 检查替换后的占位符值与 SQL 里的对象名 |
 | 退出码 5 / timeout                        | 调大 `--timeout`,或错峰调优 |

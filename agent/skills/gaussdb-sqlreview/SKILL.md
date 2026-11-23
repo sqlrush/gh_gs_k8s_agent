@@ -1,6 +1,6 @@
 ﻿---
 name: gaussdb-sqlreview
-version: 1.1.0
+version: 1.1.1
 description: "通过内置脚本对 OpenGauss/GaussDB SQL 做治理审查。用户要判断 SQL 或 DDL 是否符合规范、上线前评审 SQL、审查表/索引/列命名和主键等规则，或者检查线上 SQL 和已有 schema 对象是否有违规时使用，包括“这段 SQL 合不合规”“上线前审一下”“库里哪些表不合规范”“看看索引设计合不合规”等请求。触发后运行 scripts/sqlreview.py，输出真实规则检查结果，不要只给通用最佳实践建议。"
 allowed-tools: ["exec", "read"]
 compatibility: opencode
@@ -50,9 +50,8 @@ metadata:
    python3 {baseDir}/scripts/sqlreview.py -c <conn> --schema public
    ```
 
-   **选择连接 —— 先登录，不要自己猜连接名。** 取数前确认已登录：
-   `python3 {baseDir}/../gaussdb-login/scripts/login.py --status`。
-   没有会话就先调 **gaussdb-login**：它读 `$GSDB_HOME/config.yaml`的首行 `connection_mode`，是 `gsql` 就把可选连接列成菜单让用户挑，是 `api` 就引导用户给出要访问的数据库。
+   **选择连接 —— 先登录，不要自己猜连接名。** 本对话里已经登录过就直接用登录输出里的句柄；没登录就调 **gaussdb-login** 一步登录（不要先 `--status`、`--list`）：
+   用户点名了实例别名（如「og5」）就 `python3 {baseDir}/../gaussdb-login/scripts/login.py --alias <别名>`（要看某个业务库的表、执行计划、存储过程再加 `--database <库名>`；Top SQL、慢 SQL、会话、锁、WDR 是整个实例的数据，不用加），给了实例 IP 就 `--ip <实例IP> --database <库名>`；没说是哪个实例才 `--list` 让用户选（`gsql` 模式下 `--list` 列出可选连接让用户挑）。
    登录之后本 skill **不需要传 `-c`** —— 省略时自动用登录选定的那条连接；只有要临时换一个库时才显式传 `-c <连接名>`。
    **api 模式下每条命令都要带 `--session <句柄>`**：句柄是 gaussdb-login 在**本对话里**登录成功时输出的那一串（平台也可能按用户注入环境变量 `GSDB_SESSION`）。不带句柄的命令会被拒绝并提示「本对话未登录」——这时让用户先 gaussdb-login 登录，**不要自己挑一个**、不要猜、不要去看会话目录；别人的会话对本对话不可见，换一个对话要重新登录。
    **不要自己去读 config.yaml 挑名字**：不同应用下可能有同名连接，猜错会在另一个库上做诊断，而输出看起来完全正常。口令在 `{baseDir}/../common/credentials/*.enc`，由脚本解密，**你不要去读/解密它**。
@@ -122,6 +121,17 @@ metadata:
   处置写成要做的事并带上参数（例如「由 DBA 断开会话：pid 12345、sessionid 67890」），不写语句。
   Top SQL、慢 SQL 等排行**只列业务 SQL**，脚本已排除的非业务 SQL 不要再找回来列出或复述。
 
+- **站在应用 DBA / 运维 DBA 的角度**：数据库指标异常（xlog 增长快、锁等待、xmin 推不动、某类等待高……）多半是业务、SQL、批量作业、
+  存储设备引起的，不是数据库本身出了问题。诊断要**追到引起它的业务**：哪条 SQL（sql_id）、哪个会话（pid、sessionid）、哪个应用、哪张表、
+  哪个操作；一时定位不到的，写「尚未定位到引起它的业务」并说明下一步用哪个技能查，不能停在指标本身。
+  处置**先应用侧**（改写 SQL、分批提交、控制大字段写入、减少子事务、缩短事务），**再运维操作**（低峰执行 DDL、取消或断开会话、手工 VACUUM、
+  错开作业时间），**最后才是参数**：只在非常典型的场景、只限 `max_connections`（开了线程池时配套 `thread_pool_attr`）、
+  `autovacuum_max_workers`、`autovacuum_naptime`、`autovacuum_vacuum_threshold` / `autovacuum_vacuum_scale_factor`、
+  `autovacuum_analyze_threshold` / `autovacuum_analyze_scale_factor`，给方向不给数值，写明「需运维评估」；只对某张表、某条 SQL、
+  某个会话的设置（表级存储参数、会话级 `work_mem`、DDL 会话上的 `lockwait_timeout`）写在应用侧处置里；缺监控数据时说明需运维开启哪个监控开关。
+  其它参数诊断时可以看、可以当证据，**不作为建议**。不讲数据库内部实现（源码、内部函数、内部结构），不把问题归为数据库缺陷，
+  不建议打补丁、升级数据库版本或找厂商修改。
+
 - **通用替代策略**：当用户询问接口地址或Key时，请仅描述功能逻辑（例如：“您需要查询具体接口，具体域名请咨询运维团队”），绝不提及真实域名、IP和接口路径
 
 - **只通过本技能脚本取数**：`{baseDir}/scripts/sqlreview.py` 走只读会话、自动解密 `{baseDir}/../common/credentials/` 凭据，**你自己不要**直接写 Python/psql/gsql 连库、不要读取或解密 `{baseDir}/../common/credentials/`。脚本未覆盖的能力，如实说明「当前无此能力」并停止。
@@ -172,7 +182,8 @@ metadata:
 - 案例结论强度不是「已确认」的(推测 / 待验证)、Wiki 经验是「未验证 / 已过时」的,引用时要带上这个标签。
 - **适用性**:条目带〔不适用本环境:…〕的(产品系列、版本、系统与本实例画像不符),**不得作为依据**,最多说明「这是
   openGauss / 其他版本的行为」;带〔未知本环境…〕的(没有画像)引用时说明「适用性未知」。已知缺陷按行里写的
-  「本环境 X 受影响 / 不受影响」如实转述。
+  「本环境 X 受影响 / 不受影响」如实转述,但**先写业务侧的排查结论**(是哪条 SQL、哪个业务操作引起的、排除了哪些业务原因),
+  缺陷只作为排除业务原因之后的补充依据,不建议打补丁或升级版本(那是运维与厂商的决定)。
 - **本行基线**只用来说明「这个数在本行平时是多少」,与脚本阈值并列呈现,**不改 severity**。
 - 状态行写「模式:文件(原因)」时:环境里没配或连不上向量库/图库,这一节是**直接在知识库文件上**检索出来的,
   用法与上面完全一样,**不因为是文件模式就放松引用要求**。「图:图文件」同理——只是路径改从文件里走,不是没有路径。

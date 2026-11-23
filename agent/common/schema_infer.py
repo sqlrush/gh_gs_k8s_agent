@@ -1,9 +1,10 @@
-"""贴文本没带 --schema 时,按表名在目录里找 schema:唯一就用,多个候选就问,没有就照旧。
+"""贴文本没带 --schema 时,按表名在目录里找 schema:唯一就用,多个候选按规则选一个并写明,没有就照旧。
 
 现场(2026-09-09 早):模型贴文本漏了 --schema → 400。命令是模型拼的,SKILL.md 只能约束不能保证;
 脚本层自己去 pg_class 查一遍,把「模型记不记得带参数」从关键路径上拿掉。
-纪律不变:同名表跨 schema 时不猜(Oracle 迁移库里 gbatch / dsc_ora_public 同名表很常见),列出候选交用户;
-各表分散在不同 schema(多 schema 的 search_path)同样不猜——只有 DBA 给执行账号设完整 search_path 能根治。
+不再因为跨 schema 停下(2026-11-06 行方:技能不要做跨 schema 的限制):同名表在多个 schema 下时按推测值、
+否则按名字顺序取第一个;各表分散在不同 schema 时把这些 schema 组成 search_path(`a, b`)一起用。两种都在 reason
+里写明取了哪个、候选有哪些(picked=True),调用方把它写进报告 —— 取错了用户加 --schema 重跑即可,不再先挡下来问。
 按执行账号名推测出来的 schema(备机退回路)只用来在多个候选之间打破平局,不能压过目录里的唯一匹配。
 """
 from __future__ import annotations
@@ -24,7 +25,7 @@ class Inference:
     tables: Tuple[str, ...] = ()                       # 参与推断的不带 schema 的表名(查目录用的形态)
     candidates: Dict[str, Tuple[str, ...]] = field(default_factory=dict)   # 表 → 它所在的 schema 们
     reason: str = ""                                   # 人话
-    ambiguous: bool = False                            # 有候选但定不下来——要问用户
+    picked: bool = False                               # 有多个候选,按规则选了一个(reason 里写明)——报告要说
     via_guess: bool = False                            # 是靠推测值在候选里打破平局才定下来的
 
 
@@ -75,21 +76,15 @@ def infer(runner, script: str, sql: str, guess: str = "") -> Inference:
         return Inference(schema=next(iter(common)), tables=tuple(keys), candidates=cands,
                          reason="按表名在目录里唯一匹配到 schema %s" % next(iter(common)))
     if not common:
-        return Inference(tables=tuple(keys), candidates=cands, ambiguous=True,
-                         reason="各表不在同一个 schema 下(%s)——这条 SQL 依赖多 schema 的 search_path" % detail)
+        path = ", ".join(sorted({s for v in cands.values() for s in v}))
+        return Inference(schema=path, tables=tuple(keys), candidates=cands, picked=True,
+                         reason="各表分属不同 schema(%s),按 search_path %s 一起取;不对就加 --schema 指定" % (detail, path))
     if guess and guess in common:
         return Inference(schema=guess, tables=tuple(keys), candidates=cands, via_guess=True,
                          reason="多个 schema 都有这些表(%s),按推测值 %s 取" % (detail, guess))
-    return Inference(tables=tuple(keys), candidates=cands, ambiguous=True,
-                     reason="同名表在多个 schema 下(%s)" % detail)
+    first = sorted(common)[0]
+    return Inference(schema=first, tables=tuple(keys), candidates=cands, picked=True,
+                     reason="同名表在多个 schema 下(%s),按 %s 取;不对就加 --schema 指定" % (detail, first))
 
 
-def describe(inf: Inference) -> str:
-    """歧义时给用户看的话:说清候选,要用户定,不猜。"""
-    cands = sorted({s for v in inf.candidates.values() for s in v})
-    return ("无法确定这条 SQL 的 schema:%s。不猜——请确认这条 SQL 平时在哪个 schema 下跑,加 --schema <schema> 重跑"
-            "(候选:%s);各表分属不同 schema 时需要 DBA 给执行账号设完整的 search_path,或把表名写全。"
-            % (inf.reason, "、".join(cands) or "无"))
-
-
-__all__ = ["Inference", "infer", "describe", "quoted_list"]
+__all__ = ["Inference", "infer", "quoted_list"]

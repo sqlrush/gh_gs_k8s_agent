@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-style="normal">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GaussDB 智能体 · 大盘</title>
+<!-- 站点永远挂在 /dash/ 下(网关按这个前缀路由),资源一律绝对路径:
+     /dash/health 与 /dash/health/ 两种写法都能解析到同一份文件,nginx 与本地预览都一样 -->
+<link rel="preload" href="/dash/fonts/IBMPlexSans-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/dash/styles/base.css">
+<link rel="stylesheet" href="/dash/styles/press.css">
+<link rel="stylesheet" href="/dash/styles/parts.css">
+<link rel="stylesheet" href="/dash/styles/resources.css">
+<link rel="icon" href="data:,">
+<!-- 先定风格再画,避免先闪一下另一种风格(普通 / 文艺,见 lib/style.js) -->
+<script>try { var s = new URLSearchParams(location.search).get('style') || localStorage.getItem('dash.style'); if (s === 'press' || s === 'normal') document.documentElement.dataset.style = s; } catch (e) { /* 隐私模式等 */ }</script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+  import { start } from '/dash/lib/shell.js';
+  start();
+</script>
+</body>
+</html>

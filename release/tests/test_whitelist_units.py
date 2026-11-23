@@ -24,20 +24,26 @@ def _insert(name, body, params='[]', scene="AGENT"):
             "NULL, 'ALL', uuid());\n" % (COLS, name, body.replace("'", "''"), params, scene))
 
 
-def test_the_shipped_full_dml_parses_to_128_scripts():
+def test_the_shipped_full_dml_parses_to_132_scripts():
     scripts = wl.parse_dml((DELIVERY / "scripts.sql").read_text(encoding="utf-8"))
-    assert len(scripts) == 128
+    assert len(scripts) == 132         # v1.4.13:新增 2、8 条两段 SQL 的脚本不再交付
     assert all(re.match(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$", n) for n in scripts)
-    assert scripts["procinfo.source_adm"].params == (("name", "STRING"),)
+    # 业务库类的脚本参数最前面是路由参数 dbName(行方写法 String,2026-11-11):核对时一并比,能看出行方导没导本版增量
+    assert scripts["procinfo.source_adm"].params == (("dbName", "String"), ("name", "STRING"))
 
 
 def test_md5_matches_the_self_checks_shipped_in_the_delta_files():
     """增量文件末尾的自检 SQL 写着「库里 md5(script_content) 应等于这个值」—— 拿它当标准答案,口径必须一模一样。"""
+    # 同一条脚本可能在几份增量里先后更新过:以**最新**那份写的为准(更早的那份描述的是当时的正文)
     scripts = wl.parse_dml((DELIVERY / "scripts.sql").read_text(encoding="utf-8"))
-    pairs = re.findall(r"\('([a-z_]+\.[a-z_0-9]+)', '([0-9a-f]{32})'\)",
-                       (DELIVERY / "scripts-delta-20261024.sql").read_text(encoding="utf-8"))
-    assert len(pairs) == 12
-    for name, md5 in pairs:
+    latest = {}
+    for f in sorted(DELIVERY.glob("scripts-delta-*.sql"), reverse=True):
+        for name, md5 in re.findall(r"\('([a-z_]+\.[a-z_0-9]+)', '([0-9a-f]{32})'\)", f.read_text(encoding="utf-8")):
+            latest.setdefault(name, md5)
+    assert len(latest) >= 12
+    for name, md5 in latest.items():
+        if name not in scripts:          # 早期增量里有、本版不再交付的(v1.4.13 起 8 条两段 SQL 的脚本)
+            continue
         assert scripts[name].md5 == md5, name
 
 

@@ -15,7 +15,7 @@ import pytest
 
 _ROOT = pathlib.Path(__file__).resolve().parents[3]
 _REG = "registry.example/gaussdb-agent"
-_DOCS = ("从源码构建到K8s运行-完整手册.md",)
+_DOCS = ("快速搭建-K8s.md", "命令卡-测试环境搭建.md", "部署手册-从零到上线.md", "从源码构建到K8s运行-完整手册.md")
 
 
 def _sed_commands(doc):
@@ -42,9 +42,9 @@ def test_registry_steps_produce_valid_image_names(doc, tmp_path):
 
     base = tmp_path / "k8s" / "base"
     images = re.findall(r"^\s*image:\s*(\S+)", "\n".join(
-        p.read_text(encoding="utf-8") for p in base.glob("*.yaml") if not p.name.endswith(".example.yaml")), re.MULTILINE)
-    # base 里有镜像的只有网关(前端由前端方自建,样例清单不算;用户容器的镜像由网关拼名字)
-    assert len(images) >= 1
+        p.read_text(encoding="utf-8") for p in base.glob("*.yaml")), re.MULTILINE)
+    # base 里有镜像的是网关与大盘前端两个(原第三个 openGauss 向量库 2026-10-23 下线;用户容器的镜像由网关拼名字)
+    assert len(images) >= 2
     for img in images:
         assert img.startswith(_REG + "/"), "%s:%s 没指向内网仓库" % (doc, img)
         assert img.rsplit("/", 1)[-1].count(":") == 1, "%s:%s 不是合法的镜像名" % (doc, img)

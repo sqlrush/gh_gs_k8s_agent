@@ -1,4 +1,4 @@
-# 全体用户 Pod 共用的非密配置(各项含义见 docs/从源码构建到K8s运行-完整手册.md 5.5)。样例值;平台按实际填写。
+# 全体 Pod 共用的非密配置(spec §6 环境变量契约)。样例值;平台按实际填写。
 # Mac 验证时 scripts/k8s/verify-cluster.sh 会用 kubectl 覆盖成 host.docker.internal:8781。
 apiVersion: v1
 kind: ConfigMap
@@ -13,7 +13,7 @@ data:
   GRMP_PATH_PREFIX: ""
   # 2026-09-18 中间件加固:请求头带 Appkey / Timestamp / Signature。GRMP_APPKEY 为空 = 不签名。
   # 私钥在 Secret grmp-sm2。下面四个旋钮按中间件口径填,缺省 = 国标 / Java BouncyCastle 常见形态;
-  # 注意 OpenSSL 签出来的默认 userId 是空串,客户用什么必须问清。
+  # 注意 OpenSSL 签出来的默认 userId 是空串,客户用什么必须问清(docs/env-contract.md)。
   # 过渡期(私钥还没到位):先只发 Appkey + Timestamp,不发 Signature。
   #   过渡期填:GRMP_APPKEY: <中间件给的 Appkey> / GRMP_SIGN_MODE: headers-only / GRMP_SIGN_TIMESTAMP: s
   #   密钥到位后:GRMP_SIGN_MODE 改回 full,并建 Secret grmp-sm2。
@@ -47,7 +47,3 @@ data:
   KB_CLIP_ORIGINS: ""
   # 单次剪藏(网页 + 页内图片)的总大小上限,单位 MB。默认 30,最大 45(网关单请求上限 64 MB,图片按 base64 传要多三分之一)
   KB_CLIP_MAX_MB: "30"
-  # 回答里「打开报告」链接的站点前缀。技能给出的链接是 <前缀>/dash/<页面>?<参数>(页面与参数见
-  # docs/前端对接接口说明.md 第 7 章)。留空 = 根相对地址 /dash/...,大盘与对话页同源时点开就对;
-  # 大盘在别的站点(贵方门户)时填那个站点,例如 https://portal.example.com。改了要重启用户 Pod 才生效。
-  GSDB_DASH_BASE_URL: ""

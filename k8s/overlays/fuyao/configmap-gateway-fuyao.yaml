@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: gaussdb-agent
+data:
+  RUNTIME_MODE: "fuyao"
+  FUYAO_API: "http://opensandbox-server.flux-system.svc:80"
+  FUYAO_RUNTIME_GROUP: "sg-gsdb-runtime"
+  FUYAO_IMPORT_GROUP: "sg-gsdb-import"
+  FUYAO_RUNTIME_TEMPLATE: ""          # scripts/build-e2b-template.py 打印的模板名,如 gsdb-runtime-v1-5-0
+  FUYAO_IMPORT_TEMPLATE: ""           # 如 gsdb-import-v1-5-0

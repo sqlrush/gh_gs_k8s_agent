@@ -99,18 +99,12 @@ _ITEM_ORDER = (
 )
 _ALL_ITEMS = (_DB_TIME,) + _ITEM_ORDER
 
-_FLATTEN_NOTE = (
-    "以下各项都是各自占 DB_TIME 的独立占比，不是一棵包含树。实测（见 "
-    "tools/probe_dbtime_containment.py，5 个真实快照窗口）：EXECUTION_TIME+"
-    "PARSE_TIME+PLAN_TIME+REWRITE_TIME<=DB_TIME 在全部窗口成立，但 CPU_TIME+"
-    "DATA_IO_TIME+NET_SEND_TIME<=EXECUTION_TIME 在全部窗口都不成立（超出 "
-    "EXECUTION_TIME 15%~24%，不是舍入误差）。两条关系一真一假时画树最危险："
-    "读者会拿子项减父项去算'其余'，在不成立的那一半上得到负数或无意义的结果，"
-    "且不会有任何报错提示。因此哪怕只画验证过的那一半也不画，全部平铺；各项"
-    "之间可能重叠，不能相加、不能相减估算'剩余部分'。（未证实的猜测：并行 "
-    "worker 的 CPU_TIME/DATA_IO_TIME 累计可能不是会话墙钟 EXECUTION_TIME 的"
-    "子集，两者统计口径不同。）"
-)
+# 各项为什么平铺而不画成包含树(写给维护者,不进报告):实测(tools/probe_dbtime_containment.py,5 个真实快照窗口)
+# EXECUTION_TIME+PARSE_TIME+PLAN_TIME+REWRITE_TIME<=DB_TIME 在全部窗口成立,但 CPU_TIME+DATA_IO_TIME+NET_SEND_TIME
+# <=EXECUTION_TIME 在全部窗口都不成立(超出 15%~24%,不是舍入误差)。一真一假时画树最危险:读者会拿子项减父项算「其余」,
+# 在不成立的那一半上得到负数且没有任何报错。所以全部平铺。报告里只留一句用户能用的话(2026-11-05:报告站在应用 / 运维
+# DBA 角度,不印内部口径与探针脚本)。
+_FLATTEN_NOTE = "以下各项是各自占 DB_TIME 的比例，彼此可能重叠，不能相加，也不能相减去估算「其余部分」。"
 
 _RESTART_NOTE = (
     "本窗口跨了一次实例重启：十项时间模型里至少一项后减前的增量算出负数，"

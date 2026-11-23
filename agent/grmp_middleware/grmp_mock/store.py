@@ -15,6 +15,7 @@ import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 
 from common.grmp.placeholder import ParamDef
+from common.grmp import routing
 from common.grmp.script import SCRIPT_CONFIG_COLUMNS, ScriptRecord
 
 # 21 列的 SQLite 类型。行方 id 是 varchar，这里同样用 TEXT ——
@@ -180,8 +181,9 @@ def _params_from_config(raw: Optional[str]) -> Tuple[ParamDef, ...]:
     if not raw:
         return ()
     items = json.loads(raw)
+    # dbName 是路由参数(中间件据此切库),不是 SQL 里的占位符;是否带它由 database_type 决定(见 routing.py)
     return tuple(
-        ParamDef(key=item["key"], type=item["type"]) for item in items
+        ParamDef(key=item["key"], type=item["type"]) for item in items if item.get("key") != routing.PARAM
     )
 
 

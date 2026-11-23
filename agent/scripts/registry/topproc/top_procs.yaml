@@ -6,6 +6,7 @@
 #
 # {{order}} 落在 ORDER BY 位，取值只能来自 topproc.py 的 _SORT_COLS 白名单。
 name: topproc.top_procs
+database_type: appbusiness
 description: 资源消耗最高的存储过程/函数（pg_stat_user_functions）
 sql: |
   SELECT n.nspname, p.proname, s.calls,

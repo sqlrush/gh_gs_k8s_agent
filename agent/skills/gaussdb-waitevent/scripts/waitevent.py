@@ -176,7 +176,36 @@ def _events_block(events: list) -> str:
     return "\n".join(out)
 
 
-def _findings_block(findings: list, idle: bool = False) -> str:
+# 实例级指标 → 追到 SQL / 会话的下一步(安全红线「站在应用 DBA / 运维 DBA 的角度」:不能停在指标)
+_NEXT = {
+    "DBTIME_IO_HEAVY": "数据 IO 耗时高:看这段时间读得最多、自身耗时最长的 SQL —— `gaussdb-topsql --from '{b}' --to '{e}' --by self`",
+    "DBTIME_CPU_HEAVY": "CPU 耗时高:看这段时间 CPU 花在哪些 SQL 上 —— `gaussdb-topsql --from '{b}' --to '{e}' --by self`",
+    "DBTIME_NET_HEAVY": "发送耗时高:多是 SQL 返回结果集过大或客户端取数慢 —— `gaussdb-topsql --from '{b}' --to '{e}' --by rows` 看返回行数最多的 SQL",
+    "WAIT_LOCK_HEAVY": "锁等待耗时高:看这段时间谁堵了谁、阻塞链的根是哪个会话 —— `gaussdb-lockwait --from '{b}' --to '{e}'`",
+    "WAIT_LWLOCK_HEAVY": "轻量锁耗时高:多是大量会话并发访问同一批数据、或写入量大(WAL 类) —— "
+                         "`gaussdb-topsql --from '{b}' --to '{e}'` 看这段时间的热点 SQL;WAL 类等待看 `gaussdb-health` 的 WAL 维度(写入来源)",
+}
+
+
+def _minute(ts: str) -> str:
+    return str(ts or "")[:16]
+
+
+def _next_steps(findings, win) -> list:
+    """每条发现对应的下一步(同一时段的命令)。窗口时间取不到时只给技能名。"""
+    b, e = win.label.split(" → ", 1) if win is not None and " → " in win.label else ("", "")
+    lines = []
+    for code in dict.fromkeys(f.code for f in findings):
+        hint = _NEXT.get(code)
+        if hint:
+            lines.append("- " + (hint.format(b=_minute(b), e=_minute(e)) if b and e else
+                                 hint.replace(" --from '{b}' --to '{e}'", "")))
+    if not lines:
+        return []
+    return ["", "**下一步：追到具体的 SQL 与会话**（以上是实例级指标，还没落到是哪条 SQL、哪个会话、哪个应用引起的）：", ""] + lines
+
+
+def _findings_block(findings: list, idle: bool = False, win=None) -> str:
     if not findings and idle:
         # 空闲窗口没判 —— 不能写「未发现越过阈值的问题」,那读起来是「查过了、没问题」
         return "### Findings（本窗口）\n\n本窗口几乎空闲，没有做比例判定（见上）。\n"
@@ -187,6 +216,7 @@ def _findings_block(findings: list, idle: bool = False) -> str:
            render.table(["级别", "代码", "指标", "实测值", "阈值"], rows), ""]
     for f in findings:
         out.append("- **%s**（%s）：%s" % (f.code, f.severity.label(), f.evidence))
+    out.extend(_next_steps(findings, win))
     return "\n".join(out) + "\n"
 
 
@@ -217,7 +247,7 @@ def _window_block(win: Window) -> str:
     # judge_dbtime 是纯函数：用本窗口已经取到的 bd/events 原样重算一遍，
     # 只为把"是哪个窗口触发的"这条信息带进渲染——不重新取数，结果与
     # collect() 汇总进 WaitReport.findings 的那份完全一致。
-    out.append(_findings_block(dbtime.judge_dbtime(bd, win.events, win.seconds), idle=g.idle))
+    out.append(_findings_block(dbtime.judge_dbtime(bd, win.events, win.seconds), idle=g.idle, win=win))
     return "\n".join(out)
 
 

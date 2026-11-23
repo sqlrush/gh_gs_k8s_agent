@@ -1,0 +1,7 @@
+# 登录时核实中间件是否真的切到了业务库(common/grmp/routing.py):脚本登记为 appbusiness,调用时带 dbName;
+# 回来的 current_database() 等于用户给的库名即「已直连」,否则说明中间件没切(没升级 / 白名单没导 / 库不存在或没权限)。
+name: login.current_db
+database_type: appbusiness
+description: 登录核实:中间件实际连的库与账号
+sql: |
+  SELECT current_database() AS db, current_user AS usr;

@@ -1,6 +1,6 @@
 """经模拟 SSO / 网关访问本人的 opencode:建会话、发问、等答完、取消息。
 
-接口与前端用的是同一套(docs/api/opencode-1.18.27-openapi.json):
+接口与前端用的是同一套(联合仓库 gh_gs_k8s_agent 的 docs/api/opencode-1.18.27-openapi.json):
   POST /session                       建会话
   POST /session/{id}/prompt_async     发一句,立即返回(答的过程在后台)
   GET  /session/status                忙着的会话 → {type: busy | retry};答完的不在里面

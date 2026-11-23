@@ -1,6 +1,8 @@
 """冒烟验证:经网关走用户的真实路径(设计 §7)。
 
 1. 模拟登录(GET /session):不带信任头必须 403;带上(X-Agent-User + X-Agent-Trust)200。槽位刚在准备时网关回 503「正在为您准备环境」,带退避重试。
+   Fuyao 模式没有池子:网关这时为冒烟工号建沙箱(载入状态、起 opencode),请求会挂住到 FUYAO_WAIT_SECONDS 才回 503,
+   所以单次超时(request_timeout_s)与总等待(ready_timeout_s)由调用方按网关配置放宽;挂到超时也当「还没好」重试。
 2. 一次真实对话(经模型):默认一句不碰数据库的问题;给了冒烟实例时,问对它做一次只读健康检查(全链路:模型、技能、白名单、中间件),
    并核对 /reports/health/targets.json 里该实例的份数增加。
 3. 知识库检索:请它查一次知识库,核对 /reports/kb/queries.jsonl 多了一行。
@@ -10,6 +12,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import socket
 import time
 import urllib.parse
 from dataclasses import dataclass, field
@@ -44,6 +47,7 @@ class Smoke:
     instance: str = ""
     chat_timeout_s: float = 240
     ready_timeout_s: float = 180
+    request_timeout_s: float = 60   # 等环境就绪的那几个请求单次的超时;Fuyao 模式网关建沙箱时会把请求挂住到 FUYAO_WAIT_SECONDS
     clock: Callable[[], float] = time.time
     sleep: Callable[[float], None] = time.sleep
     log: Callable[[str], None] = lambda _m: None
@@ -68,11 +72,16 @@ class Smoke:
         finally:
             conn.close()
 
-    def _ready(self, method: str, path: str, body: Optional[dict] = None, timeout: float = 60) -> Tuple[int, bytes]:
-        """网关在准备槽位时回 503 / 504:等一会儿再试。"""
+    def _ready(self, method: str, path: str, body: Optional[dict] = None) -> Tuple[int, bytes]:
+        """网关在准备槽位 / 沙箱时回 503 / 504,或者把请求挂住到超时:等一会儿再试,直到 ready_timeout_s。"""
         end, wait = self.clock() + self.ready_timeout_s, 2.0
         while True:
-            code, data = self._req(method, path, body, timeout=timeout)
+            try:
+                code, data = self._req(method, path, body, timeout=self.request_timeout_s)
+            except socket.timeout:
+                if self.clock() >= end:
+                    raise
+                code, data = 504, b"timeout"
             if code not in (502, 503, 504) or self.clock() >= end:
                 return code, data
             self.sleep(wait)
@@ -93,7 +102,10 @@ class Smoke:
         bare, _ = self._req("GET", "/session", trust=False)
         if bare != 403:
             return self._record("模拟登录", False, "不带信任头应当被拒(403),实际 %d:网关没有在验证身份" % bare, t0)
-        code, data = self._ready("GET", "/session")
+        try:
+            code, data = self._ready("GET", "/session")
+        except socket.timeout:
+            return self._record("模拟登录", False, "%s:%d 秒内环境没有准备好(网关一直没有回答)" % (self.user, self.ready_timeout_s), t0)
         ok = code == 200
         return self._record("模拟登录", ok, "%s → %d%s" % (self.user, code, "" if ok else ":" + data[:120].decode("utf-8", "replace")), t0)
 
@@ -151,18 +163,32 @@ class Smoke:
         items = json.loads(data or b"[]")
         return sum(int(i.get("count") or 0) for i in items if key is None or i.get("label") == key or i.get("key") == key)
 
+    def _reports(self, path: str) -> Tuple[int, str]:
+        """(份数, 最新一份的时间)。份数有上限:每个实例只留最近 50 份(common/reports.DEFAULT_KEEP),
+        满了以后新报告挤掉最老的一份,份数不再增加 —— 只看份数会把正常出了报告判成没出(2026-11-06 测试环境攒满后撞到)。"""
+        code, data = self._req("GET", path)
+        if code == 404:
+            return 0, ""
+        if code != 200:
+            raise SmokeError("读 %s 失败(%d)" % (path, code))
+        items = json.loads(data or b"[]")
+        return (sum(int(i.get("count") or 0) for i in items),
+                max((str(i.get("last_at") or "") for i in items), default=""))
+
     def health_report(self, version: str) -> Optional[Check]:
         if not self.instance:
             return None
         t0 = self.clock()
         try:
-            before = self._count("/reports/health/targets.json")
+            before, b_last = self._reports("/reports/health/targets.json")
             reply, tools, err = self.chat(HEALTH.format(inst=self.instance), "发版台冒烟 %s 健康检查" % version)
-            after = self._count("/reports/health/targets.json")
+            after, a_last = self._reports("/reports/health/targets.json")
         except (SmokeError, OSError, ValueError) as exc:
             return self._record("只读诊断报告", False, str(exc), t0)
-        ok = after > before and not err
-        return self._record("只读诊断报告", ok, "报告 %d → %d 份%s" % (before, after, (",错误 " + err) if err else ""), t0)
+        ok = (after > before or a_last > b_last) and not err
+        full = ("(份数已到上限,最新一份 %s → %s)" % (b_last or "无", a_last or "无")) if after == before else ""
+        return self._record("只读诊断报告", ok, "报告 %d → %d 份%s%s" % (
+            before, after, full, (",错误 " + err) if err else ""), t0)
 
     def kb_query(self, version: str) -> Check:
         t0 = self.clock()

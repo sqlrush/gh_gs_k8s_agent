@@ -4,6 +4,7 @@
 # 这条与同目录下 generated 的脚本不同，它是**固定的** ——
 # 探测「实例有哪些视图/列」这件事本身不随实例而变。
 name: memanalyze.cols_qualified
+database_type: appbusiness
 description: 取某个 schema.table 的列清单
 sql: |
   SELECT a.attname::text AS attname

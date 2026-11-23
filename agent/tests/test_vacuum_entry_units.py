@@ -58,7 +58,7 @@ def _worker_row(**kw):
 class _Runner:
     def __init__(self, dead=None, settings=None, workers=None, xmin=None,
                  version="(openGauss-lite 5.0.3 build x)", kernel_info=None,
-                 freeze=None, bloat=None):
+                 freeze=None, bloat=None, holders=None, xid_lag=None):
         self._dead = dead if dead is not None else []
         self._settings = settings if settings is not None else _SETTINGS_ROWS
         self._workers = workers if workers is not None else []
@@ -73,6 +73,10 @@ class _Runner:
         # 膨胀估算。默认给空表 —— 默认不该触发任何 finding,否则每个既有用例
         # 都会多出一条与它无关的发现。
         self._bloat = bloat if bloat is not None else []
+        # 持有 xmin 的事务(vacuum.xmin_holder)。默认 None = 白名单里还没有这条脚本(报「未登记」),
+        # 走旧口径(按 oldest_xmin 列长事务)—— 既有用例都是按旧口径写的。
+        self._holders = holders
+        self._xid_lag = xid_lag if xid_lag is not None else []
 
     def run(self, script, values=None):
         if script == vacuum.DEAD_SCRIPT:
@@ -87,13 +91,13 @@ class _Runner:
             return self._freeze
         if script == vacuum.BLOAT_SCRIPT:
             return self._bloat
-        if script == vacuum.kf.PROBE_SCRIPT:
-            rows = [{"item": "version", "detail": self._version}]
-            if self._kernel is not None:
-                rows.append({"item": "func:gs_get_kernel_info", "detail": ""})
-            return rows
-        if script == vacuum.kf.KERNEL_INFO_SCRIPT:
-            return list(self._kernel or [])
+        if script == vacuum.HOLDER_SCRIPT:
+            if self._holders is None:
+                from common.grmp.errors import QueryError
+                raise QueryError("脚本 vacuum.xmin_holder 未登记")
+            return self._holders
+        if script == vacuum.XID_LAG_SCRIPT:
+            return self._xid_lag
         raise AssertionError("没料到的脚本 %s" % script)
 
 
@@ -277,48 +281,65 @@ def test_no_xmin_blocker_also_says_so_explicitly():
 
 
 # ---------------------------------------------------------------------------
-# 6b. 内核事务水位（gs_get_kernel_info，GaussDB 私有）：有就附一节原样列出，
-#     openGauss 没有就整节不出现，GaussDB 该有而没有要用中文说明。
+# 6b. 内核事务水位不进报告(2026-11-05:站在应用 / 运维 DBA 角度);卡住回收的是谁由 vacuum.xmin_holder 给出。
 # ---------------------------------------------------------------------------
 _GAUSS = "(GaussDB Kernel V500R002C10 build 1) compiled at 2025"
-_KERNEL_ROWS = [
-    {"node_name": "dn1", "module": "XACT", "name": "recent_global_xmin", "value": "15805"},
-    {"node_name": "dn1", "module": "UNDO", "name": "global_recycle_xid", "value": "15805"},
-]
 
 
-def test_kernel_info_section_lists_metrics_when_the_kernel_has_the_function():
-    rep = vacuum.collect(_Runner(version=_GAUSS, kernel_info=_KERNEL_ROWS), limit=20, th=_th())
+def test_report_does_not_print_kernel_watermark_even_on_gaussdb():
+    md = vacuum.render_markdown(vacuum.collect(_Runner(version=_GAUSS), limit=20, th=_th()))
+    assert "gs_get_kernel_info" not in md and "内核事务水位" not in md and "clog" not in md
+
+
+def _holder(**kw):
+    base = dict(xact_id="4840", xmin="309436750", is_oldest="t", sessionid="4840", pid="281462818264736",
+                usename="app_user", application_name="batch_job", state="active", xact_age_s="1800",
+                unique_sql_id="12345", query="call fl.settle_all(20261105)", background="f")
+    base.update(kw)
+    return base
+
+
+def test_holder_names_session_application_and_procedure():
+    row = _dead_row(n_dead_tup="600000", n_live_tup="1000000")
+    rep = vacuum.collect(_Runner(dead=[row], holders=[_holder()],
+                                 xid_lag=[{"node": "dn1", "oldest_xmin": "309436750", "next_xid": "310436750"}]),
+                         limit=20, th=_th())
     md = vacuum.render_markdown(rep)
-    assert "gs_get_kernel_info" in md and "XACT" in md and "recent_global_xmin" in md and "15805" in md
-    assert "指标" in md                      # 明说每行是指标不是事务——现场问过这个
+    assert "会话 4840" in md and "应用 batch_job" in md and "持有当前最老的 xmin" in md
+    assert "gaussdb-proctune" in md and "EXCEPTION" in md          # 正在执行存储过程:指向循环内的子事务
+    assert "1,000,000" in md                                        # xmin 落后下一个事务号的量
+    r4 = [f for f in rep.findings if f.code == "VACUUM_XMIN_BLOCKED"]
+    assert r4 and "会话 4840" in r4[0].evidence and "应用侧" in r4[0].evidence
 
 
-def test_kernel_info_is_silent_on_opengauss():
-    md = vacuum.render_markdown(vacuum.collect(_Runner(), limit=20, th=_th()))
-    assert "gs_get_kernel_info" not in md and "内核事务水位" not in md
+def test_short_holder_is_normal_concurrency_not_a_blocker():
+    row = _dead_row(n_dead_tup="600000", n_live_tup="1000000")
+    rep = vacuum.collect(_Runner(dead=[row], holders=[_holder(xact_age_s="2.5")]), limit=20, th=_th())
+    assert not [f for f in rep.findings if f.code == "VACUUM_XMIN_BLOCKED"]
+    assert "正常并发" in vacuum.render_markdown(rep)
 
 
-def test_kernel_info_missing_on_gaussdb_is_explained_in_chinese():
-    rep = vacuum.collect(_Runner(version=_GAUSS), limit=20, th=_th())
+def test_holder_mode_drops_the_long_xact_guesses_but_keeps_slots():
+    rep = vacuum.collect(_Runner(holders=[], xmin=[_xmin_row(identifier="2259"),
+                                                   _xmin_row(source="replication_slot", identifier="slot_a",
+                                                             xmin_age_s="")]),
+                         limit=20, th=_th())
     md = vacuum.render_markdown(rep)
-    assert "gs_get_kernel_info" in md and "GaussDB" in md and "函数定义逐 database 独立" in md and "升级" in md
-    assert "SELECT proname" not in md
+    assert "slot_a" in md and "2259" not in md
 
 
-def test_kernel_info_call_failure_does_not_break_the_report():
-    from common.grmp.errors import QueryError
-
-    class _Boom(_Runner):
-        def run(self, script, values=None):
-            if script == vacuum.kf.KERNEL_INFO_SCRIPT:
-                raise QueryError("ERROR: Permission denied for relation gs_get_kernel_info.")
-            return super().run(script, values)
-
-    rep = vacuum.collect(_Boom(version=_GAUSS, kernel_info=_KERNEL_ROWS), limit=20, th=_th())
+def test_missing_holder_script_falls_back_and_says_why():
+    rep = vacuum.collect(_Runner(xmin=[_xmin_row(identifier="2259")]), limit=20, th=_th())
     md = vacuum.render_markdown(rep)
-    assert "Permission denied" in md and "权限" in md     # 原文 + 中文提示都在
-    assert "风险表" in md                                  # 主体报告照常
+    assert "2259" in md and "取不到" in md
+
+
+def test_dead_tuple_findings_name_the_updates_and_deletes():
+    row = _dead_row(n_dead_tup="600000", n_live_tup="1000000", n_tup_upd="900000", n_tup_hot_upd="100",
+                    n_tup_del="5000")
+    rep = vacuum.collect(_Runner(dead=[row]), limit=20, th=_th())
+    ev = " ".join(f.evidence for f in rep.findings)
+    assert "UPDATE 900000" in ev and "DELETE 5000" in ev and "--by writes" in ev
 
 
 # ---------------------------------------------------------------------------

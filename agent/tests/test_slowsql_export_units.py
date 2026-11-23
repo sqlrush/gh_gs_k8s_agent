@@ -48,7 +48,7 @@ def test_export_creates_its_directory(tmp_path, monkeypatch, capsys):
 
     assert list(out.glob("slow_sql_export_*.csv")), "导出目录没建出来，或文件没写成"
     assert "数据已导出到" in capsys.readouterr().out
-    assert len(rows) <= 5, "导出后返回的应是摘要行"
+    assert len(rows) == 12, "报告与 CSV 条数一致:原先导出后只回 5 条(行方报告 Bug 4,这条断言当时把 bug 当成了规格)"
 
 
 def test_exported_csv_holds_every_row_not_just_the_summary(tmp_path, monkeypatch):
@@ -72,7 +72,7 @@ def test_auto_export_is_off(tmp_path, monkeypatch):
     out = _fake_here(tmp_path, monkeypatch)
     rows = slowsql.slow_sql(_Runner(30), 100, 50, "2000-01-01 00:00:00", False)
     assert not out.exists(), "export=False 时不该产生任何文件"
-    assert len(rows) <= 5, "超过 SLOWSQL_MAX_ROWS 仍应截断显示"
+    assert len(rows) == 30, "展示条数由 --limit 决定(取数时已截好),这里不再按 min(…, 5) 截(行方报告 Bug 4)"
 
 
 def test_no_export_below_the_threshold(tmp_path, monkeypatch):
@@ -117,3 +117,40 @@ def test_export_flag_rejects_the_bool_string_trap(raw):
         return          # argparse 当场拒绝，安全
     assert args.export is not True, (
         "`--export %s` 被解析成了「要导出」—— 用户写的是关掉，实际打开了" % raw)
+
+
+# 参数组合矩阵(2026-11-08 行方报告 Bug 4 后加):原先只测默认 --limit 20,截成 5 条要 --limit 大于 20 或带 --export 才出现。
+@pytest.mark.parametrize("available,limit,export", [
+    (3, 20, False), (20, 20, False), (30, 20, False), (30, 21, False), (30, 50, False),
+    (60, 50, False), (12, 50, True), (30, 5, True), (0, 20, False),
+])
+def test_rows_shown_follow_limit_for_every_combination(tmp_path, monkeypatch, available, limit, export):
+    _fake_here(tmp_path, monkeypatch)
+    rows = slowsql.slow_sql(_Runner(available), 100, limit, "2000-01-01 00:00:00", export)
+    assert len(rows) == min(available, limit)
+
+
+class _SlowFailsRunner:
+    """慢 SQL 脚本回 400(行方 11-08 有一台实例如此),Top SQL 脚本正常。"""
+
+    def __init__(self):
+        self.calls = []
+
+    def run(self, script, values=None):
+        self.calls.append(script)
+        if script == "slowsql.slow_sql":
+            from common.access import QueryError
+            raise QueryError("中间件返回 HTTP 400:agent诊断脚本执行失败")
+        if script == "topsql.top_sql":
+            assert "NULLIF(n_calls,0) DESC" in values["order"]
+            return [{"unique_sql_id": str(i), "query": "SELECT c%d FROM fl.acct" % i, "calls": "2",
+                     "avg_ms": str(5000 - i * 1000), "total_sec": "9", "cpu_sec": "1", "rows": "1"} for i in range(5)]
+        return []
+
+
+def test_slow_sql_falls_back_to_the_top_sql_script_when_its_own_script_fails(tmp_path, monkeypatch):
+    _fake_here(tmp_path, monkeypatch)
+    r = _SlowFailsRunner()
+    rows, _screening, note = slowsql.slow_sql_report(r, 1500, 20, "2000-01-01 00:00:00", False)
+    assert [x.sql_id for x in rows] == ["0", "1", "2", "3"]     # 平均 5000/4000/3000/2000 ms 过 1500 的阈值,1000 不过
+    assert "已改用 Top SQL 脚本" in note and "agent诊断脚本执行失败" in note and "开始时间" in note

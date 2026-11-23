@@ -251,7 +251,7 @@ def runner_for(
         if sock:
             # 凭据代理(容器部署):本进程里没有令牌与私钥,中间件地址、签名、工号都由代理定,这里只管报文
             return GrmpRunner(GrmpClient(base_url="http://credproxy", token="", data_ip=conn.data_ip,
-                                         proxy_socket=sock))
+                                         proxy_socket=sock, target_db=conn.route_db))
         token = os.environ.get(TOKEN_ENV)
 
         # 如果设置了HOST_ENV 变量，则以变量的值为主，未设置则以配置文件里的host为主
@@ -291,6 +291,7 @@ def runner_for(
                 data_ip=conn.data_ip,
                 signer=signing.RequestSigner(sign_settings) if sign_settings else None,
                 user_id=user_id_settings,
+                target_db=conn.route_db,
             )
         )
     raise AccessError("连接 %s 的 driver %r 不受支持" % (conn.name, driver))

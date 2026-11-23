@@ -1,0 +1,55 @@
+# Fuyao 运行模式(2026-11-17):状态服务。沙箱(E2B 微型虚拟机)挂不了 NAS(平台实测),用户状态与知识库经它进出 NAS。
+# 设计:docs/specs/2026-11-17-fuyao-sandbox-design.md §7。只认网关签发的沙箱令牌(控制密钥 = Secret sandbox-control)。
+# **单副本**:本人目录的独占与知识库发布的串行由进程内的锁保证(NAS 上的 .owner 标记另做跨进程的那一层)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: statesvc
+  namespace: gaussdb-agent
+  labels: {app: gaussdb-statesvc}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: gaussdb-statesvc}
+  template:
+    metadata:
+      labels: {app: gaussdb-statesvc}
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false       # 不调 K8s 接口
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000}
+      containers:
+        - name: statesvc
+          image: gaussdb-agent-runtime:agent-v1.5.0-oc1.18.27     # 复用 runtime 镜像(新入口);平台按实际版本改
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "-u", "/opt/agent/podctl.py", "serve-statesvc", "--nas", "/nas", "--listen", "0.0.0.0:8090"]
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+          env:
+            - {name: GSDB_CONTROL_KEY, valueFrom: {secretKeyRef: {name: sandbox-control, key: KEY}}}
+          ports: [{containerPort: 8090, name: http}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8090}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /healthz, port: 8090}, initialDelaySeconds: 10, periodSeconds: 20}
+          resources:
+            requests: {cpu: 500m, memory: 512Mi}
+            limits: {cpu: "4", memory: 4Gi}
+          volumeMounts:
+            - {name: nas, mountPath: /nas}                 # 全体用户目录与知识库:只有这个服务碰
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: nas, persistentVolumeClaim: {claimName: nas}}
+        - {name: tmp, emptyDir: {sizeLimit: 1Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: statesvc
+  namespace: gaussdb-agent
+  labels: {app: gaussdb-statesvc}
+spec:
+  selector: {app: gaussdb-statesvc}
+  ports:
+    - {name: http, port: 8090, targetPort: 8090}

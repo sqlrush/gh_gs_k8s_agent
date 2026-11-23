@@ -130,9 +130,8 @@ def snaps(runner, limit: int, t_from: str = "", t_to: str = "") -> str:
         raise common.DBError(f"读取 enable_wdr_snapshot 失败：{exc}")
     if str(enabled or "").strip().lower() != "on":
         raise common.DBError(
-            "WDR 未开启（enable_wdr_snapshot=off）。请由 DBA 执行 "
-            "`ALTER SYSTEM SET enable_wdr_snapshot=on`（需 reload/重启）并等待自动快照，"
-            "或自行 `SELECT create_wdr_snapshot();`。本工具只读、不代为开启或创建。")
+            "WDR 未开启（enable_wdr_snapshot=off），缺快照数据。需运维开启 enable_wdr_snapshot"
+            "（需 reload/重启）并等自动快照生成后才能分析。本工具只读、不代为开启，也不创建快照。")
 
     try:
         rows = runner.run("wdr.snapshots", {"limit": int(limit)})

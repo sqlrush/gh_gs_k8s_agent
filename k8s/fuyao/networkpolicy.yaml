@@ -1,0 +1,59 @@
+# Fuyao 运行模式的网络策略(2026-11-17)。NetworkPolicy 是叠加的:这里只**补**base 里没有的通路,不改 base。
+# 沙箱(E2B 微型虚拟机)不是 Pod,podSelector 选不中它们,只能按地址段写:SANDBOX_CIDR 换成平台给虚拟机分地址的网段
+# (实测在 Pod 网段里,如 10.244.0.0/16)。CNI 不执行 NetworkPolicy 时(如 Flannel)这些对象不起作用 ——
+# 沙箱的出网限制要由平台在宿主机侧做(设计文档 §9 平台前提)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-to-sandboxes
+  namespace: gaussdb-agent
+spec:
+  podSelector:
+    matchLabels: {app: agent-gateway}
+  policyTypes: [Egress]
+  egress:
+    - to: [{ipBlock: {cidr: 10.244.0.0/16}}]          # SANDBOX_CIDR:对话 4096、报告 4097、剪藏 4095、envd 49983
+      ports: [{port: 4095, protocol: TCP}, {port: 4096, protocol: TCP}, {port: 4097, protocol: TCP},
+              {port: 49983, protocol: TCP}]
+    - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: flux-system}}}]   # OpenSandbox
+      ports: [{port: 80, protocol: TCP}]
+    - to: [{podSelector: {matchLabels: {app: gaussdb-statesvc}}}]     # 状态服务:恢复后找沙箱新地址、资源大盘的统计上报
+      ports: [{port: 8090, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: statesvc-policy
+  namespace: gaussdb-agent
+spec:
+  podSelector:
+    matchLabels: {app: gaussdb-statesvc}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{ipBlock: {cidr: 10.244.0.0/16}}]        # SANDBOX_CIDR:沙箱连它(凭沙箱令牌)
+      ports: [{port: 8090, protocol: TCP}]
+    - from: [{podSelector: {matchLabels: {app: agent-gateway}}}]   # 网关:问沙箱地址、报 / 读运维统计(凭运维签名)
+      ports: [{port: 8090, protocol: TCP}]
+  egress: []                                          # 只读写 NAS,不出网
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: credproxy-policy
+  namespace: gaussdb-agent
+spec:
+  podSelector:
+    matchLabels: {app: gaussdb-credproxy}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{ipBlock: {cidr: 10.244.0.0/16}}]        # SANDBOX_CIDR
+      ports: [{port: 8091, protocol: TCP}]
+  egress:
+    - to: [{namespaceSelector: {}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to: [{ipBlock: {cidr: 10.0.0.0/8}}]             # 中间件 GRMP:平台改成实际地址段与端口
+      ports: [{port: 8080, protocol: TCP}]
+    - to: [{ipBlock: {cidr: 10.0.0.0/8}}]             # 模型服务:平台改成实际地址段与端口
+      ports: [{port: 443, protocol: TCP}, {port: 80, protocol: TCP}]
+    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]              # K8s API(读 grmp-token-<工号>):平台改成 API Server 地址
+      ports: [{port: 443, protocol: TCP}, {port: 6443, protocol: TCP}]

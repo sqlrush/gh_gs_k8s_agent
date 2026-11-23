@@ -369,40 +369,27 @@ def test_tune_by_id_adds_the_recorded_schema_when_a_relation_is_missing(monkeypa
 
 
 class _SchemaRunner:
-    """回答探测脚本与 *_schema 模板的 runner:看 collect 有没有把 schema 递到模板里。"""
+    """记下取计划模板收到的 SQL:看 collect 有没有按 schema 把表名补全。"""
 
-    def __init__(self, probe_ok=True):
-        self.probe_ok, self.calls = probe_ok, []
+    def __init__(self):
+        self.calls = []
 
     def run(self, script, values=None):
         self.calls.append((script, dict(values or {})))
         if script == evidence.VERSION_SCRIPT:
             return [{"version": "openGauss 5.0.3"}]
-        if script == "explain.multi_stmt_probe":
-            return [{"ok": "1"}] if self.probe_ok else []
         if script.startswith("sqltune.plan_"):
             return [{"QUERY PLAN": "Seq Scan on orders  (cost=0.00..1.00 rows=1 width=4)"}]
         return []
 
 
-def test_collect_switches_search_path_through_the_schema_template():
-    """现场 400 的修法:知道 schema 就走「SET search_path; EXPLAIN」两语句模板,证据包记下切到了哪个 schema。"""
-    from common import search_path as sp
-    sp.reset_probe_cache()
+def test_collect_qualifies_tables_with_the_schema_and_sends_one_statement():
+    """现场 400 的修法:知道 schema 就把不带 schema 的表名补全后走单语句模板(行方中间件拦截两段 SQL,v1.4.13
+    起不再探测、不再用两语句模板)。"""
     r = _SchemaRunner()
     ev = evidence.collect(r, None, "select * from orders", False, schema="app_trade")
-    assert ("sqltune.plan_text_schema", {"sql": "select * from orders", "schema": "app_trade"}) in r.calls
-    assert ev.search_path == "app_trade" and ev.search_path_note == ""
-    assert "app_trade" in evidence.evidence_report(ev)
-
-
-def test_collect_falls_back_to_the_plain_template_when_two_statements_are_refused():
-    from common import search_path as sp
-    sp.reset_probe_cache()
-    r = _SchemaRunner(probe_ok=False)
-    ev = evidence.collect(r, None, "select * from orders", False, schema="app_trade")
-    # 2026-09-09 起:两语句跑不了不再把原文原样发过去等 400,脚本自己把表名按 schema 补全后走单语句模板
     assert ("sqltune.plan_text", {"sql": "select * from app_trade.orders"}) in r.calls
+    assert all("multi_stmt_probe" not in c[0] and not c[0].endswith("_schema") for c in r.calls)
     assert ev.search_path == "" and "app_trade" in ev.search_path_note and "补全" in ev.search_path_note
     assert ev.schema == "app_trade"                       # 要求切到的 schema 留着,后面取 JSON 计划还要用
     assert ev.search_path_note in evidence.evidence_report(ev)
@@ -428,24 +415,19 @@ def test_collect_sets_search_path_on_a_raw_session_before_explain():
     assert ev.search_path == "app_trade"
 
 
-def test_explain_json_via_script_uses_the_schema_template_too():
-    from common import search_path as sp
-    sp.reset_probe_cache()
+def test_explain_json_via_script_qualifies_too():
     r = _SchemaRunner()
-    evidence.explain_json_via_script(r, "select 1", schema="app_trade")
-    assert r.calls[-1] == ("sqltune.plan_json_schema", {"sql": "select 1", "schema": "app_trade"})
+    evidence.explain_json_via_script(r, "select * from orders", schema="app_trade")
+    assert r.calls[-1] == ("sqltune.plan_json", {"sql": "select * from app_trade.orders"})
 
 
 # ---- statement_history.schema_name 是搜索路径串(2026-10-21 现场:`fl, public` 被当成一个 schema 名整条没切)
 
-def test_collect_switches_to_a_search_path_string_through_the_template():
-    from common import search_path as sp
-    sp.reset_probe_cache()
+def test_collect_qualifies_with_the_first_segment_of_a_search_path_string():
     r = _SchemaRunner()
     ev = evidence.collect(r, None, "select * from orders", False, schema="fl, public")
-    # 末尾的 public 模板自己补:填进去的值与原先单 schema 一样,渲染出 SET search_path TO "fl", public
-    assert ("sqltune.plan_text_schema", {"sql": "select * from orders", "schema": "fl"}) in r.calls
-    assert ev.search_path == "fl, public" and ev.search_path_note == ""
+    assert ("sqltune.plan_text", {"sql": "select * from fl.orders"}) in r.calls
+    assert ev.search_path == "" and "第一个 schema fl" in ev.search_path_note
     assert "不是合法标识符" not in evidence.evidence_report(ev)
 
 
@@ -467,8 +449,6 @@ def test_collect_sets_a_search_path_string_on_a_raw_session():
 
 
 def test_collect_with_a_bad_segment_switches_nothing_and_says_which():
-    from common import search_path as sp
-    sp.reset_probe_cache()
     r = _SchemaRunner()
     ev = evidence.collect(r, None, "select * from orders", False, schema="fl, x;drop")
     assert ev.search_path == "" and "x;drop" in ev.search_path_note and "整串不切" in ev.search_path_note
@@ -476,12 +456,10 @@ def test_collect_with_a_bad_segment_switches_nothing_and_says_which():
 
 
 def test_explain_json_via_script_takes_the_applied_search_path_back():
-    """代价推演取 JSON 计划时传的是 ev.search_path(`fl, public`),要能原样再走一次模板。"""
-    from common import search_path as sp
-    sp.reset_probe_cache()
+    """代价推演取 JSON 计划时传搜索路径串(`fl, public`):同样按第一段补全后走单语句模板。"""
     r = _SchemaRunner()
-    evidence.explain_json_via_script(r, "select 1", schema="fl, public")
-    assert r.calls[-1] == ("sqltune.plan_json_schema", {"sql": "select 1", "schema": "fl"})
+    evidence.explain_json_via_script(r, "select * from orders", schema="fl, public")
+    assert r.calls[-1] == ("sqltune.plan_json", {"sql": "select * from fl.orders"})
 
 
 def test_tune_by_id_missing_relation_hint_with_a_search_path_string(monkeypatch):
@@ -554,8 +532,6 @@ class _TwoSchemaRunner:
         self.calls.append((script, dict(values or {})))
         if script == evidence.VERSION_SCRIPT:
             return [{"version": "openGauss 5.0.3"}]
-        if script == "explain.multi_stmt_probe":
-            return [{"ok": "1"}]
         if script.startswith("sqltune.plan_"):
             return [{"QUERY PLAN": "Seq Scan on orders  (cost=0.00..1.00 rows=1 width=4)"}]
         if script == evidence.TABLES_SCRIPT:
@@ -581,8 +557,6 @@ class _TwoSchemaRunner:
 
 def test_collect_keeps_only_the_resolved_schema_rows():
     """现场同名表跨 schema:证据包不能混进别的 schema 的表、索引、列统计。"""
-    from common import search_path as sp
-    sp.reset_probe_cache()
     ev = evidence.collect(_TwoSchemaRunner(), None, "select * from orders where status = 'NEW'", False, schema="app")
     assert [t.schema for t in ev.tables] == ["app"]
     assert [i.name for i in ev.indexes] == ["idx_app"]
@@ -590,15 +564,11 @@ def test_collect_keeps_only_the_resolved_schema_rows():
 
 
 def test_collect_without_a_schema_keeps_everything_as_before():
-    from common import search_path as sp
-    sp.reset_probe_cache()
     ev = evidence.collect(_TwoSchemaRunner(), None, "select * from orders", False)
     assert sorted(t.schema for t in ev.tables) == ["app", "other"] and len(ev.indexes) == 2
 
 
 def test_explicit_schema_in_sql_beats_the_resolved_one():
-    from common import search_path as sp
-    sp.reset_probe_cache()
     ev = evidence.collect(_TwoSchemaRunner(), None, "select * from other.orders", False, schema="app")
     assert [t.schema for t in ev.tables] == ["other"] and [i.name for i in ev.indexes] == ["idx_other"]
 
@@ -645,13 +615,12 @@ def test_user_name_guess_yields_to_a_unique_catalog_match():
     assert sqltune.resolve_schema(r, "select * from t", "kf_app", "user_name") == ("gmag", "catalog")
 
 
-def test_ambiguous_tables_raise_with_candidates_instead_of_guessing():
-    import pytest
+def test_same_name_in_two_schemas_is_picked_not_refused():
+    """2026-11-06 行方:技能不要做跨 schema 的限制 —— 选一个(来源 catalog_picked,报告写明),不再拒绝。"""
     import sqltune
     r = _CatalogRunner([("gbatch", "t"), ("dsc_ora_public", "t")])
-    with pytest.raises(ValueError) as ei:
-        sqltune.resolve_schema(r, "select * from t", "", "")
-    assert "gbatch" in str(ei.value) and "dsc_ora_public" in str(ei.value) and "--schema" in str(ei.value)
+    assert sqltune.resolve_schema(r, "select * from t", "", "") == ("dsc_ora_public", "catalog_picked")
+    assert "--schema" in sqltune._SCHEMA_SOURCE_LABEL["catalog_picked"]
     assert sqltune.resolve_schema(r, "select * from t", "gbatch", "user_name") == ("gbatch", "user_name")   # 推测值在候选里就留
 
 

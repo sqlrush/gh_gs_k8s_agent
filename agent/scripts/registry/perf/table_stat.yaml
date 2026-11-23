@@ -1,7 +1,10 @@
+# 拼接一律 concat(…),不用 ||(2026-11-17 现场):本脚本切到业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、
+# 不是字符串拼接,整条报「argument … not type name」。concat 在 A / M 两种兼容模式下都是拼接。守卫:test_registry_m_compat_units.py。
 name: perf.table_stat
+database_type: appbusiness
 description: 表级统计与膨胀比例，按死元组倒序（pg_stat_user_tables）
 sql: |
-  select schemaname||'.'||relname as tbl, seq_scan, idx_scan,
+  select concat(schemaname, '.', relname) as tbl, seq_scan, idx_scan,
          n_live_tup, n_dead_tup,
          round(n_dead_tup*100.0/nullif(n_live_tup+n_dead_tup,0), 2) as dead_pct,
          to_char(last_autovacuum,'YYYY-MM-DD HH24:MI:SS') as last_autovacuum

@@ -187,9 +187,7 @@ def test_evidence_says_when_analyze_was_requested_but_the_plan_is_an_estimate():
 
 
 def test_cursor_evidence_switches_search_path_to_the_procedure_schema():
-    """存储过程里的游标 SELECT 表名多半不带 schema——它们本来就在过程所在的 schema 下解析。"""
-    from common import search_path as sp
-    sp.reset_probe_cache()
+    """存储过程里的游标 SELECT 表名多半不带 schema——它们本来就在过程所在的 schema 下解析:按过程的 schema 补全表名。"""
     evidence = _load_proctune_evidence()
 
     class _R:
@@ -200,16 +198,15 @@ def test_cursor_evidence_switches_search_path_to_the_procedure_schema():
             self.calls.append((script, dict(values or {})))
             if script == evidence.DB_VERSION_SCRIPT:
                 return [{"version": "openGauss 5.0.3"}]
-            if script == "explain.multi_stmt_probe":
-                return [{"ok": "1"}]
             if script.startswith("proctune.plan_"):
                 return [{"QUERY PLAN": "Seq Scan on t  (cost=0.00..1.00 rows=1 width=4)"}]
             return []
 
     r = _R()
     ev = evidence.collect(r, None, "select 1 from t", False, schema="billing")
-    assert ("proctune.plan_text_schema", {"sql": "select 1 from t", "schema": "billing"}) in r.calls
-    assert ev.search_path == "billing"
+    assert ("proctune.plan_text", {"sql": "select 1 from billing.t"}) in r.calls
+    assert all("multi_stmt_probe" not in c[0] and not c[0].endswith("_schema") for c in r.calls)
+    assert ev.search_path == "" and "补全" in ev.search_path_note
 
 
 def test_proctune_fetch_proc_def_handles_package_names():
@@ -243,16 +240,12 @@ def test_proctune_fetch_proc_def_handles_package_names():
 
 def test_proctune_collect_filters_catalog_rows_by_procedure_schema():
     """游标 SELECT 的表按过程所在 schema 解析——目录证据也只留那个 schema 的行。"""
-    from common import search_path as sp
-    sp.reset_probe_cache()
     evidence = _load_proctune_evidence()
 
     class _R:
         def run(self, script, values=None):
             if script == evidence.DB_VERSION_SCRIPT:
                 return [{"version": "openGauss 5.0.3"}]
-            if script == "explain.multi_stmt_probe":
-                return [{"ok": "1"}]
             if script.startswith("proctune.plan_"):
                 return [{"QUERY PLAN": "Seq Scan on t  (cost=0.00..1.00 rows=1 width=4)"}]
             if script == evidence.TABLES_SCRIPT:

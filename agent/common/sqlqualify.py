@@ -4,8 +4,13 @@
 执行器不认两条语句 / JDBC 只取第一个结果集),退回提示里的备选②「把表名写全」是模型手工做的。这一步该由脚本做:
 确定性、可测、报告注明。补全后的 SQL 解析到同一张表,EXPLAIN 的计划与原 SQL 等价。
 
-只动**表位置**上的名字:FROM / JOIN / UPDATE / INSERT INTO / DELETE FROM 后面的标识符,以及 FROM 列表里逗号后的项
-(任意嵌套深度,子查询里的 FROM 同样处理);不动列名、别名、函数调用、CTE 名、已带 schema 的名字、字符串与注释里的东西。
+只动**表位置**上的名字:FROM / JOIN / UPDATE / INSERT INTO / MERGE INTO / DELETE FROM 后面的标识符,DELETE / MERGE 的
+USING 后面的标识符,以及 FROM 列表里逗号后的项(任意嵌套深度,子查询里的 FROM 同样处理);不动列名、别名、函数调用、
+CTE 名、已带 schema 的名字、字符串与注释里的东西。
+**函数调用括号里的 FROM 不是表引导词**(2026-11-08 行方测试报告 Bug 1):EXTRACT(HOUR FROM 列)、TRIM(BOTH 'x' FROM 列)、
+SUBSTRING(s FROM 1 FOR 3)、OVERLAY(… PLACING … FROM …)、POSITION … 里的 FROM 后面是列或表达式;原先一律当表补全,
+`EXTRACT(HOUR FROM sample_time)` 被改成 `"rdsAdmin".sample_time`。括号按「由谁开启」区分:前面紧挨着函数名的是函数括号,
+里面只认真正的子查询(`(SELECT …)` 另开一层)。
 拿不准的一律不动——漏补的后果是 EXPLAIN 报对象不存在(看得见),补错的后果是分析了另一张表(看不见)。
 """
 from __future__ import annotations
@@ -48,6 +53,10 @@ _FROM_CLAUSE_ENDERS = {
 # 表名后面不能当别名用的词
 _NOT_AN_ALIAS = _FROM_CLAUSE_ENDERS | _NOT_A_TABLE | {
     "join", "inner", "left", "right", "full", "cross", "natural", "outer",
+}
+# 紧挨在「(」前面时,这个括号不是函数调用(子查询、值列表、列清单、分组):其余标识符后面的「(」都按函数括号算
+_NOT_A_FUNCTION = _NOT_A_TABLE | _FROM_CLAUSE_ENDERS | {
+    "from", "join", "any", "all", "some", "array", "row", "by", "over", "filter", "within", "recursive",
 }
 
 
@@ -173,6 +182,7 @@ def _rewrite(sql: str, prefix: Optional[str]) -> Tuple[str, List[str]]:
         return None
 
     active: Dict[int, bool] = {}       # 层级 → 是否正处在 FROM 列表里(逗号后的项算表)
+    func: Dict[int, bool] = {}         # 层级 → 这层括号是函数调用开启的(里面的 FROM 不是表引导词)
     depth = 0
     prev = ""
     n = 0
@@ -180,17 +190,25 @@ def _rewrite(sql: str, prefix: Optional[str]) -> Tuple[str, List[str]]:
         k, v = at(n)
         low = v.lower() if k == "ident" else ""
         if k == "punct" and v == "(":
+            pk, pv = at(n - 1)
             depth += 1
+            func[depth] = (pk == "qident" and at(n - 2) != ("punct", ".")) or \
+                (pk == "ident" and pv.lower() not in _NOT_A_FUNCTION)
             n += 1
             continue
         if k == "punct" and v == ")":
             active.pop(depth, None)
+            func.pop(depth, None)
             depth = max(0, depth - 1)
             n += 1
             continue
-        if low in ("from", "join", "update") or (low == "into" and prev == "insert"):
+        if func.get(depth) and low in ("from", "join", "update", "using", "into"):
+            n += 1                     # EXTRACT(HOUR FROM 列) / TRIM(… FROM 列) 之类:后面是列或表达式,不是表
+            continue
+        if low in ("from", "join", "update") or (low == "into" and prev in ("insert", "merge")) or \
+                (low == "using" and prev in ("delete", "merge") and at(n + 1) != ("punct", "(")):
             nxt = table_after(n + 1, allow_paren=(low == "into"))
-            if low == "from":
+            if low in ("from", "using"):
                 active[depth] = True
             n = nxt if nxt is not None else n + 1
             continue
@@ -204,7 +222,7 @@ def _rewrite(sql: str, prefix: Optional[str]) -> Tuple[str, List[str]]:
             continue
         if low in _FROM_CLAUSE_ENDERS:
             active[depth] = False
-        if low in ("insert", "delete", "update", "select"):
+        if low in ("insert", "delete", "update", "select", "merge"):
             prev = low
         n += 1
     return "".join(out), changed

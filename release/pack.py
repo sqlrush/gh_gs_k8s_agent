@@ -119,7 +119,9 @@ def compose(tag: str, dist: pathlib.Path, changes: dict, delivery: pathlib.Path,
     history = [v for v in changes["versions"] if vkey(v["version"]) <= vkey(version)]
     return {"schema": SCHEMA, "version": version, "tag": tag, "skills": skills, "commit": commit, "packed": packed,
             "min_upgrade_from": changes["min_upgrade_from"], "files": files, "images": images,
-            "whitelist": {"count": len(scripts), "scripts": wl.to_json(scripts)}, "history": history}
+            "whitelist": {"count": len(scripts), "scripts": wl.to_json(scripts),
+                          # 各份增量导完后的正文 md5 与参数:白名单关卡据此推断现场导到了哪一份(2026-11-19)
+                          "deltas": wl.deltas_from_dir(delivery.parent)}, "history": history}
 
 
 def main(argv: Optional[List[str]] = None) -> int:

@@ -1,0 +1,50 @@
+# 大盘前端:纯静态 nginx(非 root,监听 8080)。全体共用 1 个副本。
+#
+# 它只端页面文件,**不读任何人的报告**:页面在浏览器里自己经网关取 /reports/*,网关按工号路由到
+# 用户自己的 Pod。所以这里无状态、不挂 NAS、不持口令、不调 k8s API、出网一条都不放(见 networkpolicy)。
+# 升级 = 改 image 标签 + apply(它不归网关管,是普通 Deployment)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: gaussdb-agent
+  labels: {app: gaussdb-frontend}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: gaussdb-frontend}
+  template:
+    metadata:
+      labels: {app: gaussdb-frontend}
+    spec:
+      # 同 runtime:别把命名空间里别的 Service 注进环境变量
+      enableServiceLinks: false
+      securityContext: {runAsNonRoot: true, runAsUser: 101, runAsGroup: 101}
+      containers:
+        - name: nginx
+          image: gaussdb-agent-frontend:agent-v1.5.0-oc1.18.27
+          imagePullPolicy: IfNotPresent
+          securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          ports: [{containerPort: 8080, name: http}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /healthz, port: 8080}, initialDelaySeconds: 10, periodSeconds: 20}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: "200m", memory: 128Mi}
+          # 只读根文件系统下 nginx 还要写 pid(/tmp)与缓存目录
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: cache, mountPath: /var/cache/nginx}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+        - {name: cache, emptyDir: {sizeLimit: 64Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend                       # 网关 /dash/* 代理到 <FRONTEND_SERVICE>.<ns>.svc:80,默认就是这个名字
+  namespace: gaussdb-agent
+  labels: {app: gaussdb-frontend}
+spec:
+  selector: {app: gaussdb-frontend}
+  ports: [{port: 80, targetPort: 8080, name: http}]

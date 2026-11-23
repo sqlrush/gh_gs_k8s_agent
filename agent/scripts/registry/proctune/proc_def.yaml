@@ -7,6 +7,7 @@
 # 整条 WHERE 变假,过程「找不到」——og5 的 kf_a(DBCOMPATIBILITY='A')实测踩到。
 # gs_package 在 openGauss 3.0+ 与 GaussDB 505 的所有库里都有(PG 兼容库里也有,只是空的)。
 name: proctune.proc_def
+database_type: appbusiness
 description: 按名字取存储过程/函数的定义(源码 + 语言 + 形参 + 所属包);支持包内过程与按包名过滤
 sql: |
   SELECT n.nspname, p.proname, l.lanname, p.prosrc,

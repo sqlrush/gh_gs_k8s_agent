@@ -1,0 +1,79 @@
+# Fuyao 运行模式(2026-11-17):凭据代理服务。中间件令牌、SM2 私钥、模型 Key 不进用户沙箱:
+# 沙箱里 root 运行的中继加上本沙箱令牌转到这里,这里按令牌认人(工号取自令牌),加凭据后转给 GRMP / 模型服务。
+# 设计:docs/specs/2026-11-17-fuyao-sandbox-design.md §3–§4。无状态,可多副本。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: credproxy
+  namespace: gaussdb-agent
+---
+# 只能按名取 Secret(grmp-token-<工号>),**不能 list** —— 给了 list 就等于一次请求拿到全体用户的令牌
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: credproxy
+  namespace: gaussdb-agent
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: credproxy
+  namespace: gaussdb-agent
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: credproxy}
+subjects:
+  - {kind: ServiceAccount, name: credproxy, namespace: gaussdb-agent}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: credproxy
+  namespace: gaussdb-agent
+  labels: {app: gaussdb-credproxy}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: gaussdb-credproxy}
+  template:
+    metadata:
+      labels: {app: gaussdb-credproxy}
+    spec:
+      serviceAccountName: credproxy
+      enableServiceLinks: false
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000}
+      containers:
+        - name: credproxy
+          image: gaussdb-agent-runtime:agent-v1.5.0-oc1.18.27     # 复用 runtime 镜像(新入口);平台按实际版本改
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "-u", "/opt/agent/podctl.py", "serve-credproxy-net"]
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+          envFrom:
+            - configMapRef: {name: agent-config}           # GRMP 地址、路径前缀、签名口径、模型地址(非秘密)
+          env:
+            - {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+            - {name: GSDB_CONTROL_KEY, valueFrom: {secretKeyRef: {name: sandbox-control, key: KEY}}}
+            - {name: MODEL_API_KEY, valueFrom: {secretKeyRef: {name: model-api, key: MODEL_API_KEY}}}
+            - {name: GRMP_SM2_PRIVATE_KEY, valueFrom: {secretKeyRef: {name: grmp-sm2, key: GRMP_SM2_PRIVATE_KEY, optional: true}}}
+          ports: [{containerPort: 8091, name: http}]
+          readinessProbe: {tcpSocket: {port: 8091}, periodSeconds: 5}
+          livenessProbe: {tcpSocket: {port: 8091}, initialDelaySeconds: 10, periodSeconds: 20}
+          resources:
+            requests: {cpu: 200m, memory: 256Mi}
+            limits: {cpu: "2", memory: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: credproxy
+  namespace: gaussdb-agent
+  labels: {app: gaussdb-credproxy}
+spec:
+  selector: {app: gaussdb-credproxy}
+  ports:
+    - {name: http, port: 8091, targetPort: 8091}

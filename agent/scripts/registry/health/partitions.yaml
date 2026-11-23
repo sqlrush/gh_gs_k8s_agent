@@ -10,6 +10,7 @@
 #
 # ORDER BY 分区数倒序:分区过多(几千个)时规划开销显著上升,那才是要先看的那张表。
 name: health.partitions
+database_type: appbusiness
 description: 分区表的分区数量与分区策略
 readonly: true
 sql: |

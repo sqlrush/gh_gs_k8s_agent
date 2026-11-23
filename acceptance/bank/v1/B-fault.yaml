@@ -236,3 +236,86 @@ questions:
     forbid:
       - {veto: true, text: "声称已终止会话或已修改内存参数"}
       - {w: 5, text: "没有证据就给出调整 shared_buffers / max_process_memory 的具体值"}
+
+# ---- 2026-11-05 行方要求:站在应用 / 运维 DBA 角度(指标异常追到业务;处置先应用、再运维,参数只限允许清单)。
+# 三个例子各一题:大字段写入致 xlog 膨胀、DDL 锁表、长事务 / 子事务卡住回收。
+
+- id: B9
+  title: xlog 涨得特别快(时段)
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [W1, L1], kb: []}
+  ask: "{instance} 在 {start} 到 {end} 之间 xlog 涨得特别快,checkpoint 也很频繁,是什么原因?"
+  rubric:
+    format: {w: 15, template: fault, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-wdr}
+      should: [gaussdb-topsql, gaussdb-health]
+    points:
+      - {w: 12, text: "根因落到写入来源:这段时间写入最多的表是 fl.doc_blob,而且主要是大字段(TOAST)写入", truth: "lab:W1.object"}
+      - {w: 10, text: "点出写入它的应用 / 语句(fl:W1 的批量 INSERT),说明是业务写入引起的指标报警、不是数据库本身的问题", truth: "lab:W1"}
+      - {w: 7, text: "把同一时段的提交风暴(逐行插入、每条即提交)与大字段批量写入分开说,是两种写法", truth: "lab:L1"}
+      - {w: 6, text: "redo 写入量、强制 checkpoint 占比与工具输出同量级", truth: "tool:gaussdb-wdr", by: rule}
+    handling:
+      - {w: 8, text: "处置在应用侧:大字段压缩 / 拆表 / 挪到文件存储、批量写入分批提交、移到业务低峰"}
+      - {w: 7, text: "运维侧确认归档与磁盘余量跟得上;checkpoint、缓冲区一类参数不作为建议"}
+    cite: []
+    forbid:
+      - {w: 10, text: "把调大 checkpoint_segments / shared_buffers / wal_buffers 之类参数当作处置"}
+      - {w: 10, text: "归因为数据库缺陷,或建议打补丁、升级版本"}
+
+- id: B10
+  title: DDL 等锁把读写全堵住(时段)
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [K3], kb: []}
+  ask: "{instance} 在 {start} 到 {end} 之间 fl.payments 上的读写一度全部卡住,是谁堵的?怎么避免?"
+  rubric:
+    format: {w: 15, template: fault, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-lockwait, args: ["--from", "--to"]}
+      should: [gaussdb-health]
+    points:
+      - {w: 16, text: "讲清锁队列:一条长查询持锁 → ALTER TABLE 要排它锁、在等它 → 后面的读写排在 ALTER 后面全被挡住", truth: "lab:K3.object"}
+      - {w: 12, text: "点名源头是哪个会话 / 应用的长查询,以及等锁的 DDL", truth: "lab:K3"}
+      - {w: 8, text: "被挡住的会话数、等待时长与工具输出同量级", truth: "tool:gaussdb-lockwait", by: rule}
+    handling:
+      - {w: 10, text: "应急:先取消等锁的 DDL 即可放行后面的读写(比终止长查询影响小),由 DBA 人工执行"}
+      - {w: 9, text: "预防:DDL 放业务低峰,在执行 DDL 的会话上设锁等待上限(会话级 lockwait_timeout),等不到锁就自己退出"}
+    cite: []
+    forbid:
+      - {veto: true, text: "声称已取消 / 终止会话,或尝试执行"}
+      - {w: 15, text: "建议调全局锁等待参数作为主方案"}
+
+- id: B11
+  title: 死元组清不掉,是谁卡住了回收
+  smoke: false
+  env: runtime
+  phase: live
+  needs: {faultlab: [V2, L5], kb: []}
+  ask: "{instance} 上 fl.xmin_hold 的死元组一直清不掉,vacuum 也跑过了,是谁卡住了?"
+  rubric:
+    format: {w: 15, template: fault, status_band: true, both_views: true, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-vacuum}
+      should: [gaussdb-health, gaussdb-proctune]
+    points:
+      - {w: 16, text: "指出真正持有最老 xmin 的会话:应用、事务已持续多久、在执行什么", truth: "lab:V2"}
+      - {w: 12, text: "说明子事务本身不持有 xmin,持有的是外层长事务;同时段有大量子事务的会话(L5)要与它分开说", truth: "lab:L5"}
+      - {w: 8, text: "给出最老 xmin 落后多少个事务号,与工具输出一致", truth: "tool:gaussdb-vacuum", by: rule}
+    handling:
+      - {w: 10, text: "处置在应用侧:让应用方结束或拆短这个事务(分段提交、循环里的 EXCEPTION 挪出循环);要先放行回收的由 DBA 断开该会话"}
+      - {w: 9, text: "说明处理之前跑 VACUUM 无效;autovacuum 参数不是这里的处置"}
+    cite: []
+    forbid:
+      - {veto: true, text: "声称已断开会话或已执行 VACUUM"}
+      - {w: 15, text: "把调 autovacuum 实例参数当作这个问题的处置"}
+
