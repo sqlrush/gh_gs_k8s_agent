@@ -29,7 +29,7 @@ for _anc in _HERE.parents:
         break
 
 import render  # noqa: E402
-from common import access, config, session  # noqa: E402
+from common import access, compat, config, session  # noqa: E402
 from common.config import MODE_API, MODE_GSQL, ConfigError, Connection  # noqa: E402
 from common.credential import secret_for  # noqa: E402
 from common.db import Database  # noqa: E402
@@ -262,6 +262,8 @@ class RouteCheck(NamedTuple):
     ok: bool
     note: str = ""                                   # 没切过去的原因 / 切过去后的提醒
     pending: Tuple[str, ...] = ()                    # 我们划为业务库类、但行方白名单里还没带 dbName 的脚本
+    compat: str = ""                                 # 探针顺带取的业务库兼容模式(v1.5.1;旧探针没有这一列 → 空 = 未知)
+    lctn: str = ""                                   # 业务库的 lower_case_table_names(M 库表名大小写规则)
 
 
 def _try_route(conn: Connection, target: str) -> RouteCheck:
@@ -290,7 +292,27 @@ def _try_route(conn: Connection, target: str) -> RouteCheck:
         return RouteCheck(False, "中间件没有按 dbName 切库(带上「%s」后仍连「%s」)" % (target, got or "未知"))
     pending = tuple(sorted(n for n in routing.BUSINESS_DB_SCRIPTS
                            if n != routing.PROBE and client.registered(n) and not client.declares(n, routing.PARAM)))
-    return RouteCheck(True, pending=pending)
+    row = (rows or [{}])[0]
+    return RouteCheck(True, pending=pending, compat=compat.normalize(row.get("compat")),
+                      lctn=compat.normalize_lctn(row.get("lctn")))
+
+
+def _detect_compat_direct(conn: Connection) -> Connection:
+    """直连模式:同一条探针直接跑一次取兼容模式。取不到(旧白名单 / 权限 / 任何错误)就保持未知,不挡登录。"""
+    try:
+        rows = access.runner_for(conn).run(routing.PROBE)
+    except Exception:                                 # noqa: BLE001 —— 只影响写法提示,不影响登录
+        return conn
+    row = (rows or [{}])[0]
+    mode = compat.normalize(row.get("compat"))
+    return replace(conn, compat=mode, lctn=compat.normalize_lctn(row.get("lctn"))) if mode else conn
+
+
+def _compat_cell(conn: Connection) -> str:
+    """登录输出「兼容模式」一行。模型按它写 SQL(AGENTS.md「数据库连接规则」第 5 条)。"""
+    if compat.mode_of(conn):
+        return compat.label(conn)
+    return "未知（本版白名单增量未导入，探针取不到；按 A 兼容处理）"
 
 
 def _direct_cell(target: str, pg: str, rc: RouteCheck) -> str:
@@ -395,6 +417,7 @@ def _describe(conn: Connection, note: str, path, role: str = "", handle: str = "
            if conn.exec_database else
            [["要诊断的库", "%s（已直连：中间件按 dbName 切库）" % conn.database]] if conn.route_db else
            [["数据库", conn.database]]),
+         *([["兼容模式", _compat_cell(conn)]] if conn.route_db else []),
          *([["库名核对", db_note]] if db_note else []),
          ["验证", note],
          ["主备", role or "未探测"]])
@@ -406,6 +429,7 @@ def _describe(conn: Connection, note: str, path, role: str = "", handle: str = "
          ["应用", conn.app or "—"],
          ["连接名",  conn.name]  ,
          ["目标", "%s:%s/%s" % (conn.host, conn.port, conn.database)],
+         *([["兼容模式", compat.label(conn)]] if compat.mode_of(conn) else []),
          ["驱动", conn.driver],
          ["用户", conn.user],
          ["验证", note],
@@ -594,7 +618,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     rc = _try_route(base, chk.target)
                     if rc.ok:
                         db_note = _direct_cell(chk.target, chk.actual, rc)
-                        conn = replace(base, route_db=chk.target)
+                        conn = replace(base, route_db=chk.target, compat=rc.compat, lctn=rc.lctn)
                     else:
                         db_note = _routed_cell(chk) + "；**没有切到业务库**：" + rc.note
                         conn = replace(base, exec_database=chk.actual)
@@ -604,6 +628,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     db_note = ("**库名未核实**（%s）：api 模式下库名不发给中间件，写错不会报错、"
                                "只会写错报告抬头。请确认「%s」就是这个实例上的库。" % (chk.note, conn.database))
 
+        if conn.driver != "grmp" and not args.no_verify:
+            conn = _detect_compat_direct(conn)
         role = "未探测（--no-verify）" if args.no_verify else _probe_role(conn)
         handle = session.save(conn)
         print(_describe(conn, note, session.path_for(handle), role, handle=handle, db_note=db_note))

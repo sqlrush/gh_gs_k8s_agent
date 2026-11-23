@@ -71,6 +71,14 @@ def render(manifest, package: str, root: pathlib.Path, source: Dict[str, str], v
               "(或在对话里说「做一次部署自检」)。它核对技能包版本、`GSDB_SKILLS_DIR`、知识库目录、白名单是否导全、白名单切库标注、"
               "是否切到了业务库、关键脚本能否执行(含执行账号权限)、数据库监控开关,逐项给出结论和「找谁」;某一项查不了只标这一项,其余照常查完。登录表格里的「技能包」一行"
               "显示正在运行的版本,与本包版本对不上说明新包没装进技能目录。", ""]
+    if (root / "common" / "compat.py").is_file() and "gaussdb-login" in pkg["skills"]:
+        # 2026-11-20 现场:M 兼容业务库上 15 条脚本报错。v1.5.1 起识别兼容模式;我方没有 M 兼容库可测,现场试跑一次发回核对
+        L += ["**业务库是 M 兼容模式(sql_compatibility='M')的**(v1.5.1 起):登录输出有「兼容模式」一行;导完本版白名单增量后显示 "
+              "M(MySQL 兼容),没导时显示「未知」并按 A 兼容处理。部署自检加 `--m-trial`:"
+              "`python3 $GSDB_SKILLS_DIR/gaussdb-login/scripts/selfcheck.py --session <句柄> --m-trial`,把 41 条在业务库执行的脚本"
+              "用安全参数(不存在的对象名、`SELECT 1` 的估算计划)各试跑一次,只读,逐条列通过 / 报错 —— 把整份输出发给我方核对。"
+              "M 库没有 ADM_SOURCE 视图,存储过程源码的 ADM_SOURCE 兜底在 M 库上自动不用;内存分析的实时 WLM 一层需要 DBA 给执行账号授权"
+              "(一般为监控管理员或系统管理员),没授权时改从 SQL 执行历史取。", ""]
     if (root / "common" / "timing" / "cli.py").is_file():
         # 2026-11-16 现场反馈一次交互十几分钟:每一步的用时由脚本统计出来,不调模型、不改提示词
         L += ["**看每次交互慢在哪**(v1.4.14 起):在智能体所在的机器 / 容器里运行 "

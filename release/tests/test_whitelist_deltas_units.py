@@ -15,7 +15,10 @@ def test_each_delta_file_is_read_in_order_and_the_newest_bodies_match_the_full_s
     assert [d["file"] for d in deltas] == sorted(p.name for p in _DELIVERY.glob("scripts-delta-*.sql"))
     full = wl.parse_dml((_DELIVERY / "scripts.sql").read_text(encoding="utf-8"))
     last = deltas[-1]
-    assert sorted(last["changed"]) == ["explain.kernel_funcs", "health.stale_stats", "health.unused_index", "lockwait.pairs"]
+    assert sorted(last["changed"]) == ["explain.kernel_funcs", "health.partitions", "health.stale_stats", "health.table_writes",
+                                       "health.unused_index", "lockwait.pairs", "login.current_db", "procinfo.locate_search",
+                                       "procinfo.proc_def", "proctune.locate_search", "proctune.proc_def", "sqlreview.indexes",
+                                       "sqlreview.tables"]           # v1.5.1 增量 20261123:M 兼容业务库
     for name, md5 in last["changed"].items():
         assert md5 == full[name].md5, "最新一份增量导完后的正文就是全量里的正文:%s" % name
     d1111 = next(d for d in deltas if d["file"] == "scripts-delta-20261111.sql")

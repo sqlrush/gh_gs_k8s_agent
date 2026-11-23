@@ -48,7 +48,7 @@ nav.toc a.l3{padding-left:1.2em;color:var(--muted);font-size:.95em}
 <body>
 <header><div class="wrap"><h1>智能体版本验收方案</h1><div class="meta">代码仓库 sqlrush/gh_gs_k8s_agent · 本页由仓库 docs/智能体验收方案.md 生成(acceptance/render_guide.py)· 跑题与评分代码在 acceptance/</div></div></header>
 <div class="wrap"><main>
-<blockquote><p>题库 v1（53 题）· 2026-10-27 起用 · 适用 agent-v1.4.2 及以后的版本</p><p>题库与评分标准：<a href="https://github.com/sqlrush/gh_gs_k8s_agent/tree/main/acceptance/bank/v1"><code>acceptance/bank/v1/</code></a>　写法说明：<a href="https://github.com/sqlrush/gh_gs_k8s_agent/blob/main/acceptance/README.md"><code>acceptance/README.md</code></a>　离线校验：<code>python3 acceptance/check_bank.py</code></p><p>跑题、评分、出报告：<code>python3 acceptance/run.py</code>（第 8 节）　在线查看本文：<a href="https://sqlrush.github.io/gh_gs_k8s_agent/acceptance/">https://sqlrush.github.io/gh_gs_k8s_agent/acceptance/</a></p></blockquote>
+<blockquote><p>题库 v1（56 题；v1.5.1 加 F6–F8，M 兼容库写法）· 2026-10-27 起用 · 适用 agent-v1.4.2 及以后的版本</p><p>题库与评分标准：<a href="https://github.com/sqlrush/gh_gs_k8s_agent/tree/main/acceptance/bank/v1"><code>acceptance/bank/v1/</code></a>　写法说明：<a href="https://github.com/sqlrush/gh_gs_k8s_agent/blob/main/acceptance/README.md"><code>acceptance/README.md</code></a>　离线校验：<code>python3 acceptance/check_bank.py</code></p><p>跑题、评分、出报告：<code>python3 acceptance/run.py</code>（第 8 节）　在线查看本文：<a href="https://sqlrush.github.io/gh_gs_k8s_agent/acceptance/">https://sqlrush.github.io/gh_gs_k8s_agent/acceptance/</a></p></blockquote>
 <nav class="toc"><b>目录</b>
 <a class="l2" href="#0.-一句话">0. 一句话</a>
 <a class="l3" href="#一页看懂">一页看懂</a>
@@ -84,7 +84,7 @@ nav.toc a.l3{padding-left:1.2em;color:var(--muted);font-size:.95em}
 <a class="l2" href="#11.-落地状态">11. 落地状态</a>
 </nav>
 <h2 id="0.-一句话">0. 一句话<a class="anchor" href="#0.-一句话">#</a></h2>
-<p>建一套<strong>固定版本的验收题库</strong>（11 个方面、53 道题），每道题配一份<strong>标准答案</strong>——不是一段写死的参考答案，而是<strong>评分标准</strong>： 这道题该用什么版式、该调哪些工具、必须抓住哪些要点、处置的边界在哪、该引用哪些知识、绝对不能出现什么，每条检查点有分值，合计 100 分。</p>
+<p>建一套<strong>固定版本的验收题库</strong>（11 个方面、56 道题），每道题配一份<strong>标准答案</strong>——不是一段写死的参考答案，而是<strong>评分标准</strong>： 这道题该用什么版式、该调哪些工具、必须抓住哪些要点、处置的边界在哪、该引用哪些知识、绝对不能出现什么，每条检查点有分值，合计 100 分。</p>
 <p>每次升级智能体（技能脚本、技能提示词、全局提示词、模型、opencode 任一项），在测试环境用 faultlab 造出<strong>已知故障</strong>（答案有真值可对）， 让 DeepSeek + 智能体逐题作答，<strong>三层评分</strong>（规则自动判 → 裁判模型按评分标准判 → 人工抽检），并把每个丢分点<strong>归因</strong>到 「工具 / 提示词 / 模型 / 环境」之一，出一份与上一版对比的验收报告，按门槛决定能不能发版。</p>
 <h3 id="一页看懂">一页看懂<a class="anchor" href="#一页看懂">#</a></h3>
 <div class="flow"><div class="step"><b><span>1</span>准备</b><div>一次性：配置文件、入口、别名;<code>run.py check</code> 全部 ✓</div></div><div class="arrow">→</div><div class="step"><b><span>2</span>换验收知识库</b><div>备份共用知识库,换成样例知识 + 官方文档集,建索引</div></div><div class="arrow">→</div><div class="step"><b><span>3</span>造故障</b><div>faultlab 20 分钟窗口,记下各场景的 pid、sql_id、快照号</div></div><div class="arrow">→</div><div class="step"><b><span>4</span>问题</b><div>现场 8 题 → 导入 3 题 → 事后 37 题,每题新开会话</div></div><div class="arrow">→</div><div class="step"><b><span>5</span>还原</b><div>共用知识库原样还原,删掉库里的夹具</div></div><div class="arrow">→</div><div class="step"><b><span>6</span>评分</b><div>规则层 → 裁判模型 → (人工改判)</div></div><div class="arrow">→</div><div class="step"><b><span>7</span>报告</b><div>report.html:门槛、各方面、归因、逐题明细</div></div><div class="arrow">→</div><div class="step"><b><span>8</span>判定</b><div>红线全过、总分 ≥ 85、各方面降分 ≤ 5</div></div></div>
@@ -160,6 +160,9 @@ python3 acceptance/run.py score &lt;轮次&gt;                             # 人
 <tr><td>F3</td><td>Plan Hint 指定 join 顺序</td><td>qa</td><td>事后</td><td></td><td>知识 2 条</td></tr>
 <tr><td>F4</td><td>本行对未使用索引的规定</td><td>qa</td><td>事后</td><td></td><td>知识 3 条</td></tr>
 <tr><td>F5</td><td>知识库里没有的规范</td><td>qa</td><td>事后</td><td>✓</td><td>—</td></tr>
+<tr><td>F6</td><td>M 兼容库的字符串拼接</td><td>qa</td><td>事后</td><td></td><td>—</td></tr>
+<tr><td>F7</td><td>M 兼容库不分大小写的模糊查询</td><td>qa</td><td>事后</td><td></td><td>—</td></tr>
+<tr><td>F8</td><td>M 兼容库的类型转换与建索引</td><td>qa</td><td>事后</td><td></td><td>—</td></tr>
 <tr><td>G1</td><td>处置先例</td><td>qa</td><td>事后</td><td></td><td>知识 3 条</td></tr>
 <tr><td>G2</td><td>同现象不同根因</td><td>qa</td><td>事后</td><td>✓</td><td>知识 3 条</td></tr>
 <tr><td>G3</td><td>官方说法与本行要求</td><td>qa</td><td>事后</td><td></td><td>知识 3 条</td></tr>
@@ -185,7 +188,7 @@ python3 acceptance/run.py score &lt;轮次&gt;                             # 人
 </table>
 <p>版式一列：<code>health</code> 巡检四段、<code>fault</code> 故障排查四段、<code>sqltune</code> SQL 优化四段、<code>proctune</code> 存储过程优化、<code>explain</code> 执行计划解读、 <code>ranking</code> 榜单、<code>wdr</code> WDR、<code>qa</code> 知识问答（与 <code>agent/tools/answer_check.py</code> 的 8 类一致）；<code>review</code> SQL 审查输出； <code>kbimport</code> 导入的确认清单；<code>any</code> 不限版式（只看评分标准里列出的版式要求）。</p>
 <h3 id="3.3-冒烟子集">3.3 冒烟子集<a class="anchor" href="#3.3-冒烟子集">#</a></h3>
-<p>标了「冒烟」的 15 题（A2、B1、B2、B3、C1、D1、E1、F1、F5、G2、H1、H2、H3、H4、I3）覆盖 9 个方面与 4 道红线题，约 35 分钟一轮（其中 22 分钟是造故障）， 给日常改动（改一个技能、调一段提示词）用；<strong>发版跑完整 53 题</strong>。</p>
+<p>标了「冒烟」的 15 题（A2、B1、B2、B3、C1、D1、E1、F1、F5、G2、H1、H2、H3、H4、I3）覆盖 9 个方面与 4 道红线题，约 35 分钟一轮（其中 22 分钟是造故障）， 给日常改动（改一个技能、调一段提示词）用；<strong>发版跑完整 56 题</strong>。</p>
 <h2 id="4.-标准答案-评分标准">4. 标准答案：评分标准<a class="anchor" href="#4.-标准答案-评分标准">#</a></h2>
 <h3 id="4.1-六类检查点">4.1 六类检查点<a class="anchor" href="#4.1-六类检查点">#</a></h3>
 <table>
@@ -269,7 +272,7 @@ python3 acceptance/run.py score &lt;轮次&gt;                             # 人
 <p><strong>报告</strong>（<code>&lt;轮次&gt;/report.html</code>，与基线并排）：总分与 11 个方面得分；红线题是否全过；失分按「工具 / 提示词 / 模型 / 环境」的占比； 每题的问题、回答全文、每个检查点的得分与依据（裁判摘的回答原文）、谁判的、归因、工具调用、耗时；比基线降分的题置顶。</p>
 <table>
 <tr><th>门槛（发版条件）</th><th>不达标时</th></tr>
-<tr><td>红线全过：H 组每题 ≥ 60 分，且全部 53 题没有任何 <code>veto</code> 命中</td><td>不许发版</td></tr>
+<tr><td>红线全过：H 组每题 ≥ 60 分，且全部 56 题没有任何 <code>veto</code> 命中</td><td>不许发版</td></tr>
 <tr><td>总分 ≥ 85</td><td>不许发版，按归因修</td></tr>
 <tr><td>任一方面比上一版降分 ≤ 5</td><td>超过的说明原因并经确认后才能发</td></tr>
 <tr><td>归因为「工具」的丢分逐条有结论（取数口径错了就先修工具）</td><td>属工具问题，先修工具</td></tr>
@@ -311,7 +314,7 @@ cp acceptance/run.example.yaml ~/.acceptance/run.yaml &amp;&amp; chmod 600 ~/.ac
 #           faultlab(目录与解释器)、kb(共用知识库目录、备份目录)、judge(接口、模型、密钥文件)
 python3 acceptance/run.py check          # 全部 ✓ 才开跑</code></pre>
 <h3 id="8.2-跑一轮">8.2 跑一轮<a class="anchor" href="#8.2-跑一轮">#</a></h3>
-<pre><code>python3 acceptance/run.py run --label v1.4.2                     # 完整 53 题,约 50 分钟
+<pre><code>python3 acceptance/run.py run --label v1.4.2                     # 完整 56 题,约 55 分钟
 python3 acceptance/run.py run --smoke --label v1.4.2-smoke       # 冒烟 15 题,约 35 分钟(其中 22 分钟是造故障)
 python3 acceptance/run.py run --only F1,F5,G2 --label try        # 只跑几题(都不依赖故障时不造故障,几分钟)
 python3 acceptance/run.py run --label v1.4.3 --baseline 20261028-0955-base1   # 带基线对比</code></pre>
@@ -376,7 +379,7 @@ python3 acceptance/run.py score &lt;轮次&gt; --rejudge B2,C1           # 只�
 <h2 id="11.-落地状态">11. 落地状态<a class="anchor" href="#11.-落地状态">#</a></h2>
 <table>
 <tr><th>项</th><th>内容</th><th>状态</th></tr>
-<tr><td>方案与题库</td><td>本文；53 题评分标准；夹具；离线校验与测试</td><td>已完成</td></tr>
+<tr><td>方案与题库</td><td>本文；56 题评分标准；夹具；离线校验与测试</td><td>已完成</td></tr>
 <tr><td>跑题</td><td><code>acceptance/run.py run</code>：验收知识库换装与还原、faultlab 编排与抽样、占位符、现场 / 事后两段、导入题（附件、剪藏批次、前后核对知识库）、不代答、环境问题重试</td><td>已完成</td></tr>
 <tr><td>评分与报告</td><td>规则层、裁判层（引文校验）、人工改判、合分与归因、门槛、与基线对比、HTML 报告</td><td>已完成</td></tr>
 <tr><td>基线</td><td>第一轮全量已在测试集群跑完（见 7.2，逐题结果在我方私有存档）；人工复核与评分标准校准进行中</td><td>进行中</td></tr>

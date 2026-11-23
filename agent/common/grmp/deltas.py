@@ -143,6 +143,15 @@ DELTAS: Tuple[Delta, ...] = (
               "explain.kernel_funcs", "health.stale_stats", "health.unused_index", "lockwait.pairs",
           ),
           routing=()),
+    Delta("scripts-delta-20261123.sql",
+          added=(),
+          changed=(
+              "explain.kernel_funcs", "health.partitions", "health.stale_stats", "health.table_writes",
+              "health.unused_index", "lockwait.pairs", "login.current_db", "procinfo.locate_search",
+              "procinfo.proc_def", "proctune.locate_search", "proctune.proc_def", "sqlreview.indexes",
+              "sqlreview.tables",
+          ),
+          routing=()),
 )
 
 

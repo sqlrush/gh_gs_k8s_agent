@@ -8,9 +8,9 @@
 > 一直走到浏览器里出健康检查大盘。输出都是那次的原样；`<...>` 是需要你换成自己的值的地方。
 > x86_64（amd64）与 ARM（arm64）两种架构的镜像都构建并验证过。验证记录见附录 C。
 >
-> **当前发布版本 `agent-v1.5.0`（2026-11-19）。** 第 2 章 `git checkout agent-v1.5.0` 后按本手册构建，`TAG` 就是 `agent-v1.5.0-oc1.18.27`；
+> **当前发布版本 `agent-v1.5.1`（2026-11-19）。** 第 2 章 `git checkout agent-v1.5.1` 后按本手册构建，`TAG` 就是 `agent-v1.5.1-oc1.18.27`；
 > 第 3 章的镜像验证输出按 v1.3.0 重跑（之后各版构建步骤相同；v1.3.2 起镜像里多了 sqlite-vec，导入镜像多了 pillow / pillow-heif；v1.4.2 起多了第 5 个镜像——标准知识库，不从源码构建，见 3.5）。**不想自己构建**的，直接拉已发布的镜像（两种架构）：
-> `ghcr.io/sqlrush/gaussdb-agent-{runtime,kb-import,gateway,frontend,kbstd}:agent-v1.5.0-oc1.18.27`，从第 4 章开始。
+> `ghcr.io/sqlrush/gaussdb-agent-{runtime,kb-import,gateway,frontend,kbstd}:agent-v1.5.1-oc1.18.27`，从第 4 章开始。
 > 部署前还要让**中间件团队导入诊断脚本白名单**（本版 137 条，见 1.3 与 5.0）。
 
 | 你要做的 | 章节 | 大约用时 |
@@ -167,7 +167,7 @@ TAG=$(git describe --tags --always)-oc1.18.27
 echo $TAG
 ```
 
-> 切在发布标签上时就是 `agent-v1.5.0-oc1.18.27`；不在标签上时形如 `agent-v1.4.3-2-g1a2b3c4-oc1.18.27`
+> 切在发布标签上时就是 `agent-v1.5.1-oc1.18.27`；不在标签上时形如 `agent-v1.4.3-2-g1a2b3c4-oc1.18.27`
 > （最近的发布标签 + 之后的提交数 + 提交号）。`oc1.18.27` 是镜像里的 opencode 版本。
 > 也可以自己定，例如 `TAG=v20261015-oc1.18.27`，只要后面一直用同一个值。
 
@@ -184,7 +184,7 @@ bash scripts/build-images.sh "$TAG"
 最后一行：
 
 ```
-built: gaussdb-agent-{runtime,kb-import,gateway,frontend}:agent-v1.5.0-oc1.18.27
+built: gaussdb-agent-{runtime,kb-import,gateway,frontend}:agent-v1.5.1-oc1.18.27
 ```
 
 验证时从零构建（不带缓存）用了 96 秒；网络慢时 5–10 分钟，主要花在下载上。
@@ -195,10 +195,10 @@ docker images | grep "gaussdb-agent.*$TAG"
 
 > 4 行：
 > ```
-> gaussdb-agent-frontend    agent-v1.5.0-oc1.18.27   78.4MB
-> gaussdb-agent-gateway     agent-v1.5.0-oc1.18.27   227MB
-> gaussdb-agent-kb-import   agent-v1.5.0-oc1.18.27   674MB
-> gaussdb-agent-runtime     agent-v1.5.0-oc1.18.27   674MB
+> gaussdb-agent-frontend    agent-v1.5.1-oc1.18.27   78.4MB
+> gaussdb-agent-gateway     agent-v1.5.1-oc1.18.27   227MB
+> gaussdb-agent-kb-import   agent-v1.5.1-oc1.18.27   674MB
+> gaussdb-agent-runtime     agent-v1.5.1-oc1.18.27   674MB
 > ```
 
 ### 3.2 这条命令做了什么
@@ -344,12 +344,12 @@ grep -rn "image:\|USER_IMAGE_REGISTRY:\|USER_IMAGE_TAG:" k8s/base/ | grep -v ":\
 
 > 6 行，地址都以你的 `REG` 开头、版本都是你的 `TAG`：
 > ```
-> k8s/base/configmap-gateway.yaml:12:  USER_IMAGE_TAG: "agent-v1.5.0-oc1.18.27"
+> k8s/base/configmap-gateway.yaml:12:  USER_IMAGE_TAG: "agent-v1.5.1-oc1.18.27"
 > k8s/base/configmap-gateway.yaml:16:  USER_IMAGE_REGISTRY: "<REG>"
-> k8s/base/frontend.yaml:25:          image: <REG>/gaussdb-agent-frontend:agent-v1.5.0-oc1.18.27
-> k8s/base/gateway.yaml:91:          image: <REG>/gaussdb-agent-gateway:agent-v1.5.0-oc1.18.27
-> k8s/base/kbstd-install.yaml:29:          image: <REG>/gaussdb-agent-kbstd:agent-v1.5.0-oc1.18.27
-> k8s/base/kbstd-install.yaml:41:          image: <REG>/gaussdb-agent-kb-import:agent-v1.5.0-oc1.18.27
+> k8s/base/frontend.yaml:25:          image: <REG>/gaussdb-agent-frontend:agent-v1.5.1-oc1.18.27
+> k8s/base/gateway.yaml:91:          image: <REG>/gaussdb-agent-gateway:agent-v1.5.1-oc1.18.27
+> k8s/base/kbstd-install.yaml:29:          image: <REG>/gaussdb-agent-kbstd:agent-v1.5.1-oc1.18.27
+> k8s/base/kbstd-install.yaml:41:          image: <REG>/gaussdb-agent-kb-import:agent-v1.5.1-oc1.18.27
 > ```
 > 后两行是标准知识库安装 Job（第 5.7 节知识库）：部署后它把官方文档集装进 NAS，用到标准知识库镜像与导入镜像。
 
@@ -593,7 +593,7 @@ kubectl -n gaussdb-agent logs -l app=agent-gateway --tail=2
 
 > 最后出现：
 > ```
-> 网关就绪:0.0.0.0:8080 · 命名空间 gaussdb-agent · 用户镜像标签 agent-v1.5.0-oc1.18.27 · 回收 scale(闲置 1800 秒)· 信任来源 共享密钥 · 控制 API 已启用
+> 网关就绪:0.0.0.0:8080 · 命名空间 gaussdb-agent · 用户镜像标签 agent-v1.5.1-oc1.18.27 · 回收 scale(闲置 1800 秒)· 信任来源 共享密钥 · 控制 API 已启用
 > ```
 
 ```bash
@@ -675,7 +675,7 @@ kubectl -n gaussdb-agent get deploy runtime-$STAFF -o wide
 > 403
 > 200
 > NAME            READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS   IMAGES
-> runtime-u0002   1/1     1            1           8s    opencode     <REG>/gaussdb-agent-runtime:agent-v1.5.0-oc1.18.27
+> runtime-u0002   1/1     1            1           8s    opencode     <REG>/gaussdb-agent-runtime:agent-v1.5.1-oc1.18.27
 > ```
 > - `403`：不带信任凭据的请求被拒，**必须是 403**；
 > - `200`：首次登录网关为这个工号新建容器，实测 8 秒；

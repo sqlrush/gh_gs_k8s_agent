@@ -17,8 +17,9 @@ import sys
 from dataclasses import replace
 from typing import Any, Optional
 
+from . import compat
 from .config import ConfigError, Connection, api_endpoint_if_configured, find, resolve
-from .grmp import paths as grmp_paths, proxy, signing, userid
+from .grmp import paths as grmp_paths, proxy, signing, statement, userid
 from .grmp.client import GrmpClient, GrmpRunner
 from .grmp.errors import QueryError
 from .grmp.registry import Registry
@@ -210,6 +211,18 @@ def runner_for(
     settings: Optional[Settings] = None,
     timeout: Optional[int] = None,
 ) -> Any:
+    """按 Connection 造一个 runner,并打上该连接业务库的兼容模式(common/compat.py;取数器本身不带 Connection)。"""
+    runner = _make_runner(conn, registry, settings, timeout)
+    statement.set_dialect(compat.mode_of(conn))
+    return compat.tag(runner, conn)
+
+
+def _make_runner(
+    conn: Connection,
+    registry: Optional[Registry] = None,
+    settings: Optional[Settings] = None,
+    timeout: Optional[int] = None,
+) -> Any:
     """按 Connection 造一个 runner。
 
     timeout 是**语句超时秒数**;None 表示调用方没提要求,用默认值。
@@ -295,6 +308,15 @@ def runner_for(
             )
         )
     raise AccessError("连接 %s 的 driver %r 不受支持" % (conn.name, driver))
+
+
+def prime_dialect(name: Optional[str]) -> None:
+    """语句守卫要在造取数器之前用时(explain 先按纯文本拦、再连库):按这个连接业务库的兼容模式先把切词方言设好
+    (common/grmp/statement.py)。取不到连接就不动 —— 后面造取数器同样会失败,什么都不会执行。"""
+    try:
+        statement.set_dialect(compat.mode_of(resolve(name)))
+    except Exception:                       # noqa: BLE001
+        pass
 
 
 def for_conn(

@@ -11,6 +11,8 @@ this skill exists to prevent.
 """
 from __future__ import annotations
 
+import re
+
 import common
 from common import access  # noqa: E402
 # 结果值全是字符串：bool("f") 是 True、int("3704.0") 会抛异常。
@@ -23,6 +25,19 @@ from model import (
 )
 from thresholds import Thresholds
 from util import f, human_mb, i64, trunc
+
+_WLM_DENIED = re.compile(r"permission denied for function|permission denied|insufficient privilege|42501", re.I)
+
+
+def _wlm_why(exc) -> str:
+    """WLM 资源跟踪取不到的原因。函数权限不足(2026-11-20 现场:Permission denied for function
+    pg_stat_get_wlm_realtime_session_info)单独说清:不是内核没有这一层,是执行账号没授权 —— DBA 授权后就能看。"""
+    from util import summarize_err
+    raw = summarize_err(exc)
+    if _WLM_DENIED.search(str(exc)):
+        return ("执行账号没有 WLM 资源跟踪函数的执行权限(%s);需 DBA 授权(一般为监控管理员或系统管理员)后才能看这一层"
+                % raw.rstrip("。."))
+    return raw
 
 _SQL_COLS = ("queryid", "query", "start_time", "duration", "estimate_memory",
              "max_peak_memory", "max_spill_size", "warning")
@@ -186,8 +201,7 @@ def collect_sql(runner, cat: Catalog, cap: Capability, th: Thresholds, top: int,
         rows = runner.run("memanalyze.wlm_sql_hist" if historical
                           else "memanalyze.wlm_sql", {"limit": int(top)})
     except access.QueryError as exc:
-        from util import summarize_err
-        return _from_history(runner, th, top, summarize_err(exc))
+        return _from_history(runner, th, top, _wlm_why(exc))
 
     d = DimResult(dimension=DIM_SQL, available=True,
                   headers=["query_id", "耗时(ms)", "估算内存", "峰值内存",
@@ -275,8 +289,7 @@ def collect_operator(runner, cat: Catalog, cap: Capability, th: Thresholds, top:
         rows = runner.run("memanalyze.wlm_operator_hist" if historical
                           else "memanalyze.wlm_operator", {"limit": int(top)})
     except access.QueryError as exc:
-        from util import summarize_err
-        return _l5_unavailable(summarize_err(exc))
+        return _l5_unavailable(_wlm_why(exc))
 
     d = DimResult(dimension=DIM_OPERATOR, available=True,
                   headers=["query_id", "node_id", "算子", "耗时(ms)", "估算行",

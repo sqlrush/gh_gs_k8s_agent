@@ -18,8 +18,15 @@ import yaml
 ROOT = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else pathlib.Path(__file__).resolve().parents[2]
 sql_text = (ROOT / "docs/delivery/scripts.sql").read_text(encoding="utf-8")
 
+# 只在 A 兼容库适用的脚本(v1.5.1):M 兼容库没有对应的系统视图,技能在 M 库自动不调用
+ONLY_A = {n: "仅 A 兼容库。M 兼容库没有 ADM_SOURCE 视图（只继承了部分系统视图），技能在 M 兼容库上自动不调用这条脚本"
+          for n in ("procinfo.source_adm", "proctune.source_adm")}
+
 # 增量文件:(文件名, 说明),最新的在前
 DELTAS = [
+    ("scripts-delta-20261123.sql", "已导入 132 条（v1.5.0）升级到 v1.5.1：13 条更新（M 兼容业务库上报错的分区体检、表写入计数、统计信息过期、"
+                                   "SQL 审查的表 / 索引清单、过程模糊查找等改成 A / M 两种兼容模式都能执行的写法；登录探针多取兼容模式）；"
+                                   "导入后仍是 132 条。更早的版本先按顺序导到 20261119"),
     ("scripts-delta-20261119.sql", "已导入 132 条（v1.4.14）升级到 v1.5.0：4 条更新（锁堵塞成对明细、统计信息过期、未使用的索引、内核函数探测的拼接改用 concat，修 M 兼容业务库上 || 不是拼接、整条报错）；导入后仍是 132 条。更早的版本先按顺序导到 20261116"),
     ("scripts-delta-20261116.sql", "已导入 132 条（v1.4.13）的升级：2 条更新（死元组清单、锁堵塞成对明细的时间差改用 date_part('epoch', clock_timestamp() - 列)，修 M 兼容业务库上报 un support type）；导入后仍是 132 条。"
                                    "还在 138 条的先导 20261112"),
@@ -117,6 +124,8 @@ for g, items in groups.items():
         d = reg[n]
         L += ["### %d. `%s`" % (idx, n), "", "**用途**：%s" % " ".join(str(d.get("description", "")).split()), "",
               "**执行库**：%s" % ("业务库（appbusiness，调用时带 dbName）" if dbtype == "appbusiness" else "postgres"), ""]
+        if n in ONLY_A:
+            L += ["**适用**：%s" % ONLY_A[n], ""]
         if params:
             descs = {p["key"]: " ".join(str(p.get("description", "")).split()) for p in (d.get("params") or [])}
             descs["dbName"] = "业务库名（路由参数：中间件据此切到该库执行，不进 SQL）"

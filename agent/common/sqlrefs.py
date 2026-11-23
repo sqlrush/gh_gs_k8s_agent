@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import re
 
-_TABLE_REF_RE = re.compile(r"(?is)\b(?:from|join|update|into)\s+([a-z_][\w.]*)")
-_IDENT_RE = re.compile(r"(?i)^[a-z_][\w.]*")
+# 名字可以是反引号括起的(M 兼容库,v1.5.1):`orders`、`app`.`orders`、app.`orders`
+_NAME = r"(?:`[^`\n]+`|[a-z_][\w]*)(?:\.(?:`[^`\n]+`|[a-z_][\w]*))*"
+_TABLE_REF_RE = re.compile(r"(?is)\b(?:from|join|update|into)\s+(%s)" % _NAME)
+_IDENT_RE = re.compile(r"(?i)^%s" % _NAME)
 _SQL_KEYWORDS = frozenset({
     "select", "lateral", "unnest", "generate_series", "where", "on", "set",
     "values", "join", "left", "right", "inner", "outer", "cross", "full",
@@ -17,13 +19,17 @@ _SQL_KEYWORDS = frozenset({
 _WS = " \t\r\n"
 
 
-def extract_table_refs(sql_text: str) -> list[str]:
-    """Lowercase, deduped table refs in first-appearance order, schema kept."""
+def extract_table_refs(sql_text: str, fold: bool = True) -> list[str]:
+    """Lowercase, deduped table refs in first-appearance order, schema kept.
+
+    反引号去掉(M 兼容库的标识符写法)。fold=False 时不折小写:M 兼容库 lower_case_table_names=0 时表名区分大小写,
+    库里存的就是原样(common/compat.py 的 folds_unquoted 决定)。"""
     seen: set[str] = set()
     out: list[str] = []
 
     def add(raw: str) -> None:
-        name = raw.strip().lower()
+        name = raw.strip().replace("`", "")
+        name = name.lower() if fold else name
         tail = name[name.rindex(".") + 1:] if "." in name else name
         if tail in ("", "(") or tail in _SQL_KEYWORDS or name in seen:
             return
@@ -69,11 +75,11 @@ def extract_table_refs(sql_text: str) -> list[str]:
     return out
 
 
-def extract_tables(sql_text: str) -> list[str]:
+def extract_tables(sql_text: str, fold: bool = True) -> list[str]:
     """Lowercase, deduped, schema-stripped table names in first-appearance order."""
     seen: set[str] = set()
     out: list[str] = []
-    for ref in extract_table_refs(sql_text):
+    for ref in extract_table_refs(sql_text, fold):
         name = ref[ref.rindex(".") + 1:] if "." in ref else ref
         if name not in seen:
             seen.add(name)

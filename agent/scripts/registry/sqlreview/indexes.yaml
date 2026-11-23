@@ -11,24 +11,24 @@
 #
 # 七个列名原本就唯一且有意义，未加别名。
 # is_unique / is_primary 是布尔列，取回来是 't'/'f'，调用方用 _as_bool 判断。
+# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
+#   同 tables.yaml:AS table → AS "table"。列顺序不再靠数组下标 (string_to_array(…))[s] 与 generate_series 展开(M 库
+#   能否用没有把握),改成在 indkey 的文本形态 ' 3 1 2 ' 里找 ' <attnum> ' 的位置排序:position(… IN …) 是两种模式都有的标准写法
+#   (M 库保持原 GaussDB 行为,官方文档「系统函数兼容性概述」)。表达式列 attnum 为 0,被 attnum > 0 排除,与原口径相同;
+#   同一列在索引里出现两次时只列一次(极少见)。
 name: sqlreview.indexes
 database_type: appbusiness
 description: 某模式下的索引清单（列顺序/唯一性/扫描次数）
 sql: |
   SELECT
     n.nspname::text                                              AS schema,
-    t.relname::text                                              AS table,
+    t.relname::text                                              AS "table",
     i.relname::text                                              AS name,
-    array_to_string(
-      COALESCE((SELECT array_agg(a.attname::text ORDER BY k.ord)
-                FROM (SELECT s AS ord,
-                             (string_to_array(ix.indkey::text, ' '))[s]::smallint AS attnum
-                      FROM generate_series(
-                             1,
-                             array_length(string_to_array(ix.indkey::text, ' '), 1)) s) k
-                JOIN pg_attribute a
-                  ON a.attrelid = t.oid AND a.attnum = k.attnum),
-               ARRAY[]::text[]), ',')                            AS columns,
+    COALESCE((SELECT array_to_string(array_agg(a.attname::text
+                       ORDER BY position(concat(' ', a.attnum::text, ' ') IN concat(' ', ix.indkey::text, ' '))), ',')
+                FROM pg_attribute a
+               WHERE a.attrelid = t.oid AND a.attnum > 0
+                 AND position(concat(' ', a.attnum::text, ' ') IN concat(' ', ix.indkey::text, ' ')) > 0), '') AS columns,
     ix.indisunique                                               AS is_unique,
     ix.indisprimary                                              AS is_primary,
     COALESCE(s.idx_scan, 0)                                      AS scans

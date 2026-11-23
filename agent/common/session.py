@@ -30,6 +30,7 @@ from typing import List, Optional
 
 import yaml
 
+from . import compat
 from .config import Connection, ConfigError, api_endpoint, ensure_dir, state_dir, validate
 
 _DIRNAME = "sessions"
@@ -54,6 +55,8 @@ _ALLOWED = frozenset({"name", "type", "host", "port", "database", "user",
 # 回滚到 1.4.10 或按槽位替换期间新旧混跑时,这个用户的所有取数技能都会失败(11-11 测试环境回滚实测)。
 # 旧版不读 .route,把这种会话当成「库名 = 业务库、不切库」,与 1.4.10 本来的行为相同。
 ROUTE_SUFFIX = ".route"
+# 兼容模式(v1.5.1)同理单独写 <句柄>.compat(内容如「M 1」):旧版不读它,回滚时这个会话照旧可用(按 A 处理)。
+COMPAT_SUFFIX = compat.SUFFIX
 _ROUTE_MAX = 128
 
 _selected: Optional[str] = None      # 本进程用 use() 选中的句柄（来自 --session）
@@ -146,8 +149,21 @@ def _read_route(path: pathlib.Path) -> str:
     return value
 
 
+def _compat_path(path: pathlib.Path) -> pathlib.Path:
+    return path.with_suffix(COMPAT_SUFFIX)
+
+
+def _read_compat(path: pathlib.Path):
+    """(兼容模式, lower_case_table_names);没有文件或内容认不出 → ('', '')。只影响写法提示,不影响连到哪个库,所以不报错。"""
+    cp = _compat_path(path)
+    try:
+        return compat.decode(cp.read_text(encoding="utf-8")[:32])
+    except (FileNotFoundError, OSError, UnicodeDecodeError):
+        return "", ""
+
+
 def _unlink(path: pathlib.Path) -> None:
-    for p in (path, _route_path(path)):
+    for p in (path, _route_path(path), _compat_path(path)):
         try:
             p.unlink()
         except FileNotFoundError:
@@ -180,6 +196,9 @@ def _read(path: pathlib.Path) -> Connection:
         exec_database=raw.get("exec_database", "") or "",
         route_db=_read_route(path),
     )
+    mode, lctn = _read_compat(path)
+    if mode:
+        conn = replace(conn, compat=mode, lctn=lctn)
     if conn.driver == "grmp":
         # 会话文件只是登录那一刻的快照。中间件地址属于环境配置,不属于会话:
         # 地址变更后老句柄仍要能用,所以每次读会话都从当前配置取(环境变量 > config.yaml)。
@@ -231,6 +250,11 @@ def save(conn: Connection, handle: Optional[str] = None) -> str:
         _write_text(_route_path(path), conn.route_db + "\n")
     elif _route_path(path).exists():
         _route_path(path).unlink()
+    tag = compat.encode(conn.compat, conn.lctn)
+    if tag:
+        _write_text(_compat_path(path), tag + "\n")
+    elif _compat_path(path).exists():
+        _compat_path(path).unlink()
     _write(path, payload)
     legacy = _legacy_path()                     # 旧版单文件:谁都能用的口子,见到就删
     if legacy.exists():
@@ -262,8 +286,8 @@ def list_sessions(prune: bool = True) -> List[SessionInfo]:
                     pass
             continue
         out.append(SessionInfo(handle=path.stem, conn=_read(path), last_used=last_used, path=path))
-    if prune:                               # 旧版清掉过期会话时不认 .route,留下的孤儿顺手删
-        for rp in d.glob("*" + ROUTE_SUFFIX):
+    if prune:                               # 旧版清掉过期会话时不认 .route / .compat,留下的孤儿顺手删
+        for rp in list(d.glob("*" + ROUTE_SUFFIX)) + list(d.glob("*" + COMPAT_SUFFIX)):
             if HANDLE_RE.match(rp.stem) and not rp.with_suffix(".yaml").exists():
                 try:
                     rp.unlink()

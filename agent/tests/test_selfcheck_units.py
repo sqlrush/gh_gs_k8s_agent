@@ -26,7 +26,8 @@ _spec.loader.exec_module(sc)
 sys.path.remove(str(_SCRIPTS))
 
 CONN = Connection(name="10-0-0-9-appdb", type="gaussdb", host="127.0.0.1", port=8769, database="appdb",
-                  user="grmp", driver="grmp", data_ip="10.0.0.9", app="api", route_db="appdb")
+                  user="grmp", driver="grmp", data_ip="10.0.0.9", app="api", route_db="appdb",
+                  compat="A")          # v1.5.1:导完本版增量后登录探针取得到兼容模式(取不到时自检报「！」)
 GOOD_TOP = {"unique_sql_id": "1", "query": "select 1", "calls": "1", "total_sec": "1", "avg_ms": "1", "rows": "1",
             "cpu_sec": "0", "io_sec": "0", "rows_written": "0", "user_name": "app"}
 
@@ -120,7 +121,7 @@ def test_the_bank_environment_is_explained_item_by_item(monkeypatch, tmp_path, c
     rc, out = _run(monkeypatch, tmp_path, runner, capsys, kb=False)
     assert rc == 1
     assert "缺 " in out and "health.xlog_position" in out and "中间件团队" in out
-    assert "从 scripts-delta-20261105.sql 起按顺序导完 6 份增量" in out and "scripts-delta-20261119.sql" in out, \
+    assert "从 scripts-delta-20261105.sql 起按顺序导完 7 份增量" in out and "scripts-delta-20261123.sql" in out, \
         "按缺的脚本推出现场导到了哪里,列出从那一份起的全部增量(2026-11-19:原先只叫人导本版那一份)"
     assert "按补充说明「SQL 白名单」一节导入增量" not in out
     assert "多条语句" not in out, "v1.4.13 起不再交付两语句脚本,自检不再探测"
@@ -204,7 +205,7 @@ def test_marks_that_differ_from_this_version_are_listed(monkeypatch, tmp_path, c
     rc, out = _run(monkeypatch, tmp_path, _Runner(Registry().names(), dbname=dbname), capsys)
     assert "1 条该切库的没带 dbName(sqltune.indexes)" in out
     assert "1 条读 SQL 历史 / WDR 快照 / 实例级视图的带了 dbName(topsql.snap_statement)" in out
-    assert "从 scripts-delta-20261111.sql 起按顺序导完 4 份增量" in out and "按本版增量白名单导入后一致" not in out
+    assert "从 scripts-delta-20261111.sql 起按顺序导完 5 份增量" in out and "按本版增量白名单导入后一致" not in out
 
 
 def test_a_gap_no_delta_explains_asks_for_the_whitelist_export(monkeypatch, tmp_path, capsys):

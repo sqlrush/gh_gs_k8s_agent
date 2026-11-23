@@ -145,7 +145,8 @@ def explain_plan(runner, base_script: str, sql: str, schema: str) -> Tuple[str, 
     # 不依赖执行器、不依赖 DBA;补全后解析到同一张表,计划与原 SQL 等价。没有可补的才原样退回。
     # 路径有多段时按第一段补(业务表绝大多数在第一段,public 垫底),说明里如实写这个前提。
     from common import sqlqualify           # 延迟导入:sqlqualify 反过来引用本模块的 valid_schema
-    qualified, changed = sqlqualify.qualify_tables(sql, segs[0])
+    from common import compat
+    qualified, changed = sqlqualify.qualify_tables(sql, segs[0], mysql=compat.is_mysql_like(runner))
     note = qualified_note(path, changed) if changed else fallback_note(path)
     try:
         rows = runner.run(base_script, {"sql": qualified if changed else sql})

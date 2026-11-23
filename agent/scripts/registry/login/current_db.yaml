@@ -1,7 +1,12 @@
 # 登录时核实中间件是否真的切到了业务库(common/grmp/routing.py):脚本登记为 appbusiness,调用时带 dbName;
 # 回来的 current_database() 等于用户给的库名即「已直连」,否则说明中间件没切(没升级 / 白名单没导 / 库不存在或没权限)。
+# v1.5.1 起顺带取兼容模式(compat:A / M / PG …)与 M 库的表名大小写参数(lctn:0 区分大小写、1 不区分;A 库没有这个参数,取到 NULL)。
+# 用 pg_settings 而不是 current_setting():A 库没有 lower_case_table_names,current_setting 会报错,pg_settings 只是取不到行。
+# 现场没导本版增量时探针仍是旧 SQL、没有这两列 —— 调用方记「兼容模式未知」,按 A 库处理并提示导入增量。
 name: login.current_db
 database_type: appbusiness
 description: 登录核实:中间件实际连的库与账号
 sql: |
-  SELECT current_database() AS db, current_user AS usr;
+  SELECT current_database() AS db, current_user AS usr,
+         (SELECT datcompatibility::text FROM pg_database WHERE datname = current_database()) AS compat,
+         (SELECT setting FROM pg_settings WHERE name = 'lower_case_table_names') AS lctn;

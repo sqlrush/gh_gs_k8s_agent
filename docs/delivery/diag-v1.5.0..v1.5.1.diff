@@ -1,0 +1,2872 @@
+diff --git a/.delivery.json b/.delivery.json
+index 2cb9406..3e5c768 100644
+--- a/.delivery.json
++++ b/.delivery.json
+@@ -1,22 +1,22 @@
+ {
+   "format": 1,
+   "package": "diag",
+-  "version": "diag-v1.5.0",
++  "version": "diag-v1.5.1",
+   "source": {
+     "repo": "gh_agent_k8s",
+-    "ref": "agent-v1.5.0",
+-    "commit": "ef0c07795c295caf85ab44fc213b083aa1a4ba60",
+-    "date": "2026-11-19T13:32:04+08:00"
++    "ref": "agent-v1.5.1",
++    "commit": "a91425d72c649ed5ba75d4a9b04312f47c7a1986",
++    "date": "2026-11-23T18:41:49+08:00"
+   },
+   "base": {
+-    "version": "diag-v1.4.14",
++    "version": "diag-v1.5.0",
+     "source": {
+       "repo": "gh_agent_k8s",
+-      "ref": "agent-v1.4.14",
+-      "commit": "ce6da96ffae03710f13e6031b72a08b91a5b3fe1",
+-      "date": "2026-11-16T00:36:00-08:00"
++      "ref": "agent-v1.5.0",
++      "commit": "ef0c07795c295caf85ab44fc213b083aa1a4ba60",
++      "date": "2026-11-19T13:32:04+08:00"
+     }
+   },
+-  "files": 432,
+-  "digest": "5a44da79c26304e7526634020dfeba75ad901b225c1d0ff9714c65983c04e54c"
++  "files": 436,
++  "digest": "a01aebb60b19a96d3725a70bc78fa5382be9ddc1245ea9047eee84b7f1128f89"
+ }
+diff --git a/AGENTS.md b/AGENTS.md
+index bf7193c..c82b0f5 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -168,6 +168,9 @@ permission:
+ 4. **会话句柄只能来自本对话里 gaussdb-login 的输出**（或平台注入的环境变量 `GSDB_SESSION`）。脚本报「本对话未登录」就让用户登录；
+    **不要去看会话目录、不要猜句柄、不要用任何不是本对话登录得到的句柄**——别人的会话对本对话不可见，用了就是在别人的库上做诊断。
+    `login --logout --all` 会退掉沙箱里其他用户的会话，用户明确要求才做。
++5. **业务库兼容模式。** 登录输出的「兼容模式」一行写明要诊断的库是 A（Oracle 兼容）还是 M（MySQL 兼容），sqltune / proctune / sqlreview 的报告开头也会写。
++   你自己写的 SQL（改写、建索引、给用户的示例语句）按这个库的模式写：A 库照旧；M 库标识符用反引号、拼接用 `concat()`，不用 `ILIKE`、`||`、`::`、
++   双引号标识符。登录输出没有这一行、或写「未知」时按 A 库写，并在回答里说明是按 A 库写的。
+ 
+ 
+ ## 必须遵守
+diff --git a/common/VERSION b/common/VERSION
+index ea7d5e0..f8ec219 100644
+--- a/common/VERSION
++++ b/common/VERSION
+@@ -1 +1 @@
+-agent-v1.5.0
++agent-v1.5.1
+diff --git a/common/access.py b/common/access.py
+index e370641..8ec8391 100644
+--- a/common/access.py
++++ b/common/access.py
+@@ -17,8 +17,9 @@ import sys
+ from dataclasses import replace
+ from typing import Any, Optional
+ 
++from . import compat
+ from .config import ConfigError, Connection, api_endpoint_if_configured, find, resolve
+-from .grmp import paths as grmp_paths, proxy, signing, userid
++from .grmp import paths as grmp_paths, proxy, signing, statement, userid
+ from .grmp.client import GrmpClient, GrmpRunner
+ from .grmp.errors import QueryError
+ from .grmp.registry import Registry
+@@ -209,6 +210,18 @@ def runner_for(
+     registry: Optional[Registry] = None,
+     settings: Optional[Settings] = None,
+     timeout: Optional[int] = None,
++) -> Any:
++    """按 Connection 造一个 runner,并打上该连接业务库的兼容模式(common/compat.py;取数器本身不带 Connection)。"""
++    runner = _make_runner(conn, registry, settings, timeout)
++    statement.set_dialect(compat.mode_of(conn))
++    return compat.tag(runner, conn)
++
++
++def _make_runner(
++    conn: Connection,
++    registry: Optional[Registry] = None,
++    settings: Optional[Settings] = None,
++    timeout: Optional[int] = None,
+ ) -> Any:
+     """按 Connection 造一个 runner。
+ 
+@@ -297,6 +310,15 @@ def runner_for(
+     raise AccessError("连接 %s 的 driver %r 不受支持" % (conn.name, driver))
+ 
+ 
++def prime_dialect(name: Optional[str]) -> None:
++    """语句守卫要在造取数器之前用时(explain 先按纯文本拦、再连库):按这个连接业务库的兼容模式先把切词方言设好
++    (common/grmp/statement.py)。取不到连接就不动 —— 后面造取数器同样会失败,什么都不会执行。"""
++    try:
++        statement.set_dialect(compat.mode_of(resolve(name)))
++    except Exception:                       # noqa: BLE001
++        pass
++
++
+ def for_conn(
+     name: str,
+     registry: Optional[Registry] = None,
+diff --git a/common/compat.py b/common/compat.py
+new file mode 100644
+index 0000000..a015612
+--- /dev/null
++++ b/common/compat.py
+@@ -0,0 +1,128 @@
++"""业务库的兼容模式(v1.5.1,2026-11-20 现场反馈:M 兼容业务库上 15 条脚本报错)。
++
++GaussDB 每个库建库时定兼容模式(pg_database.datcompatibility):A(Oracle 兼容)、M(MySQL 兼容,505.1 起)、
++B(旧的 MySQL 兼容,官方不推荐)、C、PG。同一实例里 postgres 库一般是 A,业务库可能是 M —— 兼容模式跟库走,不跟实例走。
++
++从哪来:登录时的探针 login.current_db 顺带取 compat(datcompatibility)与 lctn(lower_case_table_names);
++存进会话(旁挂文件 <句柄>.compat,与切库库名 .route 同一个道理:不进会话 yaml,回滚到旧版也不报错)。
++取不到(现场没导本版增量、未直连业务库)就是「未知」:各处按 A 库处理,登录输出提示导入增量。
++
++用在哪(都只在 M 库时改变行为,A 库与 1.5.0 完全一致):
++  · 白名单脚本本身写成 A / M 都能跑的同一条 SQL,不分支;只有 ADM_SOURCE 这种 M 库没有的,由调用方据此跳过;
++  · 语句守卫(common/grmp/statement.py)按 M 的规则切词:# 注释、反引号、双引号字符串、反斜杠转义;
++  · SQL 里取表名 / 补 schema:M 库认反引号,表名是否折小写看 lctn;
++  · 登录输出与 sqltune / proctune / sqlreview 的报告写明兼容模式,模型按它写改写语句(AGENTS.md「数据库连接规则」第 5 条)。
++"""
++from __future__ import annotations
++
++from typing import Any, Optional
++
++A, B, C, M, PG = "A", "B", "C", "M", "PG"
++KNOWN = (A, B, C, M, PG)
++_LABELS = {
++    A: "A（Oracle 兼容）",
++    B: "B（MySQL 兼容·旧模式）",
++    C: "C（Teradata 兼容）",
++    M: "M（MySQL 兼容）",
++    PG: "PG（PostgreSQL 兼容）",
++}
++UNKNOWN_LABEL = "未知（按 A 兼容处理）"
++SUFFIX = ".compat"                     # 会话旁挂文件后缀
++_ATTR_MODE, _ATTR_LCTN = "gsdb_compat", "gsdb_lctn"
++
++
++def normalize(value: Any) -> str:
++    """探针取回的 datcompatibility → A / B / C / M / PG;认不出(含空、NULL)→ ''(未知)。"""
++    text = str(value or "").strip().upper()
++    return text if text in KNOWN else ""
++
++
++def normalize_lctn(value: Any) -> str:
++    """lower_case_table_names → '0' / '1' / '2';取不到 → ''。"""
++    text = str(value or "").strip()
++    return text if text in ("0", "1", "2") else ""
++
++
++def mode_of(obj: Any) -> str:
++    """从连接对象(Connection.compat)或取数器(access.runner_for 打的标)取兼容模式;都没有 → ''。"""
++    if obj is None:
++        return ""
++    if isinstance(obj, str):
++        return normalize(obj)
++    return normalize(getattr(obj, "compat", "") or getattr(obj, _ATTR_MODE, ""))
++
++
++def lctn_of(obj: Any) -> str:
++    if obj is None or isinstance(obj, str):
++        return ""
++    return normalize_lctn(getattr(obj, "lctn", "") or getattr(obj, _ATTR_LCTN, ""))
++
++
++def is_mysql_like(obj: Any) -> bool:
++    """M 与 B 都按 MySQL 的词法:双引号是字符串、反引号是标识符、# 是注释、|| 是逻辑或。"""
++    return mode_of(obj) in (M, B)
++
++
++def is_m(obj: Any) -> bool:
++    return mode_of(obj) == M
++
++
++def tag(runner: Any, conn: Any) -> Any:
++    """给取数器打上连接的兼容模式(取数器本身不带 Connection)。返回同一个对象,便于 return tag(...)。"""
++    for attr, value in ((_ATTR_MODE, mode_of(conn)), (_ATTR_LCTN, lctn_of(conn))):
++        try:
++            setattr(runner, attr, value)
++        except (AttributeError, TypeError):      # 个别测试替身不让设属性:当未知处理
++            pass
++    return runner
++
++
++def label(obj: Any) -> str:
++    """登录输出 / 报告里的一句话。"""
++    mode = mode_of(obj)
++    if not mode:
++        return UNKNOWN_LABEL
++    text = _LABELS[mode]
++    if mode in (M, B):
++        lctn = lctn_of(obj)
++        if lctn == "0":
++            text += "；表名区分大小写（lower_case_table_names=0）"
++        elif lctn in ("1", "2"):
++            text += "；表名不区分大小写（lower_case_table_names=%s）" % lctn
++    return text
++
++
++def report_line(obj: Any) -> str:
++    """sqltune / proctune / sqlreview 报告开头那一行:只在 MySQL 词法的库(M / B)上出,A 库报告与 1.5.0 一字不差。"""
++    if not is_mysql_like(obj):
++        return ""
++    return ("> 业务库兼容模式：%s。改写语句、建索引语句按 M 兼容写法："
++            "标识符用反引号、拼接用 concat()，不用 ILIKE、||、::、双引号标识符。\n\n" % label(obj))
++
++
++def folds_unquoted(obj: Any) -> bool:
++    """不加引号的表名在库里是否折成小写。A / PG / 未知:是(PG 规则);M / B:lower_case_table_names=0 时否,其余是。"""
++    if not is_mysql_like(obj):
++        return True
++    return lctn_of(obj) != "0"
++
++
++def quote_ident(name: str, obj: Any) -> str:
++    """按兼容模式给标识符加引号:M / B 用反引号,其余用双引号。"""
++    if is_mysql_like(obj):
++        return "`" + name.replace("`", "``") + "`"
++    return '"' + name.replace('"', '""') + '"'
++
++
++def encode(mode: str, lctn: str) -> str:
++    """会话旁挂文件的内容:'M 1'、'A'。"""
++    mode, lctn = normalize(mode), normalize_lctn(lctn)
++    return ("%s %s" % (mode, lctn)).strip() if mode else ""
++
++
++def decode(text: Optional[str]):
++    """旁挂文件内容 → (mode, lctn);不认识的内容当未知,不报错(这只影响写法提示,不影响连到哪个库)。"""
++    parts = (text or "").split()
++    mode = normalize(parts[0]) if parts else ""
++    lctn = normalize_lctn(parts[1]) if len(parts) > 1 else ""
++    return (mode, lctn) if mode else ("", "")
+diff --git a/common/config.py b/common/config.py
+index cd99d6c..aa36c81 100644
+--- a/common/config.py
++++ b/common/config.py
+@@ -59,6 +59,10 @@ class Connection:
+     # 两者都没有时回落到 credentials/<name>.enc —— 老配置不用改就能继续用。
+     password: str = ""
+     encrypted: bool = False
++    # 业务库的兼容模式(v1.5.1,common/compat.py):登录探针取的 datcompatibility(A / M / …)与
++    # lower_case_table_names。空 = 未知(按 A 处理)。存在会话的旁挂文件 <句柄>.compat 里,不进会话 yaml。
++    compat: str = ""
++    lctn: str = ""
+ 
+     @property
+     def qualified(self) -> str:
+diff --git a/common/grmp/deltas.py b/common/grmp/deltas.py
+index 122b4ae..b936aa1 100644
+--- a/common/grmp/deltas.py
++++ b/common/grmp/deltas.py
+@@ -143,6 +143,15 @@ DELTAS: Tuple[Delta, ...] = (
+               "explain.kernel_funcs", "health.stale_stats", "health.unused_index", "lockwait.pairs",
+           ),
+           routing=()),
++    Delta("scripts-delta-20261123.sql",
++          added=(),
++          changed=(
++              "explain.kernel_funcs", "health.partitions", "health.stale_stats", "health.table_writes",
++              "health.unused_index", "lockwait.pairs", "login.current_db", "procinfo.locate_search",
++              "procinfo.proc_def", "proctune.locate_search", "proctune.proc_def", "sqlreview.indexes",
++              "sqlreview.tables",
++          ),
++          routing=()),
+ )
+ 
+ 
+diff --git a/common/grmp/statement.py b/common/grmp/statement.py
+index e50ca64..4becc85 100644
+--- a/common/grmp/statement.py
++++ b/common/grmp/statement.py
+@@ -10,7 +10,7 @@
+ from __future__ import annotations
+ 
+ import re
+-from typing import List
++from typing import List, Optional
+ 
+ # 只读语句的起始关键字。不在此列的一律当作写操作。
+ READ_ONLY_STARTERS = frozenset(
+@@ -19,11 +19,40 @@ READ_ONLY_STARTERS = frozenset(
+ 
+ # 前导注释与空白
+ _LEADING_NOISE_RE = re.compile(r"^(?:\s|--[^\n]*\n?|/\*.*?\*/)+", re.DOTALL)
++# M 兼容库(MySQL 词法)另有 # 注释;/*! … */ 在 MySQL 里是「会执行的注释」,不当注释跳
++_LEADING_NOISE_M_RE = re.compile(r"^(?:\s|#[^\n]*\n?|--[^\n]*\n?|/\*(?!!).*?\*/)+", re.DOTALL)
+ 
++# ---- 方言(v1.5.1,业务库可能是 M 兼容)-------------------------------------------------------------
++# A:PostgreSQL 词法(A / PG / C 兼容库,也是 1.5.0 及以前的唯一规则)。
++# BOTH:M 兼容库、以及兼容模式未知时 —— A、M 两套词法各切一遍,任一套判成多条 / 写操作即拒。
++#   M 库不只按 M 词法切:M 的 sql_mode 可以关掉反斜杠转义(NO_BACKSLASH_ESCAPES),那时 'a\' 就在第二个引号处结束,
++#   只按「反斜杠转义」切会把后面的 ; DELETE … 当成字符串内容放过去。两套都切,哪种设置都漏不了;代价是极少数
++#   写法(# 注释里带分号、字符串以反斜杠结尾后面还有分号)会被多拒,方向是安全的。
++DIALECT_A, DIALECT_BOTH = "A", "both"
++_dialect: Optional[str] = None          # set_dialect() 设的本进程方言;None = 没设过,按 A(与 1.5.0 相同)
+ 
+-def leading_keyword(sql: str) -> str:
+-    """跳过前导空白与注释，取第一个关键字（小写）。"""
+-    stripped = _LEADING_NOISE_RE.sub("", sql or "").lstrip()
++
++def dialect_for(mode: str) -> str:
++    """业务库兼容模式 → 切词方言:A / PG / C → A;M / B / 未知('')→ 两套都切。"""
++    return DIALECT_A if (mode or "").strip().upper() in ("A", "PG", "C") else DIALECT_BOTH
++
++
++def set_dialect(mode: str) -> None:
++    """按业务库兼容模式设本进程的切词方言。access.runner_for 造取数器时调;技能进程一次只连一个库。"""
++    global _dialect
++    _dialect = dialect_for(mode)
++
++
++def _resolve(dialect: Optional[str]) -> str:
++    if dialect is not None:
++        return dialect if dialect in (DIALECT_A, DIALECT_BOTH) else dialect_for(dialect)
++    return _dialect or DIALECT_A
++
++
++def leading_keyword(sql: str, dialect: Optional[str] = None) -> str:
++    """跳过前导空白与注释，取第一个关键字（小写）。两套都切时 # 注释也算前导注释。"""
++    noise = _LEADING_NOISE_RE if _resolve(dialect) == DIALECT_A else _LEADING_NOISE_M_RE
++    stripped = noise.sub("", sql or "").lstrip()
+     match = re.match(r"[A-Za-z_]+", stripped)
+     return match.group(0).lower() if match else ""
+ 
+@@ -85,7 +114,72 @@ def _scan(sql: str):
+             i += 1
+ 
+ 
+-def strip_noise(sql: str, literals: bool = False) -> str:
++_SPACE = " \t\r\n\f\v"
++
++
++def _scan_m(sql: str):
++    """MySQL 词法(M 兼容库):与 _scan 同样产出 (字符, sql / quote / comment)。
++
++    与 PG 词法的差别:# 到行尾是注释;-- 后面必须跟空白才是注释(--1 是两个负号);/*! … */ 是会执行的内容,
++    不当注释;单引号、双引号都是字符串(双引号默认不是标识符),里面反斜杠转义下一个字符;反引号是标识符,
++    里面连续两个反引号是转义、反斜杠不转义。
++    """
++    i, n = 0, len(sql)
++    quote = None
++    comment = None
++    while i < n:
++        ch = sql[i]
++        nxt = sql[i + 1] if i + 1 < n else ""
++        if comment == "line":
++            yield ch, "comment"
++            if ch == "\n":
++                comment = None
++            i += 1
++        elif comment == "block":
++            yield ch, "comment"
++            if ch == "*" and nxt == "/":
++                yield nxt, "comment"
++                comment = None
++                i += 2
++            else:
++                i += 1
++        elif quote:
++            yield ch, "quote"
++            if ch == "\\" and quote != "`" and nxt:
++                yield nxt, "quote"
++                i += 2
++                continue
++            if ch == quote:
++                if nxt == quote:
++                    yield nxt, "quote"
++                    i += 2
++                    continue
++                quote = None
++            i += 1
++        elif ch == "#":
++            comment = "line"
++            yield ch, "comment"
++            i += 1
++        elif ch == "-" and nxt == "-" and (i + 2 >= n or sql[i + 2] in _SPACE):
++            comment = "line"
++            yield ch, "comment"
++            yield nxt, "comment"
++            i += 2
++        elif ch == "/" and nxt == "*" and sql[i + 2:i + 3] != "!":
++            comment = "block"
++            yield ch, "comment"
++            yield nxt, "comment"
++            i += 2
++        elif ch in ("'", '"', "`"):
++            quote = ch
++            yield ch, "quote"
++            i += 1
++        else:
++            yield ch, "sql"
++            i += 1
++
++
++def strip_noise(sql: str, literals: bool = False, _scanner=_scan) -> str:
+     """把注释（可选：连同字符串字面量）抹成等长空格。
+ 
+     抹成空格而不是删掉：`select 1--c\\nfrom t` 直接删注释会粘成 `select 1from t`，
+@@ -95,14 +189,26 @@ def strip_noise(sql: str, literals: bool = False) -> str:
+     `select 'delete' as a` 会被当成 DELETE。
+     """
+     out = []
+-    for ch, state in _scan(sql):
++    for ch, state in _scanner(sql):
+         blank = state == "comment" or (literals and state == "quote")
+         # 换行保留原样：`--` 注释靠它收尾，抹成空格会把下一行并进注释里
+         out.append(("\n" if ch == "\n" else " ") if blank else ch)
+     return "".join(out)
+ 
+ 
+-def split_statements(sql: str) -> List[str]:
++def _split(sql: str, scanner) -> List[str]:
++    out, buf = [], []
++    for ch, state in scanner(sql):
++        if state == "sql" and ch == ";":
++            out.append("".join(buf))
++            buf = []
++        else:
++            buf.append(ch)
++    out.append("".join(buf))
++    return [s for s in out if strip_noise(s, _scanner=scanner).strip()]
++
++
++def split_statements(sql: str, dialect: Optional[str] = None) -> List[str]:
+     """按分号拆成多条语句，跳过字符串字面量**与注释**里的分号。
+ 
+     中间件允许一次调用发多条语句（PREPARE + EXPLAIN EXECUTE 就靠这个），
+@@ -116,24 +222,31 @@ def split_statements(sql: str) -> List[str]:
+ 
+     只由注释和空白构成的片段会被丢掉：`SELECT 1; -- 收尾注释` 是一条语句，
+     不是两条。丢掉不含可执行内容的片段不可能凭空多出语句，方向上是安全的。
++
++    两套都切时(M 库 / 兼容模式未知)返回切出语句更多的那一份:多出来的语句会被上层拒掉,方向是安全的。
+     """
+-    out, buf = [], []
+-    for ch, state in _scan(sql):
+-        if state == "sql" and ch == ";":
+-            out.append("".join(buf))
+-            buf = []
+-        else:
+-            buf.append(ch)
+-    out.append("".join(buf))
+-    return [s for s in out if strip_noise(s).strip()]
++    a = _split(sql, _scan)
++    if _resolve(dialect) == DIALECT_A:
++        return a
++    m = _split(sql, _scan_m)
++    return m if len(m) > len(a) else a
++
++
++def _parts_each(sql: str, dialect: Optional[str]):
++    """按方言给出几份切法 (切出的语句, 用的词法, 取首关键字时的方言):A 库一份;两套都切时两份,
++    首关键字都按 M 规则跳前导注释(# 注释也跳,否则以 # 注释开头的 M 语句会被误拒)。"""
++    d = _resolve(dialect)
++    yield _split(sql, _scan), _scan, d
++    if d != DIALECT_A:
++        yield _split(sql, _scan_m), _scan_m, d
+ 
+ 
+-def is_read_only(sql: str) -> bool:
+-    """整条脚本（可能含多语句）是否全部只读。"""
+-    parts = split_statements(sql)
+-    if not parts:
+-        return True
+-    return all(leading_keyword(p) in READ_ONLY_STARTERS for p in parts)
++def is_read_only(sql: str, dialect: Optional[str] = None) -> bool:
++    """整条脚本（可能含多语句）是否全部只读。两套都切时两套都得判只读。"""
++    for parts, _scanner, d in _parts_each(sql, dialect):
++        if parts and not all(leading_keyword(p, d) in READ_ONLY_STARTERS for p in parts):
++            return False
++    return True
+ 
+ 
+ # 会改数据的起始关键字。DDL/DCL 不在这里 —— 它们由 READ_ONLY_STARTERS
+@@ -143,7 +256,7 @@ _DML_STARTERS = frozenset({"insert", "update", "delete", "merge"})
+ _DML_WORD_RE = re.compile(r"(?i)\b(insert|update|delete|merge)\b")
+ 
+ 
+-def is_dml(sql: str) -> bool:
++def is_dml(sql: str, dialect: Optional[str] = None) -> bool:
+     """这条 SQL 会不会改数据。
+ 
+     **按归一化后的首关键字判，不在原始文本上跑正则。** 原先三个 skill 各自
+@@ -160,13 +273,14 @@ def is_dml(sql: str) -> bool:
+     首关键字是 with，得往里再看一眼；扫之前先把注释和字符串字面量抹掉，
+     否则 `WITH x AS (SELECT 'delete') ...` 会被误判。
+     """
+-    for part in split_statements(sql):
+-        keyword = leading_keyword(part)
+-        if keyword in _DML_STARTERS:
+-            return True
+-        if keyword == "with" and _DML_WORD_RE.search(
+-                strip_noise(part, literals=True)):
+-            return True
++    for parts, scanner, d in _parts_each(sql, dialect):  # 两套都切时任一套判成 DML 就是 DML
++        for part in parts:
++            keyword = leading_keyword(part, d)
++            if keyword in _DML_STARTERS:
++                return True
++            if keyword == "with" and _DML_WORD_RE.search(
++                    strip_noise(part, literals=True, _scanner=scanner)):
++                return True
+     return False
+ 
+ 
+@@ -174,7 +288,7 @@ class ExplainNotAllowed(Exception):
+     """这条 SQL 不能递进 EXPLAIN 模板。"""
+ 
+ 
+-def ensure_explainable(sql: str, analyze: bool = False) -> None:
++def ensure_explainable(sql: str, analyze: bool = False, dialect: Optional[str] = None) -> None:
+     """把用户 SQL 递进 `EXPLAIN (...) {{sql}}` 模板前的守卫。
+ 
+     白名单模型下，EXPLAIN 用户临时给的 SQL 只有这一条路:注册一条模板，
+@@ -200,7 +314,7 @@ def ensure_explainable(sql: str, analyze: bool = False) -> None:
+     if not sql or not sql.strip():
+         raise ExplainNotAllowed("SQL 为空。")
+ 
+-    statements = split_statements(sql)
++    statements = split_statements(sql, dialect)
+     if not statements:
+         raise ExplainNotAllowed("SQL 里没有可执行的语句（只有注释或空白）。")
+     if len(statements) > 1:
+@@ -215,18 +329,18 @@ def ensure_explainable(sql: str, analyze: bool = False) -> None:
+     # 这里再判一次是因为「片段非空但取不出首关键字」仍然可能（比如一段孤立的
+     # 字符串字面量）—— 递进模板会拼出 EXPLAIN 后面空无一物，报的是看不出
+     # 所以然的语法错。
+-    if not leading_keyword(statements[0]):
++    if not leading_keyword(statements[0], dialect):
+         raise ExplainNotAllowed("SQL 里没有可执行的语句（只有注释或空白）。")
+ 
+     # 只在 analyze 时才要求只读。EXPLAIN 不带 ANALYZE **根本不执行**语句 ——
+     # 实测 `EXPLAIN UPDATE ...` 走只读模板能正常出计划(4 行)，拒掉它是
+     # 平白砍能力。带 ANALYZE 就不一样了:语句会真跑，只读会话当场拦下，
+     # 但要在这里先说清原因，而不是让用户看一句数据库的只读事务报错。
+-    if analyze and not is_read_only(statements[0]):
++    if analyze and not is_read_only(statements[0], dialect):
+         raise ExplainNotAllowed(
+             "EXPLAIN ANALYZE 只受理只读语句，本次是 %s。\n"
+             "带 ANALYZE 时语句会**真执行**。写语句要包在回滚事务里跑，"
+             "而回滚包装实测可被一个 `--` 注释绕过，那条通道等于开放写权限。\n"
+             "写语句的实际执行计划请走直连（driver: psycopg2）。"
+-            % (leading_keyword(statements[0]).upper() or "非查询语句")
++            % (leading_keyword(statements[0], dialect).upper() or "非查询语句")
+         )
+diff --git a/common/proc_source.py b/common/proc_source.py
+index 66f8362..6b9c496 100644
+--- a/common/proc_source.py
++++ b/common/proc_source.py
+@@ -23,7 +23,7 @@ import re
+ from dataclasses import dataclass
+ from typing import Any, Dict, List, Optional, Sequence, Tuple
+ 
+-from common import procname
++from common import compat, procname
+ from common.grmp.errors import QueryError
+ 
+ MAX_LINES = 20000                   # 与 <skill>.source_adm 的 LIMIT 20001 配套:多出那一行就是「超限」
+@@ -195,6 +195,11 @@ def _reason(exc: Exception) -> str:
+ 
+ 
+ def _query(runner, script: str, name: str) -> List[Dict[str, Any]]:
++    # M 兼容库只继承了部分系统视图,ADM_* 不在其中(官方文档《M-Compatibility 开发者指南》系统视图;
++    # 2026-11-20 现场:Relation "pg_catalog.adm_source" does not exist)。没有对等写法,不发这条脚本,原因写清。
++    if compat.is_mysql_like(runner):
++        raise Unavailable("本库是 %s,没有 ADM_SOURCE 视图(它只在 A 兼容库提供),pg_proc 取不到时没有别的兜底"
++                          % compat.label(runner))
+     # 名字进的是白名单模板的 String 参数位,中间件按文本替换 —— 只放行合法标识符。用户给的名字在 procname 里校验过,
+     # 但「pg_proc 里过程体为空」那一路的包名是从数据库读回来的,同样要过这一关
+     if not procname.IDENT_RE.match(name or ""):
+diff --git a/common/schema_infer.py b/common/schema_infer.py
+index e642291..510ef97 100644
+--- a/common/schema_infer.py
++++ b/common/schema_infer.py
+@@ -37,11 +37,16 @@ def _is_system(schema: str) -> bool:
+     return schema.startswith(_SYSTEM_PREFIXES) or schema in _SYSTEM_NAMES
+ 
+ 
+-def _lookup_key(name: str) -> str:
+-    """查目录用的 relname:加引号的原样(去引号、还原双引号),不加引号的小写。"""
++def _lookup_key(name: str, fold: bool = True) -> str:
++    """查目录用的 relname:加引号的原样(去引号、还原双引号),不加引号的小写。
++    M 兼容库(v1.5.1):反引号同样去掉;表名大小写看 lower_case_table_names —— 为 0 时一律原样,否则一律小写
++    (那里加了引号也不区分大小写,common/compat.py folds_unquoted)。"""
+     if name.startswith('"') and name.endswith('"') and len(name) >= 2:
+         return name[1:-1].replace('""', '"')
+-    return name.lower()
++    if name.startswith("`") and name.endswith("`") and len(name) >= 2:
++        inner = name[1:-1].replace("``", "`")
++        return inner.lower() if fold else inner
++    return name.lower() if fold else name
+ 
+ 
+ def quoted_list(keys) -> str:
+@@ -49,8 +54,10 @@ def quoted_list(keys) -> str:
+ 
+ 
+ def infer(runner, script: str, sql: str, guess: str = "") -> Inference:
+-    names = sqlqualify.unqualified_tables(sql)
+-    keys = list(dict.fromkeys(_lookup_key(n) for n in names))
++    from common import compat
++    names = sqlqualify.unqualified_tables(sql, mysql=compat.is_mysql_like(runner))
++    fold = compat.folds_unquoted(runner)
++    keys = list(dict.fromkeys(_lookup_key(n, fold) for n in names))
+     if not keys:
+         return Inference(reason="SQL 里没有不带 schema 的表名")
+     try:
+diff --git a/common/search_path.py b/common/search_path.py
+index af607e8..3dc848d 100644
+--- a/common/search_path.py
++++ b/common/search_path.py
+@@ -145,7 +145,8 @@ def explain_plan(runner, base_script: str, sql: str, schema: str) -> Tuple[str,
+     # 不依赖执行器、不依赖 DBA;补全后解析到同一张表,计划与原 SQL 等价。没有可补的才原样退回。
+     # 路径有多段时按第一段补(业务表绝大多数在第一段,public 垫底),说明里如实写这个前提。
+     from common import sqlqualify           # 延迟导入:sqlqualify 反过来引用本模块的 valid_schema
+-    qualified, changed = sqlqualify.qualify_tables(sql, segs[0])
++    from common import compat
++    qualified, changed = sqlqualify.qualify_tables(sql, segs[0], mysql=compat.is_mysql_like(runner))
+     note = qualified_note(path, changed) if changed else fallback_note(path)
+     try:
+         rows = runner.run(base_script, {"sql": qualified if changed else sql})
+diff --git a/common/session.py b/common/session.py
+index 185e367..857af01 100644
+--- a/common/session.py
++++ b/common/session.py
+@@ -30,6 +30,7 @@ from typing import List, Optional
+ 
+ import yaml
+ 
++from . import compat
+ from .config import Connection, ConfigError, api_endpoint, ensure_dir, state_dir, validate
+ 
+ _DIRNAME = "sessions"
+@@ -54,6 +55,8 @@ _ALLOWED = frozenset({"name", "type", "host", "port", "database", "user",
+ # 回滚到 1.4.10 或按槽位替换期间新旧混跑时,这个用户的所有取数技能都会失败(11-11 测试环境回滚实测)。
+ # 旧版不读 .route,把这种会话当成「库名 = 业务库、不切库」,与 1.4.10 本来的行为相同。
+ ROUTE_SUFFIX = ".route"
++# 兼容模式(v1.5.1)同理单独写 <句柄>.compat(内容如「M 1」):旧版不读它,回滚时这个会话照旧可用(按 A 处理)。
++COMPAT_SUFFIX = compat.SUFFIX
+ _ROUTE_MAX = 128
+ 
+ _selected: Optional[str] = None      # 本进程用 use() 选中的句柄（来自 --session）
+@@ -146,8 +149,21 @@ def _read_route(path: pathlib.Path) -> str:
+     return value
+ 
+ 
++def _compat_path(path: pathlib.Path) -> pathlib.Path:
++    return path.with_suffix(COMPAT_SUFFIX)
++
++
++def _read_compat(path: pathlib.Path):
++    """(兼容模式, lower_case_table_names);没有文件或内容认不出 → ('', '')。只影响写法提示,不影响连到哪个库,所以不报错。"""
++    cp = _compat_path(path)
++    try:
++        return compat.decode(cp.read_text(encoding="utf-8")[:32])
++    except (FileNotFoundError, OSError, UnicodeDecodeError):
++        return "", ""
++
++
+ def _unlink(path: pathlib.Path) -> None:
+-    for p in (path, _route_path(path)):
++    for p in (path, _route_path(path), _compat_path(path)):
+         try:
+             p.unlink()
+         except FileNotFoundError:
+@@ -180,6 +196,9 @@ def _read(path: pathlib.Path) -> Connection:
+         exec_database=raw.get("exec_database", "") or "",
+         route_db=_read_route(path),
+     )
++    mode, lctn = _read_compat(path)
++    if mode:
++        conn = replace(conn, compat=mode, lctn=lctn)
+     if conn.driver == "grmp":
+         # 会话文件只是登录那一刻的快照。中间件地址属于环境配置,不属于会话:
+         # 地址变更后老句柄仍要能用,所以每次读会话都从当前配置取(环境变量 > config.yaml)。
+@@ -231,6 +250,11 @@ def save(conn: Connection, handle: Optional[str] = None) -> str:
+         _write_text(_route_path(path), conn.route_db + "\n")
+     elif _route_path(path).exists():
+         _route_path(path).unlink()
++    tag = compat.encode(conn.compat, conn.lctn)
++    if tag:
++        _write_text(_compat_path(path), tag + "\n")
++    elif _compat_path(path).exists():
++        _compat_path(path).unlink()
+     _write(path, payload)
+     legacy = _legacy_path()                     # 旧版单文件:谁都能用的口子,见到就删
+     if legacy.exists():
+@@ -262,8 +286,8 @@ def list_sessions(prune: bool = True) -> List[SessionInfo]:
+                     pass
+             continue
+         out.append(SessionInfo(handle=path.stem, conn=_read(path), last_used=last_used, path=path))
+-    if prune:                               # 旧版清掉过期会话时不认 .route,留下的孤儿顺手删
+-        for rp in d.glob("*" + ROUTE_SUFFIX):
++    if prune:                               # 旧版清掉过期会话时不认 .route / .compat,留下的孤儿顺手删
++        for rp in list(d.glob("*" + ROUTE_SUFFIX)) + list(d.glob("*" + COMPAT_SUFFIX)):
+             if HANDLE_RE.match(rp.stem) and not rp.with_suffix(".yaml").exists():
+                 try:
+                     rp.unlink()
+diff --git a/common/sqlqualify.py b/common/sqlqualify.py
+index 4ffca4c..3ad9885 100644
+--- a/common/sqlqualify.py
++++ b/common/sqlqualify.py
+@@ -35,6 +35,23 @@ _TOKEN_RE = re.compile(
+     """,
+     re.S | re.X,
+ )
++# M 兼容库(MySQL 词法,v1.5.1):反引号是标识符;双引号、单引号都是字符串,里面反斜杠转义;# 与「-- 加空白」是行注释;
++# /*! … */ 是会执行的内容,不当注释。词法按库来:同一段 SQL 在 A 库与 M 库里切出的字符串 / 注释不一样。
++_TOKEN_RE_M = re.compile(
++    r"""
++    (?P<ws>\s+)
++  | (?P<lcomment>(?:--(?=\s)|\#)[^\n]*)
++  | (?P<bcomment>/\*(?!!).*?\*/)
++  | (?P<str>'(?:\\.|''|[^'\\])*'|"(?:\\.|""|[^"\\])*")
++  | (?P<qident>`(?:``|[^`])+`)
++  | (?P<param>\{\{[^}]*\}\}|\$\d+|:[A-Za-z_]\w*|\?)
++  | (?P<ident>[A-Za-z_][A-Za-z0-9_$]*)
++  | (?P<num>\d+(?:\.\d+)?)
++  | (?P<punct>[(),.;=<>+\-*/%|^&!~\[\]])
++  | (?P<other>.)
++    """,
++    re.S | re.X,
++)
+ 
+ # 引导词后面可能先出现的修饰词,越过它们再看名字
+ _SKIP_AFTER_LEADER = {"only", "lateral"}
+@@ -60,9 +77,9 @@ _NOT_A_FUNCTION = _NOT_A_TABLE | _FROM_CLAUSE_ENDERS | {
+ }
+ 
+ 
+-def _tokens(sql: str):
++def _tokens(sql: str, mysql: bool = False):
+     pos = 0
+-    for m in _TOKEN_RE.finditer(sql):
++    for m in (_TOKEN_RE_M if mysql else _TOKEN_RE).finditer(sql):
+         assert m.start() == pos, "tokenizer left a gap"
+         pos = m.end()
+         yield m.lastgroup, m.group(0)
+@@ -105,7 +122,7 @@ def _cte_names(sig) -> set:
+                 j += 1
+                 if not (j < len(sig) and sig[j] == ("punct", "(")):
+                     break
+-                names.add(name[1:-1].lower() if name.startswith('"') else name.lower())
++                names.add(name[1:-1].lower() if name[:1] in ('"', "`") else name.lower())
+                 j = _skip_parens(sig, j)                               # 跳过 CTE 体
+                 if j < len(sig) and sig[j] == ("punct", ","):
+                     j += 1
+@@ -117,25 +134,29 @@ def _cte_names(sig) -> set:
+     return names
+ 
+ 
+-def _schema_prefix(schema: str) -> str:
+-    return (schema if schema == schema.lower() else '"%s"' % schema) + "."
++def _schema_prefix(schema: str, mysql: bool = False) -> str:
++    """大小写混写的 schema 要加引号:A 库用双引号,M 兼容库用反引号(那里双引号是字符串)。"""
++    if schema == schema.lower():
++        return schema + "."
++    return ("`%s`." % schema) if mysql else ('"%s".' % schema)
+ 
+ 
+-def qualify_tables(sql: str, schema: str) -> Tuple[str, List[str]]:
+-    """返回 (补全后的 SQL, 被补全的表名列表——按出现顺序,原样大小写/引号)。没有可补的就原样返回。"""
++def qualify_tables(sql: str, schema: str, mysql: bool = False) -> Tuple[str, List[str]]:
++    """返回 (补全后的 SQL, 被补全的表名列表——按出现顺序,原样大小写/引号)。没有可补的就原样返回。
++    mysql=True:SQL 按 M 兼容库(MySQL 词法)切词、补的 schema 用反引号(common/compat.py is_mysql_like)。"""
+     if not valid_schema(schema):
+         raise ValueError("schema 名 %r 不是合法标识符" % (schema,))
+-    return _rewrite(sql, _schema_prefix(schema))
++    return _rewrite(sql, _schema_prefix(schema, mysql), mysql)
+ 
+ 
+-def unqualified_tables(sql: str) -> List[str]:
++def unqualified_tables(sql: str, mysql: bool = False) -> List[str]:
+     """SQL 里表位置上不带 schema 的名字(按出现顺序,原样大小写/引号)——贴文本没带 --schema 时拿去目录里找 schema 用。"""
+-    return _rewrite(sql, None)[1]
++    return _rewrite(sql, None, mysql)[1]
+ 
+ 
+-def _rewrite(sql: str, prefix: Optional[str]) -> Tuple[str, List[str]]:
++def _rewrite(sql: str, prefix: Optional[str], mysql: bool = False) -> Tuple[str, List[str]]:
+     """单趟扫描,按括号层级各自记住「这一层正处在 FROM 列表里」。prefix 为 None 时只收集不改写。"""
+-    toks = list(_tokens(sql))
++    toks = list(_tokens(sql, mysql))
+     sig_idx = [i for i, (k, _) in enumerate(toks) if k not in ("ws", "lcomment", "bcomment")]
+     sig = [toks[i] for i in sig_idx]
+     ctes = _cte_names(sig)
+diff --git a/common/sqlrefs.py b/common/sqlrefs.py
+index 8c61cc7..f5b6dba 100644
+--- a/common/sqlrefs.py
++++ b/common/sqlrefs.py
+@@ -7,8 +7,10 @@ from __future__ import annotations
+ 
+ import re
+ 
+-_TABLE_REF_RE = re.compile(r"(?is)\b(?:from|join|update|into)\s+([a-z_][\w.]*)")
+-_IDENT_RE = re.compile(r"(?i)^[a-z_][\w.]*")
++# 名字可以是反引号括起的(M 兼容库,v1.5.1):`orders`、`app`.`orders`、app.`orders`
++_NAME = r"(?:`[^`\n]+`|[a-z_][\w]*)(?:\.(?:`[^`\n]+`|[a-z_][\w]*))*"
++_TABLE_REF_RE = re.compile(r"(?is)\b(?:from|join|update|into)\s+(%s)" % _NAME)
++_IDENT_RE = re.compile(r"(?i)^%s" % _NAME)
+ _SQL_KEYWORDS = frozenset({
+     "select", "lateral", "unnest", "generate_series", "where", "on", "set",
+     "values", "join", "left", "right", "inner", "outer", "cross", "full",
+@@ -17,13 +19,17 @@ _SQL_KEYWORDS = frozenset({
+ _WS = " \t\r\n"
+ 
+ 
+-def extract_table_refs(sql_text: str) -> list[str]:
+-    """Lowercase, deduped table refs in first-appearance order, schema kept."""
++def extract_table_refs(sql_text: str, fold: bool = True) -> list[str]:
++    """Lowercase, deduped table refs in first-appearance order, schema kept.
++
++    反引号去掉(M 兼容库的标识符写法)。fold=False 时不折小写:M 兼容库 lower_case_table_names=0 时表名区分大小写,
++    库里存的就是原样(common/compat.py 的 folds_unquoted 决定)。"""
+     seen: set[str] = set()
+     out: list[str] = []
+ 
+     def add(raw: str) -> None:
+-        name = raw.strip().lower()
++        name = raw.strip().replace("`", "")
++        name = name.lower() if fold else name
+         tail = name[name.rindex(".") + 1:] if "." in name else name
+         if tail in ("", "(") or tail in _SQL_KEYWORDS or name in seen:
+             return
+@@ -69,11 +75,11 @@ def extract_table_refs(sql_text: str) -> list[str]:
+     return out
+ 
+ 
+-def extract_tables(sql_text: str) -> list[str]:
++def extract_tables(sql_text: str, fold: bool = True) -> list[str]:
+     """Lowercase, deduped, schema-stripped table names in first-appearance order."""
+     seen: set[str] = set()
+     out: list[str] = []
+-    for ref in extract_table_refs(sql_text):
++    for ref in extract_table_refs(sql_text, fold):
+         name = ref[ref.rindex(".") + 1:] if "." in ref else ref
+         if name not in seen:
+             seen.add(name)
+diff --git a/scripts/registry/explain/kernel_funcs.yaml b/scripts/registry/explain/kernel_funcs.yaml
+index a4d0d10..6075208 100644
+--- a/scripts/registry/explain/kernel_funcs.yaml
++++ b/scripts/registry/explain/kernel_funcs.yaml
+@@ -10,6 +10,9 @@
+ # 只查 pg_proc + version(),任何版本都能跑,是这组脚本里唯一无条件安全的一条。
+ # 拼接一律 concat(…),不用 ||(2026-11-17 现场):本脚本切到业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、
+ # 不是字符串拼接,整条报「argument … not type name」。concat 在 A / M 两种兼容模式下都是拼接。守卫:test_registry_m_compat_units.py。
++# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
++#   名字类列(name 类型)进 concat / COALESCE 前先 ::text:M 库按自己的类型推导矩阵处理 name 类型,
++#   health.table_writes 就栽在 COALESCE(name, name) 上;显式转成文字,两种模式结果一致。
+ name: explain.kernel_funcs
+ database_type: appbusiness
+ description: 探测 GaussDB 私有内核函数(gs_get_explain / gs_get_kernel_info)是否存在,并带回 version()
+@@ -17,6 +20,6 @@ readonly: true
+ sql: |
+   SELECT 'version' AS item, version() AS detail
+   UNION ALL
+-  SELECT concat('func:', p.proname) AS item, pg_get_function_arguments(p.oid) AS detail
++  SELECT concat('func:', p.proname::text) AS item, pg_get_function_arguments(p.oid) AS detail
+     FROM pg_proc p
+    WHERE p.proname IN ('gs_get_explain', 'gs_get_kernel_info');
+diff --git a/scripts/registry/health/partitions.yaml b/scripts/registry/health/partitions.yaml
+index 01bb34d..f846419 100644
+--- a/scripts/registry/health/partitions.yaml
++++ b/scripts/registry/health/partitions.yaml
+@@ -9,15 +9,21 @@
+ # 把两件事混在一起,会让人以为分区数正常就等于裁剪正常。
+ #
+ # ORDER BY 分区数倒序:分区过多(几千个)时规划开销显著上升,那才是要先看的那张表。
++# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
++#   partstrategy 是 "char" 类型,max() / COALESCE() 直接处理它在 M 库报 un support type。先用 CASE 映射成同样的单字母文字常量
++#   (取值见 PG_PARTITION:r 范围、i 间隔、l 列表、a 自动扩展列表、h 哈希、n 无),再聚合;输出与原来相同,collectors.py 不动。
++#   "char" 列与字面量比较(parttype = 'p'、relkind = 'r')在 M 库可用(现场其他脚本已跑通)。
+ name: health.partitions
+ database_type: appbusiness
+ description: 分区表的分区数量与分区策略
+ readonly: true
+ sql: |
+-  SELECT n.nspname      AS schema,
+-         c.relname      AS "table",
+-         count(*)       AS parts,
+-         COALESCE(max(p.partstrategy), '') AS strategy
++  SELECT n.nspname AS schema,
++         c.relname AS "table",
++         count(*)  AS parts,
++         COALESCE(max(CASE p.partstrategy WHEN 'r' THEN 'r' WHEN 'i' THEN 'i' WHEN 'l' THEN 'l'
++                                          WHEN 'a' THEN 'a' WHEN 'h' THEN 'h' WHEN 'n' THEN 'n'
++                                          ELSE '?' END), '') AS strategy
+     FROM pg_partition p
+     JOIN pg_class c     ON c.oid = p.parentid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+diff --git a/scripts/registry/health/stale_stats.yaml b/scripts/registry/health/stale_stats.yaml
+index b867c29..51206df 100644
+--- a/scripts/registry/health/stale_stats.yaml
++++ b/scripts/registry/health/stale_stats.yaml
+@@ -31,6 +31,10 @@
+ # pg_stats 的列数要参与排序，所以挪进了子查询，对每张候选表都数一次（og5 36 张候选 36 毫秒）。
+ # 拼接一律 concat(…),不用 ||(2026-11-17 现场):本脚本切到业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、
+ # 不是字符串拼接,整条报「argument … not type name」。concat 在 A / M 两种兼容模式下都是拼接。守卫:test_registry_m_compat_units.py。
++# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
++#   M 库 CAST 的目标类型只有 SIGNED / UNSIGNED / DATE / TIME / DATETIME / BINARY / CHAR / DECIMAL / FLOAT / DOUBLE / JSON,
++#   不认 float8(官方文档「显式类型转换」),偏离比例改成 * 1.0 / 求小数,两种模式结果一致。concat 的名字列先 ::text。
++#   M 库里 / 的结果是小数,cur_pages 会带小数位;Python 侧 as_int 按截断处理(common/grmp/values.py)。
+ name: health.stale_stats
+ database_type: appbusiness
+ description: 表的统计信息新鲜度证据（页数漂移 + 统计列数 + 上次 ANALYZE）
+@@ -38,7 +42,7 @@ sql: |
+   SELECT tbl_name, frozen_pages, cur_pages, frozen_tuples, live_tuples,
+          stat_columns, last_analyze, last_autoanalyze
+   FROM (
+-    SELECT concat(n.nspname, '.', c.relname) AS tbl_name,
++    SELECT concat(n.nspname::text, '.', c.relname::text) AS tbl_name,
+            c.relpages AS frozen_pages,
+            pg_relation_size(c.oid) / current_setting('block_size')::bigint AS cur_pages,
+            c.reltuples::bigint AS frozen_tuples,
+@@ -56,7 +60,7 @@ sql: |
+   ) x
+   ORDER BY (stat_columns = 0 OR frozen_pages = 0) DESC,
+            CASE WHEN frozen_pages > 0
+-                THEN CAST(abs(cur_pages - frozen_pages) AS float8) / frozen_pages
++                THEN abs(cur_pages - frozen_pages) * 1.0 / frozen_pages
+                 ELSE 0 END DESC,
+            cur_pages DESC
+   LIMIT {{limit}};
+diff --git a/scripts/registry/health/table_writes.yaml b/scripts/registry/health/table_writes.yaml
+index cc218f8..d7a42fe 100644
+--- a/scripts/registry/health/table_writes.yaml
++++ b/scripts/registry/health/table_writes.yaml
+@@ -8,6 +8,11 @@
+ # 按 last_data_changed(这张表最近一次数据变化的时间)倒序取前 {{limit}} 张:正在写的表一定排在前面;
+ # 按累计写入量排会把「历史上写得多、现在不写」的表排进来,而把正在猛写的新表挤掉。
+ # 系统 schema 排除表照抄 health/bloat.yaml;找不到所属表的 TOAST(系统表的)随 pg_toast 一起排除。
++# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
++#   原写法两处不行:① COALESCE(pn.nspname, s.schemaname) 两个 name 类型在 M 库推导成 any,外层 schema NOT IN (…) 报
++#   「operator does not exist: any <> unknown」;② 外层 SELECT 里的 "table" 在 M 库是字符串常量(双引号默认是字符串),
++#   修好①之后整列会静默变成字面值 'table'。改成一层查询:名字列先 ::text 再进 CASE,双引号只留在最外层别名 AS "table"。
++#   口径不变:普通表取自身;TOAST 折回所属表;找不到所属表的 TOAST(pn 为空)与系统 schema 一并排除。
+ name: health.table_writes
+ database_type: appbusiness
+ description: 各表（大字段写入折回所属表）的插入 / 更新 / 删除行数与 TOAST 大小
+@@ -17,17 +22,18 @@ params:
+     type: INTEGER
+     description: 返回条数上限
+ sql: |
+-  SELECT schema, "table", is_toast, n_tup_ins, n_tup_upd, n_tup_del, toast_bytes
+-    FROM (SELECT COALESCE(pn.nspname, s.schemaname) AS schema,
+-                 COALESCE(pc.relname, s.relname) AS "table",
+-                 (s.schemaname = 'pg_toast') AS is_toast,
+-                 s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
+-                 CASE WHEN s.schemaname = 'pg_toast' THEN pg_relation_size(s.relid) END AS toast_bytes,
+-                 s.last_data_changed
+-            FROM pg_stat_all_tables s
+-            LEFT JOIN pg_class pc ON s.schemaname = 'pg_toast' AND pc.reltoastrelid = s.relid
+-            LEFT JOIN pg_namespace pn ON pn.oid = pc.relnamespace) t
+-   WHERE schema NOT IN ('pg_catalog','information_schema','snapshot','dbe_perf','dbe_pldeveloper','cstore','pg_toast')
+-     AND n_tup_ins + n_tup_upd + n_tup_del > 0
+-   ORDER BY last_data_changed DESC NULLS LAST
++  SELECT CASE WHEN s.schemaname = 'pg_toast' THEN pn.nspname::text ELSE s.schemaname::text END AS schema,
++         CASE WHEN s.schemaname = 'pg_toast' THEN pc.relname::text ELSE s.relname::text END AS "table",
++         (s.schemaname = 'pg_toast') AS is_toast,
++         s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
++         CASE WHEN s.schemaname = 'pg_toast' THEN pg_relation_size(s.relid) END AS toast_bytes
++    FROM pg_stat_all_tables s
++    LEFT JOIN pg_class pc     ON s.schemaname = 'pg_toast' AND pc.reltoastrelid = s.relid
++    LEFT JOIN pg_namespace pn ON pn.oid = pc.relnamespace
++   WHERE s.n_tup_ins + s.n_tup_upd + s.n_tup_del > 0
++     AND ((s.schemaname <> 'pg_toast'
++           AND s.schemaname NOT IN ('pg_catalog','information_schema','snapshot','dbe_perf','dbe_pldeveloper','cstore'))
++       OR (s.schemaname = 'pg_toast' AND pn.nspname IS NOT NULL
++           AND pn.nspname NOT IN ('pg_catalog','information_schema','snapshot','dbe_perf','dbe_pldeveloper','cstore','pg_toast')))
++   ORDER BY s.last_data_changed DESC NULLS LAST
+    LIMIT {{limit}};
+diff --git a/scripts/registry/health/unused_index.yaml b/scripts/registry/health/unused_index.yaml
+index ddd14ee..a0ba8ee 100644
+--- a/scripts/registry/health/unused_index.yaml
++++ b/scripts/registry/health/unused_index.yaml
+@@ -21,11 +21,14 @@
+ # 防线在调用方：取值来自 collectors.py 里的固定常量，不来自用户输入。
+ # 拼接一律 concat(…),不用 ||(2026-11-17 现场):本脚本切到业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、
+ # 不是字符串拼接,整条报「argument … not type name」。concat 在 A / M 两种兼容模式下都是拼接。守卫:test_registry_m_compat_units.py。
++# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
++#   名字类列(name 类型)进 concat / COALESCE 前先 ::text:M 库按自己的类型推导矩阵处理 name 类型,
++#   health.table_writes 就栽在 COALESCE(name, name) 上;显式转成文字,两种模式结果一致。
+ name: health.unused_index
+ database_type: appbusiness
+ description: 索引用量全局视图（含扫描次数、大小、是否约束背书、所属表的扫描分布）
+ sql: |
+-  SELECT concat(s.schemaname, '.', s.indexrelname) AS idx_name,
++  SELECT concat(s.schemaname::text, '.', s.indexrelname::text) AS idx_name,
+          s.relname AS table_name,
+          s.idx_scan,
+          s.idx_tup_read,
+diff --git a/scripts/registry/lockwait/pairs.yaml b/scripts/registry/lockwait/pairs.yaml
+index 96c05f9..e5c1984 100644
+--- a/scripts/registry/lockwait/pairs.yaml
++++ b/scripts/registry/lockwait/pairs.yaml
+@@ -29,6 +29,9 @@
+ # 不是字符串拼接,整条报「argument … not type name」。concat 在 A / M 两种兼容模式下都是拼接。守卫:test_registry_m_compat_units.py。
+ # lock_object 不能写成 COALESCE(concat(…), ''):锁对象不是表(事务号锁等)时 LEFT JOIN 不上、两列都是 NULL,
+ # concat 在 A 兼容下跳过 NULL 得到 '.',在 M 兼容下得到 NULL —— 两边不一样。先判 relname 再拼,两种模式都回 ''。
++# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
++#   名字类列(name 类型)进 concat / COALESCE 前先 ::text:M 库按自己的类型推导矩阵处理 name 类型,
++#   health.table_writes 就栽在 COALESCE(name, name) 上;显式转成文字,两种模式结果一致。
+ name: lockwait.pairs
+ database_type: appbusiness
+ description: 锁堵塞的持有者/等待者成对明细（含双方锁模式、锁对象、等待时长、双方 SQL）
+@@ -41,14 +44,14 @@ sql: |
+          COALESCE(h.sessionid, 0)      AS holder_sessionid,
+          h.mode                        AS holder_mode,
+          w.locktype                    AS locktype,
+-         CASE WHEN c.relname IS NULL THEN '' ELSE concat(n.nspname, '.', c.relname) END AS lock_object,
++         CASE WHEN c.relname IS NULL THEN '' ELSE concat(n.nspname::text, '.', c.relname::text) END AS lock_object,
+          COALESCE(w.locktag, '')       AS locktag,
+          round(date_part('epoch', clock_timestamp() - wa.query_start)::numeric, 1) AS waiter_wait_s,
+-         COALESCE(wa.usename, '')      AS waiter_user,
++         COALESCE(wa.usename::text, '') AS waiter_user,
+          COALESCE(wa.application_name, '') AS waiter_app,
+          COALESCE(substr(wa.query, 1, 300), '')       AS waiter_query,
+          COALESCE(ha.state, '')        AS holder_state,
+-         COALESCE(ha.usename, '')      AS holder_user,
++         COALESCE(ha.usename::text, '') AS holder_user,
+          COALESCE(ha.application_name, '') AS holder_app,
+          round(date_part('epoch', clock_timestamp() - ha.xact_start)::numeric, 1) AS holder_xact_age_s,
+          COALESCE(substr(ha.query, 1, 300), '')       AS holder_query
+diff --git a/scripts/registry/login/current_db.yaml b/scripts/registry/login/current_db.yaml
+index 62db3b1..652e55d 100644
+--- a/scripts/registry/login/current_db.yaml
++++ b/scripts/registry/login/current_db.yaml
+@@ -1,7 +1,12 @@
+ # 登录时核实中间件是否真的切到了业务库(common/grmp/routing.py):脚本登记为 appbusiness,调用时带 dbName;
+ # 回来的 current_database() 等于用户给的库名即「已直连」,否则说明中间件没切(没升级 / 白名单没导 / 库不存在或没权限)。
++# v1.5.1 起顺带取兼容模式(compat:A / M / PG …)与 M 库的表名大小写参数(lctn:0 区分大小写、1 不区分;A 库没有这个参数,取到 NULL)。
++# 用 pg_settings 而不是 current_setting():A 库没有 lower_case_table_names,current_setting 会报错,pg_settings 只是取不到行。
++# 现场没导本版增量时探针仍是旧 SQL、没有这两列 —— 调用方记「兼容模式未知」,按 A 库处理并提示导入增量。
+ name: login.current_db
+ database_type: appbusiness
+ description: 登录核实:中间件实际连的库与账号
+ sql: |
+-  SELECT current_database() AS db, current_user AS usr;
++  SELECT current_database() AS db, current_user AS usr,
++         (SELECT datcompatibility::text FROM pg_database WHERE datname = current_database()) AS compat,
++         (SELECT setting FROM pg_settings WHERE name = 'lower_case_table_names') AS lctn;
+diff --git a/scripts/registry/procinfo/locate_search.yaml b/scripts/registry/procinfo/locate_search.yaml
+index 2cb6cee..09e7e47 100644
+--- a/scripts/registry/procinfo/locate_search.yaml
++++ b/scripts/registry/procinfo/locate_search.yaml
+@@ -2,24 +2,28 @@
+ # 两个 LEFT JOIN 是有意的:对象隔离下 pg_namespace 行被藏、pg_proc 行还在(og5 实测),内联 JOIN 会把它丢掉;
+ # LEFT JOIN 让它以 nspname 为空的形态回来——这就是「过程在、schema 不可见」的证据。
+ # 包那半段只在给了包名时才搜(A 兼容库 '' 即 NULL,所以用 length 判空而不是 <> '')。
+-# {{name}} / {{package}} 进的是 ILIKE 的引号里,调用方(common/procname.py)只放行合法标识符。
++# {{name}} / {{package}} 进的是 LIKE 的引号里,调用方(common/procname.py)只放行合法标识符。
++# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
++#   M 库不支持 ILIKE(syntax error at or near "ILIKE"):改成 lower(…) LIKE lower(…),两种模式都不分大小写。
++#   名字列进 COALESCE / UNION 前先 ::text(两个分支的列类型一致,不靠 M 库的类型推导)。
++#   length('') 在 A 库是 NULL、M 库是 0,COALESCE 后都不 > 0,判空写法两边一致;M 库升序默认 NULLS LAST,与 A 库相同。
+ name: procinfo.locate_search
+ database_type: appbusiness
+ description: 过程找不到时的排查:按名字模糊搜过程(schema 不可见时 nspname 为空)与包
+ sql: |
+-  SELECT 'proc' AS kind, n.nspname, COALESCE(k.pkgname, '') AS pkgname, p.proname
++  SELECT 'proc' AS kind, n.nspname::text AS nspname, COALESCE(k.pkgname::text, '') AS pkgname, p.proname::text AS proname
+   FROM pg_proc p
+   LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
+   LEFT JOIN gs_package k ON k.oid = p.propackageid
+-  WHERE p.proname ILIKE '%{{name}}%'
++  WHERE lower(p.proname::text) LIKE lower('%{{name}}%')
+     AND (n.nspname IS NULL OR (n.nspname NOT LIKE 'pg_%' AND n.nspname NOT LIKE 'dbe_%'
+          AND n.nspname NOT IN ('information_schema', 'pkg_service', 'pkg_util', 'sqladvisor', 'db4ai',
+                                'snapshot', 'blockchain', 'cstore', 'pmk', 'coverage')))
+   UNION ALL
+-  SELECT 'package' AS kind, n.nspname, k.pkgname, '' AS proname
++  SELECT 'package' AS kind, n.nspname::text AS nspname, k.pkgname::text AS pkgname, '' AS proname
+   FROM gs_package k
+   LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
+-  WHERE COALESCE(length('{{package}}'), 0) > 0 AND k.pkgname ILIKE '%{{package}}%'
++  WHERE COALESCE(length('{{package}}'), 0) > 0 AND lower(k.pkgname::text) LIKE lower('%{{package}}%')
+   ORDER BY 1, 2, 3, 4
+   LIMIT 40;
+ params:
+diff --git a/scripts/registry/procinfo/proc_def.yaml b/scripts/registry/procinfo/proc_def.yaml
+index e873b62..40fbbc0 100644
+--- a/scripts/registry/procinfo/proc_def.yaml
++++ b/scripts/registry/procinfo/proc_def.yaml
+@@ -6,13 +6,16 @@
+ # 「'{{x}}' IS NULL OR '{{x}}' = ''」两个条件都要:A 兼容库(Oracle 迁移库)里空串就是 NULL,只写 '' = '' 会得到 NULL,
+ # 整条 WHERE 变假,过程「找不到」——og5 的 kf_a(DBCOMPATIBILITY='A')实测踩到。
+ # gs_package 在 openGauss 3.0+ 与 GaussDB 505 的所有库里都有(PG 兼容库里也有,只是空的)。
++# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
++#   名字类列(name 类型)进 concat / COALESCE 前先 ::text:M 库按自己的类型推导矩阵处理 name 类型,
++#   health.table_writes 就栽在 COALESCE(name, name) 上;显式转成文字,两种模式结果一致。
+ name: procinfo.proc_def
+ database_type: appbusiness
+ description: 按名字取存储过程/函数的定义(源码 + 语言 + 形参 + 所属包);支持包内过程与按包名过滤
+ sql: |
+   SELECT n.nspname, p.proname, l.lanname, p.prosrc,
+          pg_catalog.pg_get_function_arguments(p.oid) AS args,
+-         COALESCE(k.pkgname, '') AS package
++         COALESCE(k.pkgname::text, '') AS package
+   FROM pg_proc p
+   JOIN pg_namespace n ON n.oid = p.pronamespace
+   JOIN pg_language l ON l.oid = p.prolang
+diff --git a/scripts/registry/proctune/locate_search.yaml b/scripts/registry/proctune/locate_search.yaml
+index cc4815b..617667e 100644
+--- a/scripts/registry/proctune/locate_search.yaml
++++ b/scripts/registry/proctune/locate_search.yaml
+@@ -2,24 +2,28 @@
+ # 两个 LEFT JOIN 是有意的:对象隔离下 pg_namespace 行被藏、pg_proc 行还在(og5 实测),内联 JOIN 会把它丢掉;
+ # LEFT JOIN 让它以 nspname 为空的形态回来——这就是「过程在、schema 不可见」的证据。
+ # 包那半段只在给了包名时才搜(A 兼容库 '' 即 NULL,所以用 length 判空而不是 <> '')。
+-# {{name}} / {{package}} 进的是 ILIKE 的引号里,调用方(common/procname.py)只放行合法标识符。
++# {{name}} / {{package}} 进的是 LIKE 的引号里,调用方(common/procname.py)只放行合法标识符。
++# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
++#   M 库不支持 ILIKE(syntax error at or near "ILIKE"):改成 lower(…) LIKE lower(…),两种模式都不分大小写。
++#   名字列进 COALESCE / UNION 前先 ::text(两个分支的列类型一致,不靠 M 库的类型推导)。
++#   length('') 在 A 库是 NULL、M 库是 0,COALESCE 后都不 > 0,判空写法两边一致;M 库升序默认 NULLS LAST,与 A 库相同。
+ name: proctune.locate_search
+ database_type: appbusiness
+ description: 过程找不到时的排查:按名字模糊搜过程(schema 不可见时 nspname 为空)与包
+ sql: |
+-  SELECT 'proc' AS kind, n.nspname, COALESCE(k.pkgname, '') AS pkgname, p.proname
++  SELECT 'proc' AS kind, n.nspname::text AS nspname, COALESCE(k.pkgname::text, '') AS pkgname, p.proname::text AS proname
+   FROM pg_proc p
+   LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
+   LEFT JOIN gs_package k ON k.oid = p.propackageid
+-  WHERE p.proname ILIKE '%{{name}}%'
++  WHERE lower(p.proname::text) LIKE lower('%{{name}}%')
+     AND (n.nspname IS NULL OR (n.nspname NOT LIKE 'pg_%' AND n.nspname NOT LIKE 'dbe_%'
+          AND n.nspname NOT IN ('information_schema', 'pkg_service', 'pkg_util', 'sqladvisor', 'db4ai',
+                                'snapshot', 'blockchain', 'cstore', 'pmk', 'coverage')))
+   UNION ALL
+-  SELECT 'package' AS kind, n.nspname, k.pkgname, '' AS proname
++  SELECT 'package' AS kind, n.nspname::text AS nspname, k.pkgname::text AS pkgname, '' AS proname
+   FROM gs_package k
+   LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
+-  WHERE COALESCE(length('{{package}}'), 0) > 0 AND k.pkgname ILIKE '%{{package}}%'
++  WHERE COALESCE(length('{{package}}'), 0) > 0 AND lower(k.pkgname::text) LIKE lower('%{{package}}%')
+   ORDER BY 1, 2, 3, 4
+   LIMIT 40;
+ params:
+diff --git a/scripts/registry/proctune/proc_def.yaml b/scripts/registry/proctune/proc_def.yaml
+index 9b64761..a72606c 100644
+--- a/scripts/registry/proctune/proc_def.yaml
++++ b/scripts/registry/proctune/proc_def.yaml
+@@ -6,13 +6,16 @@
+ # 「'{{x}}' IS NULL OR '{{x}}' = ''」两个条件都要:A 兼容库(Oracle 迁移库)里空串就是 NULL,只写 '' = '' 会得到 NULL,
+ # 整条 WHERE 变假,过程「找不到」——og5 的 kf_a(DBCOMPATIBILITY='A')实测踩到。
+ # gs_package 在 openGauss 3.0+ 与 GaussDB 505 的所有库里都有(PG 兼容库里也有,只是空的)。
++# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
++#   名字类列(name 类型)进 concat / COALESCE 前先 ::text:M 库按自己的类型推导矩阵处理 name 类型,
++#   health.table_writes 就栽在 COALESCE(name, name) 上;显式转成文字,两种模式结果一致。
+ name: proctune.proc_def
+ database_type: appbusiness
+ description: 按名字取存储过程/函数的定义(源码 + 语言 + 形参 + 所属包);支持包内过程与按包名过滤
+ sql: |
+   SELECT n.nspname, p.proname, l.lanname, p.prosrc,
+          pg_catalog.pg_get_function_arguments(p.oid) AS args,
+-         COALESCE(k.pkgname, '') AS package
++         COALESCE(k.pkgname::text, '') AS package
+   FROM pg_proc p
+   JOIN pg_namespace n ON n.oid = p.pronamespace
+   JOIN pg_language l ON l.oid = p.prolang
+diff --git a/scripts/registry/sqlreview/indexes.yaml b/scripts/registry/sqlreview/indexes.yaml
+index d554837..bfd7f82 100644
+--- a/scripts/registry/sqlreview/indexes.yaml
++++ b/scripts/registry/sqlreview/indexes.yaml
+@@ -11,24 +11,24 @@
+ #
+ # 七个列名原本就唯一且有意义，未加别名。
+ # is_unique / is_primary 是布尔列，取回来是 't'/'f'，调用方用 _as_bool 判断。
++# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
++#   同 tables.yaml:AS table → AS "table"。列顺序不再靠数组下标 (string_to_array(…))[s] 与 generate_series 展开(M 库
++#   能否用没有把握),改成在 indkey 的文本形态 ' 3 1 2 ' 里找 ' <attnum> ' 的位置排序:position(… IN …) 是两种模式都有的标准写法
++#   (M 库保持原 GaussDB 行为,官方文档「系统函数兼容性概述」)。表达式列 attnum 为 0,被 attnum > 0 排除,与原口径相同;
++#   同一列在索引里出现两次时只列一次(极少见)。
+ name: sqlreview.indexes
+ database_type: appbusiness
+ description: 某模式下的索引清单（列顺序/唯一性/扫描次数）
+ sql: |
+   SELECT
+     n.nspname::text                                              AS schema,
+-    t.relname::text                                              AS table,
++    t.relname::text                                              AS "table",
+     i.relname::text                                              AS name,
+-    array_to_string(
+-      COALESCE((SELECT array_agg(a.attname::text ORDER BY k.ord)
+-                FROM (SELECT s AS ord,
+-                             (string_to_array(ix.indkey::text, ' '))[s]::smallint AS attnum
+-                      FROM generate_series(
+-                             1,
+-                             array_length(string_to_array(ix.indkey::text, ' '), 1)) s) k
+-                JOIN pg_attribute a
+-                  ON a.attrelid = t.oid AND a.attnum = k.attnum),
+-               ARRAY[]::text[]), ',')                            AS columns,
++    COALESCE((SELECT array_to_string(array_agg(a.attname::text
++                       ORDER BY position(concat(' ', a.attnum::text, ' ') IN concat(' ', ix.indkey::text, ' '))), ',')
++                FROM pg_attribute a
++               WHERE a.attrelid = t.oid AND a.attnum > 0
++                 AND position(concat(' ', a.attnum::text, ' ') IN concat(' ', ix.indkey::text, ' ')) > 0), '') AS columns,
+     ix.indisunique                                               AS is_unique,
+     ix.indisprimary                                              AS is_primary,
+     COALESCE(s.idx_scan, 0)                                      AS scans
+diff --git a/scripts/registry/sqlreview/tables.yaml b/scripts/registry/sqlreview/tables.yaml
+index b8f1043..c5ec8f0 100644
+--- a/scripts/registry/sqlreview/tables.yaml
++++ b/scripts/registry/sqlreview/tables.yaml
+@@ -19,25 +19,24 @@
+ # 列名 schema/table/has_pk/fks/columns 原本就唯一且有意义，未加别名。
+ # has_pk 是布尔列，取回来是 't'/'f'（或 'true'/'false'，取决于中间件的
+ # 布尔渲染），调用方必须用 _as_bool 判断 —— bool('f') 是 True。
++# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
++#   TABLE 在 M 库是保留字,`AS table` 报 syntax error:别名改成 AS "table"(M 库里双引号别名按字符串别名处理,A 库是加引号的标识符,
++#   两边列名都是 table)。顺带去掉 ARRAY[]::text[] 字面量:COALESCE 挪到 array_to_string 外面,空集仍得 ''。
+ name: sqlreview.tables
+ database_type: appbusiness
+ description: 某模式下的表清单（主键/外键/列名）
+ sql: |
+   SELECT
+     n.nspname::text                                              AS schema,
+-    c.relname::text                                              AS table,
++    c.relname::text                                              AS "table",
+     EXISTS (SELECT 1 FROM pg_constraint pk
+             WHERE pk.conrelid = c.oid AND pk.contype = 'p')      AS has_pk,
+-    array_to_string(
+-      COALESCE((SELECT array_agg(fk.conname::text)
++    COALESCE((SELECT array_to_string(array_agg(fk.conname::text), ',')
+                 FROM pg_constraint fk
+-                WHERE fk.conrelid = c.oid AND fk.contype = 'f'),
+-               ARRAY[]::text[]), ',')                            AS fks,
+-    array_to_string(
+-      COALESCE((SELECT array_agg(a.attname::text ORDER BY a.attnum)
++               WHERE fk.conrelid = c.oid AND fk.contype = 'f'), '') AS fks,
++    COALESCE((SELECT array_to_string(array_agg(a.attname::text ORDER BY a.attnum), ',')
+                 FROM pg_attribute a
+-                WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped),
+-               ARRAY[]::text[]), ',')                            AS columns
++               WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), '') AS columns
+   FROM pg_class c
+   JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE c.relkind = 'r' AND n.nspname = '{{schema}}'
+diff --git a/skills/gaussdb-explain/scripts/explain.py b/skills/gaussdb-explain/scripts/explain.py
+index d554d77..b3ea489 100644
+--- a/skills/gaussdb-explain/scripts/explain.py
++++ b/skills/gaussdb-explain/scripts/explain.py
+@@ -359,6 +359,8 @@ def main(argv: Optional[list[str]] = None) -> int:
+     #
+     # 这几条原先写在取到计划之后，那时才 return 1：白跑一次 EXPLAIN、白建一次
+     # 连接，而且拒绝理由与「已经拿到计划」同时出现，读起来自相矛盾。
++    # 纯文本检查也要按业务库的词法切(M 兼容库:# 注释、反斜杠转义…,v1.5.1),连库之前先按连接设好方言。
++    access.prime_dialect(args.conn)
+     reject = shape_reject(sql_text)
+     if reject:
+         print(reject)
+diff --git a/skills/gaussdb-login/scripts/login.py b/skills/gaussdb-login/scripts/login.py
+index dc8ed01..000e703 100644
+--- a/skills/gaussdb-login/scripts/login.py
++++ b/skills/gaussdb-login/scripts/login.py
+@@ -29,7 +29,7 @@ for _anc in _HERE.parents:
+         break
+ 
+ import render  # noqa: E402
+-from common import access, config, session  # noqa: E402
++from common import access, compat, config, session  # noqa: E402
+ from common.config import MODE_API, MODE_GSQL, ConfigError, Connection  # noqa: E402
+ from common.credential import secret_for  # noqa: E402
+ from common.db import Database  # noqa: E402
+@@ -262,6 +262,8 @@ class RouteCheck(NamedTuple):
+     ok: bool
+     note: str = ""                                   # 没切过去的原因 / 切过去后的提醒
+     pending: Tuple[str, ...] = ()                    # 我们划为业务库类、但行方白名单里还没带 dbName 的脚本
++    compat: str = ""                                 # 探针顺带取的业务库兼容模式(v1.5.1;旧探针没有这一列 → 空 = 未知)
++    lctn: str = ""                                   # 业务库的 lower_case_table_names(M 库表名大小写规则)
+ 
+ 
+ def _try_route(conn: Connection, target: str) -> RouteCheck:
+@@ -290,7 +292,27 @@ def _try_route(conn: Connection, target: str) -> RouteCheck:
+         return RouteCheck(False, "中间件没有按 dbName 切库(带上「%s」后仍连「%s」)" % (target, got or "未知"))
+     pending = tuple(sorted(n for n in routing.BUSINESS_DB_SCRIPTS
+                            if n != routing.PROBE and client.registered(n) and not client.declares(n, routing.PARAM)))
+-    return RouteCheck(True, pending=pending)
++    row = (rows or [{}])[0]
++    return RouteCheck(True, pending=pending, compat=compat.normalize(row.get("compat")),
++                      lctn=compat.normalize_lctn(row.get("lctn")))
++
++
++def _detect_compat_direct(conn: Connection) -> Connection:
++    """直连模式:同一条探针直接跑一次取兼容模式。取不到(旧白名单 / 权限 / 任何错误)就保持未知,不挡登录。"""
++    try:
++        rows = access.runner_for(conn).run(routing.PROBE)
++    except Exception:                                 # noqa: BLE001 —— 只影响写法提示,不影响登录
++        return conn
++    row = (rows or [{}])[0]
++    mode = compat.normalize(row.get("compat"))
++    return replace(conn, compat=mode, lctn=compat.normalize_lctn(row.get("lctn"))) if mode else conn
++
++
++def _compat_cell(conn: Connection) -> str:
++    """登录输出「兼容模式」一行。模型按它写 SQL(AGENTS.md「数据库连接规则」第 5 条)。"""
++    if compat.mode_of(conn):
++        return compat.label(conn)
++    return "未知（本版白名单增量未导入，探针取不到；按 A 兼容处理）"
+ 
+ 
+ def _direct_cell(target: str, pg: str, rc: RouteCheck) -> str:
+@@ -395,6 +417,7 @@ def _describe(conn: Connection, note: str, path, role: str = "", handle: str = "
+            if conn.exec_database else
+            [["要诊断的库", "%s（已直连：中间件按 dbName 切库）" % conn.database]] if conn.route_db else
+            [["数据库", conn.database]]),
++         *([["兼容模式", _compat_cell(conn)]] if conn.route_db else []),
+          *([["库名核对", db_note]] if db_note else []),
+          ["验证", note],
+          ["主备", role or "未探测"]])
+@@ -406,6 +429,7 @@ def _describe(conn: Connection, note: str, path, role: str = "", handle: str = "
+          ["应用", conn.app or "—"],
+          ["连接名",  conn.name]  ,
+          ["目标", "%s:%s/%s" % (conn.host, conn.port, conn.database)],
++         *([["兼容模式", compat.label(conn)]] if compat.mode_of(conn) else []),
+          ["驱动", conn.driver],
+          ["用户", conn.user],
+          ["验证", note],
+@@ -594,7 +618,7 @@ def main(argv: Optional[List[str]] = None) -> int:
+                     rc = _try_route(base, chk.target)
+                     if rc.ok:
+                         db_note = _direct_cell(chk.target, chk.actual, rc)
+-                        conn = replace(base, route_db=chk.target)
++                        conn = replace(base, route_db=chk.target, compat=rc.compat, lctn=rc.lctn)
+                     else:
+                         db_note = _routed_cell(chk) + "；**没有切到业务库**：" + rc.note
+                         conn = replace(base, exec_database=chk.actual)
+@@ -604,6 +628,8 @@ def main(argv: Optional[List[str]] = None) -> int:
+                     db_note = ("**库名未核实**（%s）：api 模式下库名不发给中间件，写错不会报错、"
+                                "只会写错报告抬头。请确认「%s」就是这个实例上的库。" % (chk.note, conn.database))
+ 
++        if conn.driver != "grmp" and not args.no_verify:
++            conn = _detect_compat_direct(conn)
+         role = "未探测（--no-verify）" if args.no_verify else _probe_role(conn)
+         handle = session.save(conn)
+         print(_describe(conn, note, session.path_for(handle), role, handle=handle, db_note=db_note))
+diff --git a/skills/gaussdb-login/scripts/selfcheck.py b/skills/gaussdb-login/scripts/selfcheck.py
+index b87cded..74b5995 100644
+--- a/skills/gaussdb-login/scripts/selfcheck.py
++++ b/skills/gaussdb-login/scripts/selfcheck.py
+@@ -6,8 +6,12 @@
+ 知识库目录不存在 —— 每一样都是用到时才以「HTTP 400 agent诊断脚本执行失败」或「列为空」的形态冒出来,排查要一层层倒推。
+ 
+     python3 {baseDir}/scripts/selfcheck.py --session <句柄>
++    python3 {baseDir}/scripts/selfcheck.py --session <句柄> --m-trial     # 另把 41 条业务库脚本各试跑一次
+ 
+ 只跑白名单里的只读脚本,每条 LIMIT 1 或等价的极小结果;不改任何东西。输出每一项的结论、原因和该找谁。
++
++--m-trial(v1.5.1):业务库是 M 兼容模式时,41 条切到业务库执行的脚本用安全参数(不存在的对象名、SELECT 1 的估算计划)
++各跑一次,逐条列通过 / 报错 —— 我们没有 M 兼容库可测,现场跑一次把结果发回即可核对。A 兼容库同样可以跑。
+ """
+ from __future__ import annotations
+ 
+@@ -25,7 +29,7 @@ for _anc in _HERE.parents:
+         break
+ 
+ import render  # noqa: E402
+-from common import access, cli, config  # noqa: E402
++from common import access, cli, compat, config  # noqa: E402
+ from common.version import package_version  # noqa: E402
+ from common.grmp import deltas, routing  # noqa: E402
+ from common.grmp.registry import Registry, RegistryError  # noqa: E402
+@@ -52,6 +56,24 @@ SWITCHES = (
+ )
+ 
+ 
++# --m-trial 的安全参数:按参数名给值。对象名用不存在的名字(查到 0 行也算通过),计划只取 SELECT 1 的估算计划(不执行)
++TRIAL_OBJECT = "gsdb_selfcheck_probe"
++TRIAL_VALUES = {
++    "limit": "1", "min_bytes": "0", "min_pages": "0", "min_rows": "0",
++    "name": TRIAL_OBJECT, "names": "'%s'" % TRIAL_OBJECT, "relname": TRIAL_OBJECT, "tables": "'%s'" % TRIAL_OBJECT,
++    "columns": "'id'", "order": "s.calls DESC", "package": "", "schema": "public", "schemas": "'public'",
++    "schema_filter": "('pg_catalog','information_schema')", "sql": "SELECT 1",
++}
++# M 兼容库上不适用的脚本(技能在 M 库自动不调用):不试跑,结果标「不适用」
++M_NOT_APPLICABLE = {
++    "procinfo.source_adm": "M 兼容库没有 ADM_SOURCE 视图(只在 A 兼容库提供),技能在 M 库自动跳过这一兜底",
++    "proctune.source_adm": "M 兼容库没有 ADM_SOURCE 视图(只在 A 兼容库提供),技能在 M 库自动跳过这一兜底",
++}
++# A 兼容库上:ADM_SOURCE 默认只有系统管理员可读,读不到属于授权问题,不算脚本坏了
++ADM_SCRIPTS = frozenset(M_NOT_APPLICABLE)
++SKIP = "—"
++
++
+ class Item(NamedTuple):
+     what: str
+     mark: str
+@@ -232,15 +254,85 @@ def check_switches(runner) -> List[Item]:
+     return items
+ 
+ 
+-def render_report(items: List[Item]) -> str:
++def check_compat(conn) -> List[Item]:
++    """业务库兼容模式(v1.5.1):登录时探针取到的 datcompatibility。只在切到业务库时有意义。"""
++    if not conn.route_db:
++        return []
++    if compat.mode_of(conn):
++        return [Item("业务库兼容模式", OK, compat.label(conn))]
++    return [Item("业务库兼容模式", WARN, "取不到:探针 %s 还是旧版(本版白名单增量未导入),按 A 兼容处理。业务库是 M 兼容时请导入"
++                 "本版增量后重新登录 —— 否则技能不知道要按 M 兼容的写法处理" % routing.PROBE, MIDDLEWARE)]
++
++
++def _trial_params(registry, name: str):
++    """按本地脚本定义给这条脚本配安全参数;读不到定义时按参数名猜不了,返回 None。"""
++    if registry is None:
++        return None
++    try:
++        rec = registry.find(name)
++    except Exception:  # noqa: BLE001
++        return None
++    keys = [p.key for p in (getattr(rec, "params", None) or ())]
++    if any(k not in TRIAL_VALUES for k in keys):
++        return None
++    return {k: TRIAL_VALUES[k] for k in keys}
++
++
++def trial_business(conn, runner, registry) -> List[List[str]]:
++    """--m-trial:41 条业务库脚本各跑一次。返回表格行 [脚本, 结果, 说明]。只读:目录查询与不执行的估算计划。"""
++    client = getattr(runner, "client", None)
++    mysql = compat.is_mysql_like(conn)
++    rows = []
++    for name in sorted(routing.BUSINESS_DB_SCRIPTS):
++        if mysql and name in M_NOT_APPLICABLE:
++            rows.append([name, SKIP, "不适用:" + M_NOT_APPLICABLE[name]])
++            continue
++        if client is not None and not client.registered(name):
++            rows.append([name, WARN, "中间件白名单里没有这条脚本(按本版增量导入)"])
++            continue
++        values = _trial_params(registry, name)
++        if values is None:
++            rows.append([name, WARN, "读不到本地脚本定义,配不了试跑参数(技能包的 scripts/ 没放进技能目录)"])
++            continue
++        try:
++            got = runner.run(name, values)
++        except Exception as exc:  # noqa: BLE001
++            if name in ADM_SCRIPTS and not mysql:
++                rows.append([name, WARN, "读不到 ADM_SOURCE(%s):默认只有系统管理员可读,需要时由 DBA 授权" % _err(exc)])
++            else:
++                rows.append([name, FAIL, _err(exc)])
++            continue
++        rows.append([name, OK, "%d 行" % len(got or [])])
++    return rows
++
++
++def trial_summary(rows: List[List[str]], conn) -> List[Item]:
++    bad = [r for r in rows if r[1] == FAIL]
++    warn = [r for r in rows if r[1] == WARN]
++    what = "业务库脚本试跑(%s)" % (compat.mode_of(conn) or "兼容模式未知")
++    if bad:
++        return [Item(what, FAIL, "%d 条报错:%s。逐条结果见下表,把整份输出发给我方" % (len(bad), "、".join(r[0] for r in bad[:6])),
++                     DEPLOY)]
++    if warn:
++        return [Item(what, WARN, "%d 条未能试跑或受限,见下表" % len(warn), MIDDLEWARE)]
++    return [Item(what, OK, "%d 条全部通过" % sum(1 for r in rows if r[1] == OK))]
++
++
++def render_report(items: List[Item], trial: Optional[List[List[str]]] = None) -> str:
+     bad = [i for i in items if i.mark != OK]
+     head = "# 部署自检\n\n" + ("全部正常。\n\n" if not bad else "%d 项需要处理(✕ 功能不可用,！ 部分受限)。\n\n" % len(bad))
+-    return head + render.table(["检查项", "结果", "说明", "找谁"], [[i.what, i.mark, i.detail, i.owner or "—"] for i in items])
++    out = head + render.table(["检查项", "结果", "说明", "找谁"], [[i.what, i.mark, i.detail, i.owner or "—"] for i in items])
++    if trial:
++        out += ("\n\n## 业务库脚本试跑(%d 条)\n\n安全参数:不存在的对象名 `%s`、`SELECT 1` 的估算计划;只读,不改任何东西。\n\n"
++                % (len(trial), TRIAL_OBJECT)) + render.table(["脚本", "结果", "说明"], trial)
++    return out
+ 
+ 
+ def main(argv: Optional[List[str]] = None) -> int:
+     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+     ap.add_argument("-c", "--conn", default="", help="连接名(省略则用 gaussdb-login 建立的会话)")
++    ap.add_argument("--m-trial", action="store_true",
++                    help="另把 41 条在业务库执行的脚本用安全参数各试跑一次(只读),逐条列结果 —— M 兼容业务库核对用")
+     cli.add_session_arg(ap)
+     args = ap.parse_args(argv)
+     cli.apply_session_arg(args)
+@@ -252,8 +344,9 @@ def main(argv: Optional[List[str]] = None) -> int:
+         items.append(Item("登录会话", FAIL, "%s。先用 gaussdb-login 登录再自检" % _err(exc), ""))
+         print(render_report(items), end="")
+         return 1
++    registry, why = _registry()
+     if conn.driver == "grmp":
+-        registry, why = _registry()
++        items += _safe("业务库兼容模式", check_compat, conn)
+         if registry is None:
+             items.append(Item("白名单", WARN, why, DEPLOY))
+             items += _safe("业务库切换", check_routing, conn, runner, None, False)
+@@ -262,7 +355,14 @@ def main(argv: Optional[List[str]] = None) -> int:
+             items += _safe("白名单", check_whitelist, conn, registry)
+             items += _safe("业务库切换", lambda: check_routing(conn, runner, used_names(registry)))
+     items += _safe("关键脚本试跑", check_scripts, runner) + _safe("数据库监控开关", check_switches, runner)
+-    print(render_report(items), end="")
++    trial = None
++    if args.m_trial:
++        try:
++            trial = trial_business(conn, runner, registry)
++            items += trial_summary(trial, conn)
++        except Exception as exc:  # noqa: BLE001 —— 试跑本身出错也照常出报告
++            items.append(Item("业务库脚本试跑", FAIL, "试跑出错:%s" % _err(exc), DEPLOY))
++    print(render_report(items, trial), end="")
+     return 0 if all(i.mark != FAIL for i in items) else 1
+ 
+ 
+diff --git a/skills/gaussdb-memanalyze/scripts/wlm.py b/skills/gaussdb-memanalyze/scripts/wlm.py
+index a346c08..348e1a0 100644
+--- a/skills/gaussdb-memanalyze/scripts/wlm.py
++++ b/skills/gaussdb-memanalyze/scripts/wlm.py
+@@ -11,6 +11,8 @@ this skill exists to prevent.
+ """
+ from __future__ import annotations
+ 
++import re
++
+ import common
+ from common import access  # noqa: E402
+ # 结果值全是字符串：bool("f") 是 True、int("3704.0") 会抛异常。
+@@ -24,6 +26,19 @@ from model import (
+ from thresholds import Thresholds
+ from util import f, human_mb, i64, trunc
+ 
++_WLM_DENIED = re.compile(r"permission denied for function|permission denied|insufficient privilege|42501", re.I)
++
++
++def _wlm_why(exc) -> str:
++    """WLM 资源跟踪取不到的原因。函数权限不足(2026-11-20 现场:Permission denied for function
++    pg_stat_get_wlm_realtime_session_info)单独说清:不是内核没有这一层,是执行账号没授权 —— DBA 授权后就能看。"""
++    from util import summarize_err
++    raw = summarize_err(exc)
++    if _WLM_DENIED.search(str(exc)):
++        return ("执行账号没有 WLM 资源跟踪函数的执行权限(%s);需 DBA 授权(一般为监控管理员或系统管理员)后才能看这一层"
++                % raw.rstrip("。."))
++    return raw
++
+ _SQL_COLS = ("queryid", "query", "start_time", "duration", "estimate_memory",
+              "max_peak_memory", "max_spill_size", "warning")
+ 
+@@ -186,8 +201,7 @@ def collect_sql(runner, cat: Catalog, cap: Capability, th: Thresholds, top: int,
+         rows = runner.run("memanalyze.wlm_sql_hist" if historical
+                           else "memanalyze.wlm_sql", {"limit": int(top)})
+     except access.QueryError as exc:
+-        from util import summarize_err
+-        return _from_history(runner, th, top, summarize_err(exc))
++        return _from_history(runner, th, top, _wlm_why(exc))
+ 
+     d = DimResult(dimension=DIM_SQL, available=True,
+                   headers=["query_id", "耗时(ms)", "估算内存", "峰值内存",
+@@ -275,8 +289,7 @@ def collect_operator(runner, cat: Catalog, cap: Capability, th: Thresholds, top:
+         rows = runner.run("memanalyze.wlm_operator_hist" if historical
+                           else "memanalyze.wlm_operator", {"limit": int(top)})
+     except access.QueryError as exc:
+-        from util import summarize_err
+-        return _l5_unavailable(summarize_err(exc))
++        return _l5_unavailable(_wlm_why(exc))
+ 
+     d = DimResult(dimension=DIM_OPERATOR, available=True,
+                   headers=["query_id", "node_id", "算子", "耗时(ms)", "估算行",
+diff --git a/skills/gaussdb-proctune/SKILL.md b/skills/gaussdb-proctune/SKILL.md
+index abcad89..75557ef 100644
+--- a/skills/gaussdb-proctune/SKILL.md
++++ b/skills/gaussdb-proctune/SKILL.md
+@@ -73,7 +73,7 @@ metadata:
+ 
+ 3. **合成值提醒。** `## Variable Substitution` 一节说明游标变量被按声明类型填了合成值——计划「形状」可靠，行数/选择性是近似值。把这点说清楚，并提示可用 `--bind` 传真实值做精确验证。
+ 
+-4. **加载方法论。** 阅读 `{baseDir}/references/proc-tuning-methodology.md`，对照证据各节按其检查清单分析。涉及 OpenGauss 内幕（嵌套语句统计、子事务成本、A 兼容游标语义）查 `{baseDir}/references/proc-internals.md`。**游标 SELECT 的优化等同单 SQL**，按需查 GaussDB 专项知识：CBO 与诊断 → `{baseDir}/references/gaussdb-cbo-and-diagnosis.md`；改写候选 → `{baseDir}/references/gaussdb-rewrite-patterns.md`；A 兼容 → `{baseDir}/references/gaussdb-a-compat-gotchas.md`；分区/分布 → `{baseDir}/references/gaussdb-partition-distribution.md`。
++4. **加载方法论。** 阅读 `{baseDir}/references/proc-tuning-methodology.md`，对照证据各节按其检查清单分析。涉及 OpenGauss 内幕（嵌套语句统计、子事务成本、A 兼容游标语义）查 `{baseDir}/references/proc-internals.md`。**游标 SELECT 的优化等同单 SQL**，按需查 GaussDB 专项知识：CBO 与诊断 → `{baseDir}/references/gaussdb-cbo-and-diagnosis.md`；改写候选 → `{baseDir}/references/gaussdb-rewrite-patterns.md`；A 兼容 → `{baseDir}/references/gaussdb-a-compat-gotchas.md`；M 兼容 → `{baseDir}/references/gaussdb-m-compat-gotchas.md`；分区/分布 → `{baseDir}/references/gaussdb-partition-distribution.md`。
+ 
+ 5. **索引建议——只用已验证的那一节。** 每个游标的 `## Verified Index Candidates` 是 hypopg 假设索引硬验证过的。
+    - **只推荐出现在那张已验证表里的索引**，引用真实的 `Orig → Hypo cost (N×)`。
+diff --git a/skills/gaussdb-proctune/references/gaussdb-m-compat-gotchas.md b/skills/gaussdb-proctune/references/gaussdb-m-compat-gotchas.md
+new file mode 100644
+index 0000000..5d01d6f
+--- /dev/null
++++ b/skills/gaussdb-proctune/references/gaussdb-m-compat-gotchas.md
+@@ -0,0 +1,79 @@
++# GaussDB M 兼容（MySQL 兼容模式）写法与陷阱
++
++> 何时相关：登录输出「兼容模式 M」（`sql_compatibility = 'M'`，建库时 `dbcompatibility = 'M'`）的业务库；报告开头有「业务库兼容模式：M」一行时也是。
++> 价值：在 M 兼容库上，**你写的改写 SQL、建索引语句要按 M 的语法写**，按 A / PostgreSQL 的写法会直接报语法错，或者不报错但意思变了。
++> 依据：GaussDB 25.1.32《M-Compatibility 开发者指南》（下文各节注明出处）。M 兼容库与 MySQL 5.7 大体兼容，但执行计划、EXPLAIN 输出沿用 GaussDB。
++> 标 ⚠️ 的是「不报错、结果却不一样」的坑：改写前后结果是否等价，交给 `verify.py` 的等价门判，不要自己断言。
++
++---
++
++## 1. 标识符用反引号，双引号是字符串 ⚠️
++
++`[M]` 标识符默认用反引号：`` SELECT `order`, `key` FROM `t_order` ``。**双引号默认是字符串常量**，只有 sql_mode 含 `ANSI_QUOTES` 时才是标识符。（出处：SQL 语法 › 标识符说明）
++
++```sql
++-- ❌ M 库里 "OrderNo" 是字符串 'OrderNo'，这一列每行都是同一个值，不报错
++SELECT "OrderNo" FROM t_order;
++-- ✅
++SELECT `OrderNo` FROM t_order;
++```
++
++保留字作名字必须加反引号：`TABLE`、`INDEX`、`KEY`、`ARRAY`、`LIMIT`、`OFFSET` 等在 M 里是保留字，`AS table` 直接报语法错。（出处：SQL 语法 › 关键字）
++
++## 2. `||` 是逻辑或，拼接用 `concat()` ⚠️
++
++`[M]` `'a' || 'b'` 是逻辑或，不是拼接（2026-11 现场：`n.nspname || '.' || c.relname` 报 argument of OR/AND must be type boolean）。拼接写 `concat(a, '.', b)`。
++
++`concat()` 的参数里有一个是 NULL，结果就是 NULL（MySQL 语义）；A 兼容库里 NULL 当空串。可能为空的列先判空：`CASE WHEN c IS NULL THEN '' ELSE concat(…) END`。
++
++## 3. 不支持 `ILIKE`
++
++`[M]` 没有 `ILIKE`（syntax error at or near "ILIKE"），也没有 `~~*`。不分大小写的匹配写 `lower(col) LIKE lower('%x%')`。
++M 库里 `LIKE` 本身是否区分大小写取决于列的字符序（`*_ci` 不区分），改写时不要假设两者行为相同。⚠️
++
++## 4. 类型转换：CAST 的目标类型有限，`::` 不建议
++
++`[M]` `CAST(x AS 类型)` 的目标类型只有：`SIGNED`、`UNSIGNED`、`DATE`、`TIME`、`DATETIME`、`BINARY`、`CHAR`、`DECIMAL`、`FLOAT`、`DOUBLE`、`JSON`。
++`CAST(x AS float8)`、`CAST(x AS bigint)`、`CAST(x AS text)` 这类 A 库写法在 M 库不行。双冒号 `x::int` 能用，但官方「不建议」（结果可能不符合预期），改写里不要用。（出处：SQL 参考 › 类型转换 › 显式类型转换）
++
++```sql
++-- ❌
++WHERE CAST(order_no AS bigint) = 100
++-- ✅
++WHERE CAST(order_no AS SIGNED) = 100
++```
++
++索引列上套类型转换照样会让索引用不上——这条与 A 库相同。
++
++## 5. 空串不是 NULL ⚠️
++
++`[M]` `'' IS NULL` 为假，`length('')` 是 0；A 兼容库里 `''` 就是 NULL。从 A 库搬来的「`col = ''` 等于没值」的写法在 M 库意思不同。
++
++## 6. 除法与整除
++
++`[M]` `/` 的结果是小数；要整除写 `DIV`（`7 DIV 2` 得 3，M 专有，A 库没有这个写法）或 `floor(7 / 2)`。取余 `%` 与 `MOD` 都支持。（出处：函数 › 数字操作函数和算术操作符）
++
++## 7. 排序与分页
++
++`[M]` `ORDER BY … NULLS FIRST / NULLS LAST` 支持；升序默认 NULL 在后、降序默认 NULL 在前（与 A 库相同）。
++`LIMIT n OFFSET m` 与 `LIMIT m, n` 都支持。（出处：SQL 参考 › SELECT）
++
++## 8. 建索引
++
++`[M]` 语法：`` CREATE [UNIQUE] INDEX [`索引名`] [USING BTREE] ON `表` (`列` [ASC|DESC], …) ``，索引名可省，但建议写上：
++**索引名在 schema 内唯一**（MySQL 是表内唯一），起名带上表名，避免和别的表的索引重名。函数索引写 `((表达式))`。
++（出处：SQL 参考 › CREATE INDEX；兼容性说明 › M-Compatibility 模式概述）
++
++## 9. 函数用 M 支持的写法
++
++`[M]` 与 MySQL 同名的原 GaussDB 函数（`round`、`position`、`instr`、`format`、`ceil`、`regexp_*` 等）行为可能与 MySQL 不同，改写里优先用 M 模式支持的函数；
++`isEmpty`、`variance`、`stddev_pop`、`var_pop` 等在 M 库直接提示不支持。不要写 `pg_catalog.函数名(…)` 这种带 schema 的调用。（出处：系统函数 › 系统函数兼容性概述）
++
++## 10. M 库没有的东西
++
++`[M]` 物化视图、SPM 计划管理（SQL 计划基线）、全密态、DB4AI 不支持——不要把这些写进建议。（出处：M-Compatibility 数据库不支持的 GaussDB 特性）
++系统视图只继承了一部分：`ADM_*` 视图（如 `ADM_SOURCE`）没有，`pg_stat_*`、`pg_stats`、`pg_locks`、`pg_settings` 等有。
++
++## 11. 执行计划照旧
++
++`[M]` EXPLAIN 用 GaussDB 的语法与输出（`EXPLAIN (FORMAT JSON) …`），不是 MySQL 的 `EXPLAIN FORMAT=…`；计划节点、代价的读法与 A 库相同，`tuning-methodology.md` 的检查清单照常用。
+diff --git a/skills/gaussdb-proctune/scripts/evidence.py b/skills/gaussdb-proctune/scripts/evidence.py
+index afede00..6416051 100644
+--- a/skills/gaussdb-proctune/scripts/evidence.py
++++ b/skills/gaussdb-proctune/scripts/evidence.py
+@@ -37,6 +37,7 @@ from common.grmp.values import as_bool, as_float, as_int  # noqa: E402
+ from common import explain_actual as ea  # noqa: E402
+ from common import search_path as sp  # noqa: E402
+ from common import catalog_scope as cs  # noqa: E402
++from common import compat  # noqa: E402
+ 
+ # SQL 已迁到 scripts/registry/proctune/ —— 两条路径共用同一份定义
+ DB_VERSION_SCRIPT = "proctune.db_version"
+@@ -274,8 +275,9 @@ def collect(runner, db, sql_text: str, do_analyze: bool, schema: str = "") -> Ev
+         except ValueError as exc:
+             sp_note = str(exc)
+         plan = explain(db, sql_text, do_analyze)
+-    names = extract_tables(sql_text)
+-    scope = cs.Scope(explicit=cs.explicit_schemas(extract_table_refs(sql_text)), default=schema or "")
++    fold = compat.folds_unquoted(runner)          # M 兼容库表名区分大小写时不折小写(v1.5.1)
++    names = extract_tables(sql_text, fold)
++    scope = cs.Scope(explicit=cs.explicit_schemas(extract_table_refs(sql_text, fold)), default=schema or "")
+     return Evidence(
+         sql=sql_text,
+         version=version,
+diff --git a/skills/gaussdb-proctune/scripts/proctune.py b/skills/gaussdb-proctune/scripts/proctune.py
+index 409f41b..20c2c29 100644
+--- a/skills/gaussdb-proctune/scripts/proctune.py
++++ b/skills/gaussdb-proctune/scripts/proctune.py
+@@ -46,6 +46,7 @@ for _anc in _HERE.parents:                      # locate common/ (repo root or i
+ 
+ import common  # noqa: E402
+ from common import access  # noqa: E402
++from common import compat  # noqa: E402
+ from common import cli  # noqa: E402
+ from common import kbsection  # noqa: E402
+ from common import proc_locate  # noqa: E402
+@@ -526,10 +527,10 @@ def main(argv: Optional[list[str]] = None) -> int:
+                 else access.DEFAULT_SKILL_TIMEOUT_SECONDS)
+         if args.cmd == "collect":
+             pe = proc_collect(runner, args.proc)
+-            out = _collect_json(pe) if args.format == "json" else proc_collect_report(pe)
++            out = _collect_json(pe) if args.format == "json" else compat.report_line(runner) + proc_collect_report(pe)
+         else:
+             tr = tune_cursors(runner, db, args.proc, args.cursor, binds)
+-            out = _tune_json(tr) if args.format == "json" else cursor_tune_report(tr)
++            out = _tune_json(tr) if args.format == "json" else compat.report_line(runner) + cursor_tune_report(tr)
+         print(out, end="" if args.format == "markdown" else "\n")
+         return 0
+     except sysprocs.SystemProcSkipped as exc:
+diff --git a/skills/gaussdb-sqlreview/SKILL.md b/skills/gaussdb-sqlreview/SKILL.md
+index 14408ed..7a53201 100644
+--- a/skills/gaussdb-sqlreview/SKILL.md
++++ b/skills/gaussdb-sqlreview/SKILL.md
+@@ -96,8 +96,8 @@ metadata:
+ - `--sql-id` 取到的线上 SQL 可能是**归一化文本**（字面量变成占位符）或**被截断**
+   （`track_activity_query_size` 限制），脚本会在报告里出 note。此时前置模糊匹配这类
+   依赖字面量的规则会失效，必须如实说明，不要断言"没有违规"。
+-- 存量对象审查（`--schema`）看到的是**服务端折叠后的名字**（未加引号的 `OrderItems`
+-  在库里就是 `orderitems`），所以大小写类命名违规只能在 DDL 文本审查中发现。
++- 存量对象审查（`--schema`）看到的是**库里存的名字**：A 兼容库里未加引号的 `OrderItems` 存成 `orderitems`，
++  大小写类命名违规只能在 DDL 文本审查中发现；M 兼容库是否保留大小写取决于参数 `lower_case_table_names`，报告开头写明了，按报告说。
+ 
+ ## 安全红线
+ 
+diff --git a/skills/gaussdb-sqlreview/scripts/checks.py b/skills/gaussdb-sqlreview/scripts/checks.py
+index 16fc0ee..7ecd866 100644
+--- a/skills/gaussdb-sqlreview/scripts/checks.py
++++ b/skills/gaussdb-sqlreview/scripts/checks.py
+@@ -85,7 +85,7 @@ def _s_table_has_foreign_key(stmt: Statement, rule: Rule) -> list[Finding]:
+     if not _RE_FOREIGN_KEY.search(stmt.normalized):
+         return []
+     m = _RE_FK_NAME.search(stmt.normalized)
+-    name = m.group(1).strip('"') if m else "(匿名)"
++    name = m.group(1).strip('"').strip("`") if m else "(匿名)"
+     return [_finding(rule, _at(stmt),
+                      _fmt(rule.message, table=_tbl(stmt), constraint=name),
+                      snippet=stmt.raw)]
+diff --git a/skills/gaussdb-sqlreview/scripts/lexer.py b/skills/gaussdb-sqlreview/scripts/lexer.py
+index 5716562..fa7041f 100644
+--- a/skills/gaussdb-sqlreview/scripts/lexer.py
++++ b/skills/gaussdb-sqlreview/scripts/lexer.py
+@@ -32,6 +32,32 @@ _DQL_HEADS = {"select", "with", "values", "table", "explain"}
+ 
+ _FILL = "x"  # stand-in byte for literal bodies inside mask()
+ 
++# M 兼容库(v1.5.1):业务库是 MySQL 词法时由 sqlreview.py 按会话的兼容模式打开(common/compat.py is_mysql_like)。
++# 打开后:# 到行尾是注释;-- 后面跟空白才是注释;双引号是字符串(不是标识符);字符串里反斜杠转义;反引号是标识符。
++# 默认关:A 库与 1.5.0 的词法一字不差。
++_MYSQL = False
++
++
++def set_mysql(flag: bool) -> None:
++    global _MYSQL
++    _MYSQL = bool(flag)
++
++
++def _quoted_end(sql: str, i: int, quote: str, backslash: bool) -> int:
++    """sql[i] 是开引号,返回配对闭引号之后的位置(连写两个引号是转义;backslash 时反斜杠转义下一个字符)。"""
++    n, j = len(sql), i + 1
++    while j < n:
++        if backslash and sql[j] == "\\":
++            j += 2
++            continue
++        if sql[j] == quote:
++            if j + 1 < n and sql[j + 1] == quote:
++                j += 2
++                continue
++            return j + 1
++        j += 1
++    return n
++
+ 
+ @dataclass(frozen=True)
+ class Span:
+@@ -58,7 +84,29 @@ def spans(sql: str) -> tuple[Span, ...]:
+     while i < n:
+         ch = sql[i]
+ 
+-        if ch == "-" and sql.startswith("--", i):
++        if _MYSQL and (ch == "#" or (sql.startswith("--", i) and (i + 2 >= n or sql[i + 2].isspace()))):
++            flush_code(i)
++            end = sql.find("\n", i)
++            end = n if end < 0 else end
++            out.append(Span("line_comment", i, end))
++            i = code_start = end
++
++        elif _MYSQL and ch in ("'", '"'):
++            flush_code(i)
++            j = _quoted_end(sql, i, ch, backslash=True)
++            out.append(Span("string", i, j))
++            i = code_start = j
++
++        elif _MYSQL and ch == "`":
++            flush_code(i)
++            j = _quoted_end(sql, i, "`", backslash=False)
++            out.append(Span("ident", i, j))
++            i = code_start = j
++
++        elif _MYSQL and ch == "-":
++            i += 1                               # MySQL 里 --x 不是注释(两个负号)
++
++        elif ch == "-" and sql.startswith("--", i):
+             flush_code(i)
+             end = sql.find("\n", i)
+             end = n if end < 0 else end          # newline itself stays code
+@@ -169,8 +217,9 @@ def normalize(sql: str) -> tuple[str, dict[str, str]]:
+ def _literal_body(kind: str, text: str) -> str:
+     """The literal's content, without its quoting."""
+     if kind == "string":
+-        inner = text[1:-1] if len(text) >= 2 and text.endswith("'") else text[1:]
+-        return inner.replace("''", "'")
++        q = text[:1] or "'"                    # M 兼容库里双引号也是字符串
++        inner = text[1:-1] if len(text) >= 2 and text.endswith(q) else text[1:]
++        return inner.replace(q + q, q)
+     tag_end = text.find("$", 1) + 1        # dollar: strip $tag$ from both ends
+     return text[tag_end:-tag_end] if tag_end > 0 else text
+ 
+@@ -213,7 +262,7 @@ def _written(name: str) -> str:
+ 
+     Naming rules judge what the author typed, so they need this, not `_bare`.
+     """
+-    return name.split(".")[-1].strip().strip('"')
++    return name.split(".")[-1].strip().strip('"').strip("`")
+ 
+ 
+ def _bare(name: str) -> str:
+@@ -223,22 +272,22 @@ def _bare(name: str) -> str:
+ 
+ _RE_CREATE_TABLE = re.compile(
+     r"\bCREATE\s+(?:(?:GLOBAL|LOCAL)\s+)?(?:(?:TEMP|TEMPORARY|UNLOGGED)\s+)?TABLE\s+"
+-    r"(?:IF\s+NOT\s+EXISTS\s+)?([\w.\"]+)", re.I)
++    r"(?:IF\s+NOT\s+EXISTS\s+)?([\w.\"`]+)", re.I)
+ # 列清单用 _index_items 按括号配对取:原先 `ON t (…)` 紧挨着,`USING btree/gin (…)`(gs_dump 与各种建表工具导出的
+ # DDL 默认都带)整条匹配不上,IDX001 / IDX002 静默失效;函数索引 `(lower(name))` 被 [^)]* 截断、列取成了函数名
+ # (2026-11-08 行方报告 M1 / M2)。
+ _RE_CREATE_INDEX = re.compile(
+     r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"
+-    r"([\w.\"]+)?\s*ON\s+(?:ONLY\s+)?([\w.\"]+)\s*(?:USING\s+(\w+)\s*)?\(", re.I)
+-_PLAIN_COL = re.compile(r'[\w$]+|"(?:[^"]|"")+"')
++    r"([\w.\"`]+)?\s*ON\s+(?:ONLY\s+)?([\w.\"`]+)\s*(?:USING\s+(\w+)\s*)?\(", re.I)
++_PLAIN_COL = re.compile(r'[\w$]+|"(?:[^"]|"")+"|`(?:[^`]|``)+`')
+ _RE_INDEX_ITEM_TAIL = re.compile(
+     r"(?:\s+COLLATE\s+\S+)?(?:\s+[A-Za-z_]\w*_ops)?(?:\s+(?:ASC|DESC))?(?:\s+NULLS\s+(?:FIRST|LAST))?\s*$", re.I)
+ _RE_ALTER_TABLE = re.compile(
+-    r"\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?([\w.\"]+)", re.I)
+-_RE_DELETE = re.compile(r"\bDELETE\s+FROM\s+(?:ONLY\s+)?([\w.\"]+)", re.I)
+-_RE_UPDATE = re.compile(r"\bUPDATE\s+(?:ONLY\s+)?([\w.\"]+)", re.I)
+-_RE_INSERT = re.compile(r"\bINSERT\s+INTO\s+([\w.\"]+)", re.I)
+-_RE_FROM = re.compile(r"\bFROM\s+([\w.\"]+)", re.I)
++    r"\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?([\w.\"`]+)", re.I)
++_RE_DELETE = re.compile(r"\bDELETE\s+FROM\s+(?:ONLY\s+)?([\w.\"`]+)", re.I)
++_RE_UPDATE = re.compile(r"\bUPDATE\s+(?:ONLY\s+)?([\w.\"`]+)", re.I)
++_RE_INSERT = re.compile(r"\bINSERT\s+INTO\s+([\w.\"`]+)", re.I)
++_RE_FROM = re.compile(r"\bFROM\s+([\w.\"`]+)", re.I)
+ 
+ 
+ def _index_items(text: str, open_paren: int) -> list:
+diff --git a/skills/gaussdb-sqlreview/scripts/sqlreview.py b/skills/gaussdb-sqlreview/scripts/sqlreview.py
+index 2ae4c90..cb3c7f3 100644
+--- a/skills/gaussdb-sqlreview/scripts/sqlreview.py
++++ b/skills/gaussdb-sqlreview/scripts/sqlreview.py
+@@ -30,7 +30,7 @@ for _anc in _HERE.parents:                      # locate common/ (repo root or i
+         break
+ 
+ import common  # noqa: E402
+-from common import access, session  # noqa: E402
++from common import access, compat, session  # noqa: E402
+ from common import cli  # noqa: E402
+ 
+ for parent in _HERE.parents:
+@@ -147,6 +147,16 @@ def main(argv: Optional[list[str]] = None) -> int:
+             print(f"error: {chosen[0]} 需要连接。{session.NOT_LOGGED_IN}gsql 模式也可用 -c/--conn 指定连接名。", file=sys.stderr)
+             return 1
+ 
++    # M 兼容库(v1.5.1):有会话就按会话里业务库的兼容模式切词;贴文本、没登录时按 A 库(与 1.5.0 相同)
++    mode_src = None
++    if not needs_db:
++        try:
++            mode_src = session.current()
++        except Exception:                 # noqa: BLE001 —— 只影响词法,取不到就按 A
++            mode_src = None
++    lexer.set_mysql(compat.is_mysql_like(mode_src))
++    prefix = compat.report_line(mode_src)
++
+     # --- DB-free sources -------------------------------------------------
+     if not needs_db:
+         try:
+@@ -158,7 +168,7 @@ def main(argv: Optional[list[str]] = None) -> int:
+         except OSError as exc:
+             print(f"error: 读取 SQL 失败：{exc}", file=sys.stderr)
+             return 1
+-        _emit(review_text(sql, rules, source), args.format)
++        _emit(review_text(sql, rules, source), args.format, prefix)
+         return 0
+ 
+     # --- DB-backed sources -----------------------------------------------
+@@ -168,6 +178,8 @@ def main(argv: Optional[list[str]] = None) -> int:
+         print(f"error: {exc}", file=sys.stderr)
+         return 2
+ 
++    lexer.set_mysql(compat.is_mysql_like(runner))
++    prefix = compat.report_line(runner)
+     try:
+         if args.schema:
+             res = review_objects(runner, args.schema, rules)
+@@ -177,7 +189,7 @@ def main(argv: Optional[list[str]] = None) -> int:
+         else:
+             sql, notes = _sql_from_top(runner, args.top)
+             res = review_text(sql, rules, f"top:{args.top}", notes)
+-        _emit(res, args.format)
++        _emit(res, args.format, prefix)
+         return 0
+     except (ValueError, KeyError, RuleError, access.QueryError) as exc:
+         print(f"error: {exc}", file=sys.stderr)
+@@ -187,8 +199,8 @@ def main(argv: Optional[list[str]] = None) -> int:
+         return 1
+ 
+ 
+-def _emit(res: ReviewResult, fmt: str) -> None:
+-    out = report.render_json(res) if fmt == "json" else report.render_markdown(res)
++def _emit(res: ReviewResult, fmt: str, prefix: str = "") -> None:
++    out = report.render_json(res) if fmt == "json" else prefix + report.render_markdown(res)
+     print(out, end="" if out.endswith("\n") else "\n")
+ 
+ 
+diff --git a/skills/gaussdb-sqltune/SKILL.md b/skills/gaussdb-sqltune/SKILL.md
+index fe17cf8..825518b 100644
+--- a/skills/gaussdb-sqltune/SKILL.md
++++ b/skills/gaussdb-sqltune/SKILL.md
+@@ -87,7 +87,7 @@ metadata:
+    若这一节只有一句说明（会话不在跑 / 函数返回为空 / GaussDB 该有而没有 / pid 超出 integer 范围），如实转达，不要自己补一个「运行态计划」。
+ 
+ 4. **加载方法论。** 阅读 `{baseDir}/references/tuning-methodology.md`，对照证据各节按其检查清单分析（`## Execution Plan`、`## Tables`、`## Indexes`、`## Column Statistics`、`## Key Parameters (GUC)`、`## Deterministic Findings`）。
+-   `## Deterministic Findings` 里排在前面的 `correlated_subplan`（相关子查询逐行执行）、`not_in_subplan`（NOT IN 退化成子计划 / NULL 语义）、`cast_on_indexed_column` / `func_on_indexed_column`（索引列上套了类型转换 / 函数，索引用不上）、`like_join_pattern`（LIKE 模式取自另一侧的列）、`like_leading_wildcard`（左模糊）是**根因线索**：脚本只在计划节点与 SQL 正文、索引 / 统计证据同时成立时才报，「根因」一节以它们为准、改写方向照它给的写；其后的 `seq_scan` / `sort` 等是通用警告，不能替代根因。根因线索里的索引与改写同样**未经验证**，照第 5–7 步验证后才能进「已验证推荐」。深度判断按需查 GaussDB 专项知识：CBO 与诊断边界 → `{baseDir}/references/gaussdb-cbo-and-diagnosis.md`；改写候选 → `{baseDir}/references/gaussdb-rewrite-patterns.md`；A 兼容库（`sql_compatibility='A'`）→ `{baseDir}/references/gaussdb-a-compat-gotchas.md`；分区表/分布式 → `{baseDir}/references/gaussdb-partition-distribution.md`。
++   `## Deterministic Findings` 里排在前面的 `correlated_subplan`（相关子查询逐行执行）、`not_in_subplan`（NOT IN 退化成子计划 / NULL 语义）、`cast_on_indexed_column` / `func_on_indexed_column`（索引列上套了类型转换 / 函数，索引用不上）、`like_join_pattern`（LIKE 模式取自另一侧的列）、`like_leading_wildcard`（左模糊）是**根因线索**：脚本只在计划节点与 SQL 正文、索引 / 统计证据同时成立时才报，「根因」一节以它们为准、改写方向照它给的写；其后的 `seq_scan` / `sort` 等是通用警告，不能替代根因。根因线索里的索引与改写同样**未经验证**，照第 5–7 步验证后才能进「已验证推荐」。深度判断按需查 GaussDB 专项知识：CBO 与诊断边界 → `{baseDir}/references/gaussdb-cbo-and-diagnosis.md`；改写候选 → `{baseDir}/references/gaussdb-rewrite-patterns.md`；A 兼容库（`sql_compatibility='A'`）→ `{baseDir}/references/gaussdb-a-compat-gotchas.md`；M 兼容库（登录输出「兼容模式 M」）→ `{baseDir}/references/gaussdb-m-compat-gotchas.md`，改写 SQL 与 `--index` 语句照它写；分区表/分布式 → `{baseDir}/references/gaussdb-partition-distribution.md`。
+ 
+ 5. **索引建议——只用已验证的那一节。**
+    `sqltune.py` 的输出含 `## Verified Index Candidates` 一节。这些是用假设（虚拟）索引硬验证过的——cost 是真实的 EXPLAIN 对比。
+diff --git a/skills/gaussdb-sqltune/references/gaussdb-m-compat-gotchas.md b/skills/gaussdb-sqltune/references/gaussdb-m-compat-gotchas.md
+new file mode 100644
+index 0000000..5d01d6f
+--- /dev/null
++++ b/skills/gaussdb-sqltune/references/gaussdb-m-compat-gotchas.md
+@@ -0,0 +1,79 @@
++# GaussDB M 兼容（MySQL 兼容模式）写法与陷阱
++
++> 何时相关：登录输出「兼容模式 M」（`sql_compatibility = 'M'`，建库时 `dbcompatibility = 'M'`）的业务库；报告开头有「业务库兼容模式：M」一行时也是。
++> 价值：在 M 兼容库上，**你写的改写 SQL、建索引语句要按 M 的语法写**，按 A / PostgreSQL 的写法会直接报语法错，或者不报错但意思变了。
++> 依据：GaussDB 25.1.32《M-Compatibility 开发者指南》（下文各节注明出处）。M 兼容库与 MySQL 5.7 大体兼容，但执行计划、EXPLAIN 输出沿用 GaussDB。
++> 标 ⚠️ 的是「不报错、结果却不一样」的坑：改写前后结果是否等价，交给 `verify.py` 的等价门判，不要自己断言。
++
++---
++
++## 1. 标识符用反引号，双引号是字符串 ⚠️
++
++`[M]` 标识符默认用反引号：`` SELECT `order`, `key` FROM `t_order` ``。**双引号默认是字符串常量**，只有 sql_mode 含 `ANSI_QUOTES` 时才是标识符。（出处：SQL 语法 › 标识符说明）
++
++```sql
++-- ❌ M 库里 "OrderNo" 是字符串 'OrderNo'，这一列每行都是同一个值，不报错
++SELECT "OrderNo" FROM t_order;
++-- ✅
++SELECT `OrderNo` FROM t_order;
++```
++
++保留字作名字必须加反引号：`TABLE`、`INDEX`、`KEY`、`ARRAY`、`LIMIT`、`OFFSET` 等在 M 里是保留字，`AS table` 直接报语法错。（出处：SQL 语法 › 关键字）
++
++## 2. `||` 是逻辑或，拼接用 `concat()` ⚠️
++
++`[M]` `'a' || 'b'` 是逻辑或，不是拼接（2026-11 现场：`n.nspname || '.' || c.relname` 报 argument of OR/AND must be type boolean）。拼接写 `concat(a, '.', b)`。
++
++`concat()` 的参数里有一个是 NULL，结果就是 NULL（MySQL 语义）；A 兼容库里 NULL 当空串。可能为空的列先判空：`CASE WHEN c IS NULL THEN '' ELSE concat(…) END`。
++
++## 3. 不支持 `ILIKE`
++
++`[M]` 没有 `ILIKE`（syntax error at or near "ILIKE"），也没有 `~~*`。不分大小写的匹配写 `lower(col) LIKE lower('%x%')`。
++M 库里 `LIKE` 本身是否区分大小写取决于列的字符序（`*_ci` 不区分），改写时不要假设两者行为相同。⚠️
++
++## 4. 类型转换：CAST 的目标类型有限，`::` 不建议
++
++`[M]` `CAST(x AS 类型)` 的目标类型只有：`SIGNED`、`UNSIGNED`、`DATE`、`TIME`、`DATETIME`、`BINARY`、`CHAR`、`DECIMAL`、`FLOAT`、`DOUBLE`、`JSON`。
++`CAST(x AS float8)`、`CAST(x AS bigint)`、`CAST(x AS text)` 这类 A 库写法在 M 库不行。双冒号 `x::int` 能用，但官方「不建议」（结果可能不符合预期），改写里不要用。（出处：SQL 参考 › 类型转换 › 显式类型转换）
++
++```sql
++-- ❌
++WHERE CAST(order_no AS bigint) = 100
++-- ✅
++WHERE CAST(order_no AS SIGNED) = 100
++```
++
++索引列上套类型转换照样会让索引用不上——这条与 A 库相同。
++
++## 5. 空串不是 NULL ⚠️
++
++`[M]` `'' IS NULL` 为假，`length('')` 是 0；A 兼容库里 `''` 就是 NULL。从 A 库搬来的「`col = ''` 等于没值」的写法在 M 库意思不同。
++
++## 6. 除法与整除
++
++`[M]` `/` 的结果是小数；要整除写 `DIV`（`7 DIV 2` 得 3，M 专有，A 库没有这个写法）或 `floor(7 / 2)`。取余 `%` 与 `MOD` 都支持。（出处：函数 › 数字操作函数和算术操作符）
++
++## 7. 排序与分页
++
++`[M]` `ORDER BY … NULLS FIRST / NULLS LAST` 支持；升序默认 NULL 在后、降序默认 NULL 在前（与 A 库相同）。
++`LIMIT n OFFSET m` 与 `LIMIT m, n` 都支持。（出处：SQL 参考 › SELECT）
++
++## 8. 建索引
++
++`[M]` 语法：`` CREATE [UNIQUE] INDEX [`索引名`] [USING BTREE] ON `表` (`列` [ASC|DESC], …) ``，索引名可省，但建议写上：
++**索引名在 schema 内唯一**（MySQL 是表内唯一），起名带上表名，避免和别的表的索引重名。函数索引写 `((表达式))`。
++（出处：SQL 参考 › CREATE INDEX；兼容性说明 › M-Compatibility 模式概述）
++
++## 9. 函数用 M 支持的写法
++
++`[M]` 与 MySQL 同名的原 GaussDB 函数（`round`、`position`、`instr`、`format`、`ceil`、`regexp_*` 等）行为可能与 MySQL 不同，改写里优先用 M 模式支持的函数；
++`isEmpty`、`variance`、`stddev_pop`、`var_pop` 等在 M 库直接提示不支持。不要写 `pg_catalog.函数名(…)` 这种带 schema 的调用。（出处：系统函数 › 系统函数兼容性概述）
++
++## 10. M 库没有的东西
++
++`[M]` 物化视图、SPM 计划管理（SQL 计划基线）、全密态、DB4AI 不支持——不要把这些写进建议。（出处：M-Compatibility 数据库不支持的 GaussDB 特性）
++系统视图只继承了一部分：`ADM_*` 视图（如 `ADM_SOURCE`）没有，`pg_stat_*`、`pg_stats`、`pg_locks`、`pg_settings` 等有。
++
++## 11. 执行计划照旧
++
++`[M]` EXPLAIN 用 GaussDB 的语法与输出（`EXPLAIN (FORMAT JSON) …`），不是 MySQL 的 `EXPLAIN FORMAT=…`；计划节点、代价的读法与 A 库相同，`tuning-methodology.md` 的检查清单照常用。
+diff --git a/skills/gaussdb-sqltune/scripts/coltypes.py b/skills/gaussdb-sqltune/scripts/coltypes.py
+index 7720bb5..21fafe5 100644
+--- a/skills/gaussdb-sqltune/scripts/coltypes.py
++++ b/skills/gaussdb-sqltune/scripts/coltypes.py
+@@ -15,6 +15,7 @@ import re
+ import sys
+ 
+ import evidence
++from common import compat  # noqa: E402
+ import placeholder
+ 
+ COLUMN_TYPES_SCRIPT = "sqltune.column_types"
+@@ -42,7 +43,7 @@ def infer_types(runner, sql_text: str, schema: str = "") -> list:
+         return []
+     columns = [placeholder.comparison_column(c) for c in contexts]
+     wanted = sorted({c for c in columns if c})
+-    tables = evidence.extract_tables(sql_text)
++    tables = evidence.extract_tables(sql_text, compat.folds_unquoted(runner))
+     if not wanted or not tables:
+         return [None] * len(contexts)
+ 
+diff --git a/skills/gaussdb-sqltune/scripts/evidence.py b/skills/gaussdb-sqltune/scripts/evidence.py
+index bb7dda0..39ac914 100644
+--- a/skills/gaussdb-sqltune/scripts/evidence.py
++++ b/skills/gaussdb-sqltune/scripts/evidence.py
+@@ -36,6 +36,7 @@ from common.grmp.values import as_bool, as_float, as_int  # noqa: E402
+ from common import explain_actual as ea  # noqa: E402
+ from common import search_path as sp  # noqa: E402
+ from common import catalog_scope as cs  # noqa: E402
++from common import compat  # noqa: E402
+ 
+ # SQL 已迁到 scripts/registry/sqltune/ —— 两条路径共用同一份定义
+ VERSION_SCRIPT = "sqltune.version"
+@@ -377,11 +378,12 @@ def collect(runner, db, sql_text: str, do_analyze: bool, schema: str = "") -> Ev
+         except ValueError as exc:
+             sp_note = str(exc)
+         plan = explain(db, sql_text, do_analyze)
+-    names = extract_tables(sql_text)
++    fold = compat.folds_unquoted(runner)          # M 兼容库表名区分大小写时不折小写(v1.5.1)
++    names = extract_tables(sql_text, fold)
+     # 目录行按 schema 过滤:SQL 里显式写的 schema.表 优先,其次本次解析出的 schema;都没有就不过滤。
+     # schema 是搜索路径串(`fl, public`)时按第一段过滤:keep_rows 在第一段一行都没有时自己退到 public,
+     # 正好是 `fl, public` 的解析顺序;拿整串去比 nspname 永远比不上,同名表就会错选成 public 那张。
+-    scope = cs.Scope(explicit=cs.explicit_schemas(extract_table_refs(sql_text)), default=sp.primary_schema(schema))
++    scope = cs.Scope(explicit=cs.explicit_schemas(extract_table_refs(sql_text, fold)), default=sp.primary_schema(schema))
+     return Evidence(
+         sql=sql_text,
+         version=version,
+diff --git a/skills/gaussdb-sqltune/scripts/sqltune.py b/skills/gaussdb-sqltune/scripts/sqltune.py
+index cef1697..da5e690 100644
+--- a/skills/gaussdb-sqltune/scripts/sqltune.py
++++ b/skills/gaussdb-sqltune/scripts/sqltune.py
+@@ -32,6 +32,7 @@ for _anc in _HERE.parents:                      # locate common/ (repo root or i
+ import coltypes  # noqa: E402
+ import common  # noqa: E402
+ from common import access  # noqa: E402
++from common import compat  # noqa: E402
+ from common import cli  # noqa: E402
+ from common import exec_db  # noqa: E402
+ from common import reports  # noqa: E402
+@@ -691,7 +692,7 @@ def main(argv: Optional[list[str]] = None) -> int:
+         if args.format == "json":
+             print(json.dumps(payload, ensure_ascii=False, indent=2))
+         else:
+-            print(sqltune_report(tr), end="")
++            print(compat.report_line(runner) + sqltune_report(tr), end="")
+         archive_tune(payload)
+         return 0
+     except systables.SystemSQLSkipped as exc:
+diff --git a/whitelist/scripts-delta-20261123.sql b/whitelist/scripts-delta-20261123.sql
+new file mode 100644
+index 0000000..56941ad
+--- /dev/null
++++ b/whitelist/scripts-delta-20261123.sql
+@@ -0,0 +1,361 @@
++-- =====================================================================
++-- GRMP 诊断脚本白名单 · 增量导入（2026-11-23）
++-- =====================================================================
++--
++-- 适用前提：已导入过上一版的 132 条脚本。本文件只含相对那一版的**增量**，
++-- 不要整份重导（整份见同目录 scripts.sql，共 132 条）。
++--
++-- 从 v1.5.0 升级到 v1.5.1;更早的版本先按顺序导到 scripts-delta-20261119.sql,再导这一份
++--
++--   新增   0 条 INSERT
++--   更新   13 条 UPDATE
++--
++-- 全部脚本均为**只读查询**，只访问系统视图与系统表，不读业务数据、
++-- 不含 DML/DDL、不修改任何对象。
++--
++-- 执行库（database_type）：appbusiness 的脚本 parameter_config 最前面带
++--   {"key":"dbName","value":"","type":"String","autoAcquire":false}，
++-- 中间件按调用时传入的 dbName 切到该业务库执行；postgres 的脚本不带 dbName，在 postgres 库执行。
++-- 本文件里的 UPDATE 只改脚本正文(script_content),不动执行库(database_type)与参数定义(parameter_config)。
++--
++-- 导入前请确认两处与现有规范的对齐：
++--   1. `create_user` / `last_modify_user` 当前填 '999999999'，与上一版保持一致；
++--      若要求填真实工号，请统一替换。
++--   2. id 用 `grmp.script_config_seq.nextval`，不硬编码，避免与现有记录冲突。
++--
++-- =====================================================================
++-- 一、新增 0 条
++-- =====================================================================
++
++-- =====================================================================
++-- 二、更新 13 条已有脚本（SQL 正文 / 参数定义 / 执行库）
++-- =====================================================================
++
++-- [explain.kernel_funcs]
++--   函数名一列 concat 里的名字列先 ::text(M 兼容库的类型推导)。列名、筛选不变。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT ''version'' AS item, version() AS detail
++UNION ALL
++SELECT concat(''func:'', p.proname::text) AS item, pg_get_function_arguments(p.oid) AS detail
++  FROM pg_proc p
++ WHERE p.proname IN (''gs_get_explain'', ''gs_get_kernel_info'');
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'explain.kernel_funcs';
++
++-- [health.partitions]
++--   **分区策略一列不再直接聚合 "char" 列**:先用 CASE 把 partstrategy 映射成同样的单字母文字,再取 max。本脚本在业务库执行,M 兼容业务库上 max() / COALESCE() 处理 "char" 类型报「un support type」(2026-11-20 现场反馈) 。输出列与取值不变(r / i / l / a / h / n),A 兼容库上结果与原写法一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname AS schema,
++       c.relname AS "table",
++       count(*)  AS parts,
++       COALESCE(max(CASE p.partstrategy WHEN ''r'' THEN ''r'' WHEN ''i'' THEN ''i'' WHEN ''l'' THEN ''l''
++                                        WHEN ''a'' THEN ''a'' WHEN ''h'' THEN ''h'' WHEN ''n'' THEN ''n''
++                                        ELSE ''?'' END), '''') AS strategy
++  FROM pg_partition p
++  JOIN pg_class c     ON c.oid = p.parentid
++  JOIN pg_namespace n ON n.oid = c.relnamespace
++ WHERE p.parttype = ''p''
++   AND n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',
++                         ''dbe_pldeveloper'',''cstore'',''pg_toast'')
++ GROUP BY n.nspname, c.relname
++ ORDER BY parts DESC;
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'health.partitions';
++
++-- [health.stale_stats]
++--   **偏离比例不再用 CAST(… AS float8)**,改为 * 1.0 / 求小数:M 兼容库的 CAST 目标类型里没有 float8。表名一列 concat 里的名字列先 ::text(M 兼容库按自己的类型推导处理 name 类型) 。列名、筛选、排序不变,A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT tbl_name, frozen_pages, cur_pages, frozen_tuples, live_tuples,
++       stat_columns, last_analyze, last_autoanalyze
++FROM (
++  SELECT concat(n.nspname::text, ''.'', c.relname::text) AS tbl_name,
++         c.relpages AS frozen_pages,
++         pg_relation_size(c.oid) / current_setting(''block_size'')::bigint AS cur_pages,
++         c.reltuples::bigint AS frozen_tuples,
++         COALESCE(t.n_live_tup, 0) AS live_tuples,
++         (SELECT count(*) FROM pg_stats s
++           WHERE s.schemaname = n.nspname AND s.tablename = c.relname) AS stat_columns,
++         COALESCE(to_char(t.last_analyze, ''YYYY-MM-DD HH24:MI:SS''), ''never'') AS last_analyze,
++         COALESCE(to_char(t.last_autoanalyze, ''YYYY-MM-DD HH24:MI:SS''), ''never'') AS last_autoanalyze
++  FROM pg_class c
++  JOIN pg_namespace n ON n.oid = c.relnamespace
++  LEFT JOIN pg_stat_user_tables t ON t.relid = c.oid
++  WHERE c.relkind = ''r'' AND n.nspname NOT IN {{schema_filter}}
++    AND (c.reltuples > {{min_rows}}
++         OR pg_relation_size(c.oid) / current_setting(''block_size'')::bigint > {{min_pages}})
++) x
++ORDER BY (stat_columns = 0 OR frozen_pages = 0) DESC,
++         CASE WHEN frozen_pages > 0
++              THEN abs(cur_pages - frozen_pages) * 1.0 / frozen_pages
++              ELSE 0 END DESC,
++         cur_pages DESC
++LIMIT {{limit}};
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'health.stale_stats';
++
++-- [health.table_writes]
++--   **改成一层查询**:原写法在 M 兼容业务库上报「operator does not exist: any <> unknown」(两个 name 类型取 COALESCE 后类型推导成 any,2026-11-20 现场反馈) ;外层引用的 "table" 在 M 库又是字符串常量,修好前一处后整列会变成字面值 table。现在名字列先转成文字再取,双引号只用作最外层列别名。口径不变:普通表取自身、大字段(TOAST)写入折回所属表、找不到所属表的 TOAST 与系统 schema 排除; 列名、排序不变,A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT CASE WHEN s.schemaname = ''pg_toast'' THEN pn.nspname::text ELSE s.schemaname::text END AS schema,
++       CASE WHEN s.schemaname = ''pg_toast'' THEN pc.relname::text ELSE s.relname::text END AS "table",
++       (s.schemaname = ''pg_toast'') AS is_toast,
++       s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
++       CASE WHEN s.schemaname = ''pg_toast'' THEN pg_relation_size(s.relid) END AS toast_bytes
++  FROM pg_stat_all_tables s
++  LEFT JOIN pg_class pc     ON s.schemaname = ''pg_toast'' AND pc.reltoastrelid = s.relid
++  LEFT JOIN pg_namespace pn ON pn.oid = pc.relnamespace
++ WHERE s.n_tup_ins + s.n_tup_upd + s.n_tup_del > 0
++   AND ((s.schemaname <> ''pg_toast''
++         AND s.schemaname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore''))
++     OR (s.schemaname = ''pg_toast'' AND pn.nspname IS NOT NULL
++         AND pn.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'',''pg_toast'')))
++ ORDER BY s.last_data_changed DESC NULLS LAST
++ LIMIT {{limit}};
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'health.table_writes';
++
++-- [health.unused_index]
++--   索引名一列 concat 里的名字列先 ::text(M 兼容库按自己的类型推导处理 name 类型,显式转成文字两种模式一致)。列名、筛选、排序不变。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT concat(s.schemaname::text, ''.'', s.indexrelname::text) AS idx_name,
++       s.relname AS table_name,
++       s.idx_scan,
++       s.idx_tup_read,
++       s.idx_tup_fetch,
++       pg_relation_size(s.indexrelid) AS idx_bytes,
++       i.indisprimary,
++       i.indisunique,
++       COALESCE(ts.seq_scan, 0) AS table_seq_scan,
++       COALESCE(ts.idx_scan, 0) AS table_idx_scan
++FROM pg_stat_user_indexes s
++JOIN pg_index i ON i.indexrelid = s.indexrelid
++LEFT JOIN pg_stat_user_tables ts ON ts.relid = s.relid
++WHERE pg_relation_size(s.indexrelid) > {{min_bytes}}
++  AND s.schemaname NOT IN {{schema_filter}}
++ORDER BY s.idx_scan ASC, pg_relation_size(s.indexrelid) DESC
++LIMIT {{limit}};
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'health.unused_index';
++
++-- [lockwait.pairs]
++--   锁对象一列 concat 里的名字列、等待方 / 持有方账号两列先 ::text(M 兼容库按自己的类型推导处理 name 类型)。列名、筛选、排序不变;锁对象不是表时照旧返回空串。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT w.pid                         AS waiter_pid,
++       COALESCE(w.sessionid, 0)      AS waiter_sessionid,
++       w.mode                        AS waiter_mode,
++       h.pid                         AS holder_pid,
++       COALESCE(h.sessionid, 0)      AS holder_sessionid,
++       h.mode                        AS holder_mode,
++       w.locktype                    AS locktype,
++       CASE WHEN c.relname IS NULL THEN '''' ELSE concat(n.nspname::text, ''.'', c.relname::text) END AS lock_object,
++       COALESCE(w.locktag, '''')       AS locktag,
++       round(date_part(''epoch'', clock_timestamp() - wa.query_start)::numeric, 1) AS waiter_wait_s,
++       COALESCE(wa.usename::text, '''') AS waiter_user,
++       COALESCE(wa.application_name, '''') AS waiter_app,
++       COALESCE(substr(wa.query, 1, 300), '''')       AS waiter_query,
++       COALESCE(ha.state, '''')        AS holder_state,
++       COALESCE(ha.usename::text, '''') AS holder_user,
++       COALESCE(ha.application_name, '''') AS holder_app,
++       round(date_part(''epoch'', clock_timestamp() - ha.xact_start)::numeric, 1) AS holder_xact_age_s,
++       COALESCE(substr(ha.query, 1, 300), '''')       AS holder_query
++  FROM pg_locks w
++  JOIN pg_locks h
++    ON h.locktag = w.locktag AND h.granted AND h.pid <> w.pid
++  LEFT JOIN pg_class c     ON c.oid = w.relation
++  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
++  LEFT JOIN pg_stat_activity wa ON wa.pid = w.pid
++  LEFT JOIN pg_stat_activity ha ON ha.pid = h.pid
++ WHERE w.granted = false
++ ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
++ LIMIT {{limit}};
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'lockwait.pairs';
++
++-- [login.current_db]
++--   **多取两列**:compat(本库的兼容模式,A / M …)、lctn(M 兼容库的表名大小写参数 lower_case_table_names,A 兼容库没有、返回空)。技能据此在 M 兼容库上按 MySQL 的写法处理(M 库没有 ADM_SOURCE、改写语句用反引号等) 。db / usr 两列不变。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT current_database() AS db, current_user AS usr,
++       (SELECT datcompatibility::text FROM pg_database WHERE datname = current_database()) AS compat,
++       (SELECT setting FROM pg_settings WHERE name = ''lower_case_table_names'') AS lctn;
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'login.current_db';
++
++-- [procinfo.locate_search]
++--   **ILIKE 改成 lower(…) LIKE lower(…)**:M 兼容库不支持 ILIKE(2026-11-20 现场反馈:syntax error at or near "ILIKE")。两种写法都不分大小写; 名字列先转成文字(UNION 两个分支的列类型一致)。列名、排序、条数上限不变。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT ''proc'' AS kind, n.nspname::text AS nspname, COALESCE(k.pkgname::text, '''') AS pkgname, p.proname::text AS proname
++FROM pg_proc p
++LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
++LEFT JOIN gs_package k ON k.oid = p.propackageid
++WHERE lower(p.proname::text) LIKE lower(''%{{name}}%'')
++  AND (n.nspname IS NULL OR (n.nspname NOT LIKE ''pg_%'' AND n.nspname NOT LIKE ''dbe_%''
++       AND n.nspname NOT IN (''information_schema'', ''pkg_service'', ''pkg_util'', ''sqladvisor'', ''db4ai'',
++                             ''snapshot'', ''blockchain'', ''cstore'', ''pmk'', ''coverage'')))
++UNION ALL
++SELECT ''package'' AS kind, n.nspname::text AS nspname, k.pkgname::text AS pkgname, '''' AS proname
++FROM gs_package k
++LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
++WHERE COALESCE(length(''{{package}}''), 0) > 0 AND lower(k.pkgname::text) LIKE lower(''%{{package}}%'')
++ORDER BY 1, 2, 3, 4
++LIMIT 40;
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'procinfo.locate_search';
++
++-- [procinfo.proc_def]
++--   包名一列 COALESCE 里的名字列先 ::text(M 兼容库的类型推导)。列名、筛选、排序不变。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname, p.proname, l.lanname, p.prosrc,
++       pg_catalog.pg_get_function_arguments(p.oid) AS args,
++       COALESCE(k.pkgname::text, '''') AS package
++FROM pg_proc p
++JOIN pg_namespace n ON n.oid = p.pronamespace
++JOIN pg_language l ON l.oid = p.prolang
++LEFT JOIN gs_package k ON k.oid = p.propackageid
++WHERE p.proname = ''{{name}}''
++  AND (''{{schema}}'' IS NULL OR ''{{schema}}'' = '''' OR n.nspname = ''{{schema}}'')
++  AND (''{{package}}'' IS NULL OR ''{{package}}'' = '''' OR k.pkgname = ''{{package}}'')
++ORDER BY (n.nspname = ''public'') DESC, n.nspname, k.pkgname
++LIMIT 5;
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'procinfo.proc_def';
++
++-- [proctune.locate_search]
++--   **ILIKE 改成 lower(…) LIKE lower(…)**,同 procinfo.locate_search(2026-11-20 现场反馈)。列名、排序、条数上限不变。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT ''proc'' AS kind, n.nspname::text AS nspname, COALESCE(k.pkgname::text, '''') AS pkgname, p.proname::text AS proname
++FROM pg_proc p
++LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
++LEFT JOIN gs_package k ON k.oid = p.propackageid
++WHERE lower(p.proname::text) LIKE lower(''%{{name}}%'')
++  AND (n.nspname IS NULL OR (n.nspname NOT LIKE ''pg_%'' AND n.nspname NOT LIKE ''dbe_%''
++       AND n.nspname NOT IN (''information_schema'', ''pkg_service'', ''pkg_util'', ''sqladvisor'', ''db4ai'',
++                             ''snapshot'', ''blockchain'', ''cstore'', ''pmk'', ''coverage'')))
++UNION ALL
++SELECT ''package'' AS kind, n.nspname::text AS nspname, k.pkgname::text AS pkgname, '''' AS proname
++FROM gs_package k
++LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
++WHERE COALESCE(length(''{{package}}''), 0) > 0 AND lower(k.pkgname::text) LIKE lower(''%{{package}}%'')
++ORDER BY 1, 2, 3, 4
++LIMIT 40;
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'proctune.locate_search';
++
++-- [proctune.proc_def]
++--   包名一列 COALESCE 里的名字列先 ::text(M 兼容库的类型推导)。列名、筛选、排序不变。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname, p.proname, l.lanname, p.prosrc,
++       pg_catalog.pg_get_function_arguments(p.oid) AS args,
++       COALESCE(k.pkgname::text, '''') AS package
++FROM pg_proc p
++JOIN pg_namespace n ON n.oid = p.pronamespace
++JOIN pg_language l ON l.oid = p.prolang
++LEFT JOIN gs_package k ON k.oid = p.propackageid
++WHERE p.proname = ''{{name}}''
++  AND (''{{schema}}'' IS NULL OR ''{{schema}}'' = '''' OR n.nspname = ''{{schema}}'')
++  AND (''{{package}}'' IS NULL OR ''{{package}}'' = '''' OR k.pkgname = ''{{package}}'')
++ORDER BY (n.nspname = ''public'') DESC, n.nspname, k.pkgname
++LIMIT 5;
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'proctune.proc_def';
++
++-- [sqlreview.indexes]
++--   **表名一列的别名改成 AS "table"**(同 sqlreview.tables,2026-11-20 现场反馈);索引列的顺序改用 position(… IN …) 在 indkey 的文本形态里定位,不再用数组下标与 generate_series。 表达式列照旧不列;列名、排序不变,A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT
++  n.nspname::text                                              AS schema,
++  t.relname::text                                              AS "table",
++  i.relname::text                                              AS name,
++  COALESCE((SELECT array_to_string(array_agg(a.attname::text
++                     ORDER BY position(concat('' '', a.attnum::text, '' '') IN concat('' '', ix.indkey::text, '' ''))), '','')
++              FROM pg_attribute a
++             WHERE a.attrelid = t.oid AND a.attnum > 0
++               AND position(concat('' '', a.attnum::text, '' '') IN concat('' '', ix.indkey::text, '' '')) > 0), '''') AS columns,
++  ix.indisunique                                               AS is_unique,
++  ix.indisprimary                                              AS is_primary,
++  COALESCE(s.idx_scan, 0)                                      AS scans
++FROM pg_index ix
++JOIN pg_class i     ON i.oid = ix.indexrelid
++JOIN pg_class t     ON t.oid = ix.indrelid
++JOIN pg_namespace n ON n.oid = t.relnamespace
++LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = ix.indexrelid
++WHERE n.nspname = ''{{schema}}''
++ORDER BY t.relname, i.relname;
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'sqlreview.indexes';
++
++-- [sqlreview.tables]
++--   **表名一列的别名改成 AS "table"**:TABLE 在 M 兼容库是保留字,原写法 AS table 报「syntax error at or near "table"」(2026-11-20 现场反馈)。顺带去掉 ARRAY[]: :text[] 字面量(空集仍返回空串)。列名、筛选、排序不变,A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT
++  n.nspname::text                                              AS schema,
++  c.relname::text                                              AS "table",
++  EXISTS (SELECT 1 FROM pg_constraint pk
++          WHERE pk.conrelid = c.oid AND pk.contype = ''p'')      AS has_pk,
++  COALESCE((SELECT array_to_string(array_agg(fk.conname::text), '','')
++              FROM pg_constraint fk
++             WHERE fk.conrelid = c.oid AND fk.contype = ''f''), '''') AS fks,
++  COALESCE((SELECT array_to_string(array_agg(a.attname::text ORDER BY a.attnum), '','')
++              FROM pg_attribute a
++             WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), '''') AS columns
++FROM pg_class c
++JOIN pg_namespace n ON n.oid = c.relnamespace
++WHERE c.relkind = ''r'' AND n.nspname = ''{{schema}}''
++ORDER BY c.relname;
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'sqlreview.tables';
++
++-- =====================================================================
++-- 三、导入后自检
++-- =====================================================================
++-- 应为 132：
++--   SELECT count(*) FROM grmp.script_config WHERE scene = 'AGENT';
++-- 本次没有新增脚本。
++-- 更新应已生效（应返回 0 行；库编码为 UTF8 时 md5 与这里一致）：
++--   SELECT c.script_name FROM grmp.script_config c
++--     JOIN (VALUES
++--     ('explain.kernel_funcs', '46bab9604c9c4d0e4e4845d23bc9a0aa'),
++--     ('health.partitions', '61bfcb4af10cd4bb434a428b7c98f0be'),
++--     ('health.stale_stats', 'fe3902c3a95cffa30811cd967bc753eb'),
++--     ('health.table_writes', 'ad002bf7af92662ef3380518029c2ca9'),
++--     ('health.unused_index', 'b206bdd76c3ac3fe31caed2fd289bdc2'),
++--     ('lockwait.pairs', '52cfd536e1f5b7564039cb04bbf9c41f'),
++--     ('login.current_db', '365d9bd8f934527ff3a53503d9052fd4'),
++--     ('procinfo.locate_search', 'cd2f6244e75792b318feeaae834bc7bc'),
++--     ('procinfo.proc_def', '4444490135788fde265602966eee3376'),
++--     ('proctune.locate_search', 'cd2f6244e75792b318feeaae834bc7bc'),
++--     ('proctune.proc_def', '4444490135788fde265602966eee3376'),
++--     ('sqlreview.indexes', '9f7610cea419d3dc88c13431228ab602'),
++--     ('sqlreview.tables', '935be833d4ea78f9b2dd513277f91e3b')) AS v(name, sum) ON c.script_name = v.name
++--    WHERE md5(c.script_content) <> v.sum;
++-- 参数定义也一起更新了的（应列出这些脚本、且 parameter_config 与 scripts.sql 里一致）：
++--   SELECT script_name, parameter_config FROM grmp.script_config WHERE script_name IN ('-');
++-- 执行库应与本版一致（appbusiness 应为 39 条，且都以 dbName 开头）：
++--   SELECT count(*) FROM grmp.script_config WHERE scene = 'AGENT' AND database_type = 'appbusiness';
++--   SELECT script_name FROM grmp.script_config WHERE scene = 'AGENT' AND database_type = 'appbusiness'
++--      AND parameter_config NOT LIKE '[{"key":"dbName",%';     -- 应返回 0 行
+diff --git a/whitelist/scripts.sql b/whitelist/scripts.sql
+index e694317..432c69e 100644
+--- a/whitelist/scripts.sql
++++ b/whitelist/scripts.sql
+@@ -126,51 +126,6 @@ WHERE unique_query_id = {{sid}}
+ ORDER BY start_time DESC
+ LIMIT 1;
+ ', '[{"key":"sid","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlreview.indexes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT
+-  n.nspname::text                                              AS schema,
+-  t.relname::text                                              AS table,
+-  i.relname::text                                              AS name,
+-  array_to_string(
+-    COALESCE((SELECT array_agg(a.attname::text ORDER BY k.ord)
+-              FROM (SELECT s AS ord,
+-                           (string_to_array(ix.indkey::text, '' ''))[s]::smallint AS attnum
+-                    FROM generate_series(
+-                           1,
+-                           array_length(string_to_array(ix.indkey::text, '' ''), 1)) s) k
+-              JOIN pg_attribute a
+-                ON a.attrelid = t.oid AND a.attnum = k.attnum),
+-             ARRAY[]::text[]), '','')                            AS columns,
+-  ix.indisunique                                               AS is_unique,
+-  ix.indisprimary                                              AS is_primary,
+-  COALESCE(s.idx_scan, 0)                                      AS scans
+-FROM pg_index ix
+-JOIN pg_class i     ON i.oid = ix.indexrelid
+-JOIN pg_class t     ON t.oid = ix.indrelid
+-JOIN pg_namespace n ON n.oid = t.relnamespace
+-LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = ix.indexrelid
+-WHERE n.nspname = ''{{schema}}''
+-ORDER BY t.relname, i.relname;
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlreview.tables', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT
+-  n.nspname::text                                              AS schema,
+-  c.relname::text                                              AS table,
+-  EXISTS (SELECT 1 FROM pg_constraint pk
+-          WHERE pk.conrelid = c.oid AND pk.contype = ''p'')      AS has_pk,
+-  array_to_string(
+-    COALESCE((SELECT array_agg(fk.conname::text)
+-              FROM pg_constraint fk
+-              WHERE fk.conrelid = c.oid AND fk.contype = ''f''),
+-             ARRAY[]::text[]), '','')                            AS fks,
+-  array_to_string(
+-    COALESCE((SELECT array_agg(a.attname::text ORDER BY a.attnum)
+-              FROM pg_attribute a
+-              WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped),
+-             ARRAY[]::text[]), '','')                            AS columns
+-FROM pg_class c
+-JOIN pg_namespace n ON n.oid = c.relnamespace
+-WHERE c.relkind = ''r'' AND n.nspname = ''{{schema}}''
+-ORDER BY c.relname;
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlreview.top_sql', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT unique_sql_id::text, query
+ FROM dbe_perf.statement
+ WHERE n_calls > 0 AND query IS NOT NULL AND LENGTH(TRIM(query)) > 0
+@@ -434,32 +389,6 @@ WHERE unique_sql_id = {{sid}}
+   AND LENGTH(TRIM(query)) > 0
+ LIMIT 1;
+ ', '[{"key":"sid","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.proc_def', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, p.proname, l.lanname, p.prosrc,
+-       pg_catalog.pg_get_function_arguments(p.oid) AS args,
+-       COALESCE(k.pkgname, '''') AS package
+-FROM pg_proc p
+-JOIN pg_namespace n ON n.oid = p.pronamespace
+-JOIN pg_language l ON l.oid = p.prolang
+-LEFT JOIN gs_package k ON k.oid = p.propackageid
+-WHERE p.proname = ''{{name}}''
+-  AND (''{{schema}}'' IS NULL OR ''{{schema}}'' = '''' OR n.nspname = ''{{schema}}'')
+-  AND (''{{package}}'' IS NULL OR ''{{package}}'' = '''' OR k.pkgname = ''{{package}}'')
+-ORDER BY (n.nspname = ''public'') DESC, n.nspname, k.pkgname
+-LIMIT 5;
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.proc_def', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, p.proname, l.lanname, p.prosrc,
+-       pg_catalog.pg_get_function_arguments(p.oid) AS args,
+-       COALESCE(k.pkgname, '''') AS package
+-FROM pg_proc p
+-JOIN pg_namespace n ON n.oid = p.pronamespace
+-JOIN pg_language l ON l.oid = p.prolang
+-LEFT JOIN gs_package k ON k.oid = p.propackageid
+-WHERE p.proname = ''{{name}}''
+-  AND (''{{schema}}'' IS NULL OR ''{{schema}}'' = '''' OR n.nspname = ''{{schema}}'')
+-  AND (''{{package}}'' IS NULL OR ''{{package}}'' = '''' OR k.pkgname = ''{{package}}'')
+-ORDER BY (n.nspname = ''public'') DESC, n.nspname, k.pkgname
+-LIMIT 5;
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.indexes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname AS schema_name, t.relname AS table_name,
+        i.relname AS index_name,
+        ix.indisunique,
+@@ -514,22 +443,6 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
+ FROM pg_namespace n
+ WHERE n.nspname = ''{{schema}}'';
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.locate_search', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''proc'' AS kind, n.nspname, COALESCE(k.pkgname, '''') AS pkgname, p.proname
+-FROM pg_proc p
+-LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
+-LEFT JOIN gs_package k ON k.oid = p.propackageid
+-WHERE p.proname ILIKE ''%{{name}}%''
+-  AND (n.nspname IS NULL OR (n.nspname NOT LIKE ''pg_%'' AND n.nspname NOT LIKE ''dbe_%''
+-       AND n.nspname NOT IN (''information_schema'', ''pkg_service'', ''pkg_util'', ''sqladvisor'', ''db4ai'',
+-                             ''snapshot'', ''blockchain'', ''cstore'', ''pmk'', ''coverage'')))
+-UNION ALL
+-SELECT ''package'' AS kind, n.nspname, k.pkgname, '''' AS proname
+-FROM gs_package k
+-LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
+-WHERE COALESCE(length(''{{package}}''), 0) > 0 AND k.pkgname ILIKE ''%{{package}}%''
+-ORDER BY 1, 2, 3, 4
+-LIMIT 40;
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.locate_context', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT current_database() AS db, current_user AS usr,
+        (SELECT string_agg(datname, '', '' ORDER BY datname) FROM pg_database WHERE NOT datistemplate) AS databases;
+ ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+@@ -537,22 +450,6 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
+ FROM pg_namespace n
+ WHERE n.nspname = ''{{schema}}'';
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.locate_search', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''proc'' AS kind, n.nspname, COALESCE(k.pkgname, '''') AS pkgname, p.proname
+-FROM pg_proc p
+-LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
+-LEFT JOIN gs_package k ON k.oid = p.propackageid
+-WHERE p.proname ILIKE ''%{{name}}%''
+-  AND (n.nspname IS NULL OR (n.nspname NOT LIKE ''pg_%'' AND n.nspname NOT LIKE ''dbe_%''
+-       AND n.nspname NOT IN (''information_schema'', ''pkg_service'', ''pkg_util'', ''sqladvisor'', ''db4ai'',
+-                             ''snapshot'', ''blockchain'', ''cstore'', ''pmk'', ''coverage'')))
+-UNION ALL
+-SELECT ''package'' AS kind, n.nspname, k.pkgname, '''' AS proname
+-FROM gs_package k
+-LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
+-WHERE COALESCE(length(''{{package}}''), 0) > 0 AND k.pkgname ILIKE ''%{{package}}%''
+-ORDER BY 1, 2, 3, 4
+-LIMIT 40;
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'explain.from_history', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT schema_name, query
+ FROM dbe_perf.statement_history
+ WHERE unique_query_id = {{sid}}
+@@ -587,19 +484,6 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
+   FROM pg_settings
+  ORDER BY name;
+ ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.partitions', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname      AS schema,
+-       c.relname      AS "table",
+-       count(*)       AS parts,
+-       COALESCE(max(p.partstrategy), '''') AS strategy
+-  FROM pg_partition p
+-  JOIN pg_class c     ON c.oid = p.parentid
+-  JOIN pg_namespace n ON n.oid = c.relnamespace
+- WHERE p.parttype = ''p''
+-   AND n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',
+-                         ''dbe_pldeveloper'',''cstore'',''pg_toast'')
+- GROUP BY n.nspname, c.relname
+- ORDER BY parts DESC;
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.sync_commit', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''peers_configured'' AS item,
+        (SELECT count(*)::text FROM pg_settings
+          WHERE name LIKE ''replconninfo%'' AND COALESCE(setting,'''') <> '''') AS value
+@@ -1070,21 +954,6 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.xlog_position', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT pg_current_xlog_location()::text AS lsn,
+        to_char(clock_timestamp(), ''YYYY-MM-DD HH24:MI:SS.US'') AS at;
+ ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.table_writes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT schema, "table", is_toast, n_tup_ins, n_tup_upd, n_tup_del, toast_bytes
+-  FROM (SELECT COALESCE(pn.nspname, s.schemaname) AS schema,
+-               COALESCE(pc.relname, s.relname) AS "table",
+-               (s.schemaname = ''pg_toast'') AS is_toast,
+-               s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
+-               CASE WHEN s.schemaname = ''pg_toast'' THEN pg_relation_size(s.relid) END AS toast_bytes,
+-               s.last_data_changed
+-          FROM pg_stat_all_tables s
+-          LEFT JOIN pg_class pc ON s.schemaname = ''pg_toast'' AND pc.reltoastrelid = s.relid
+-          LEFT JOIN pg_namespace pn ON pn.oid = pc.relnamespace) t
+- WHERE schema NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'',''pg_toast'')
+-   AND n_tup_ins + n_tup_upd + n_tup_del > 0
+- ORDER BY last_data_changed DESC NULLS LAST
+- LIMIT {{limit}};
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.write_sql', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT unique_sql_id::text,
+        LEFT(REGEXP_REPLACE(COALESCE(NULLIF(REGEXP_REPLACE(query, ''^(\s*(--[^\n]*(\n|$)|/\*([^*]|\*+[^*/])*\*+/))+\s*'', ''''), ''''), query),
+                           ''\s+'', '' '', ''g''), 80) AS query,
+@@ -1233,8 +1102,6 @@ WHERE n_calls > 0
+ ORDER BY {{order}}
+ LIMIT {{limit}};
+ ', '[{"key":"order","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'login.current_db', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT current_database() AS db, current_user AS usr;
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'memanalyze.sql_mem_history', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT unique_query_id AS queryid,
+        user_name,
+        start_time,
+@@ -1273,39 +1140,41 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
+  ORDER BY t.n_dead_tup DESC
+  LIMIT {{limit}};
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'lockwait.pairs', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT w.pid                         AS waiter_pid,
+-       COALESCE(w.sessionid, 0)      AS waiter_sessionid,
+-       w.mode                        AS waiter_mode,
+-       h.pid                         AS holder_pid,
+-       COALESCE(h.sessionid, 0)      AS holder_sessionid,
+-       h.mode                        AS holder_mode,
+-       w.locktype                    AS locktype,
+-       CASE WHEN c.relname IS NULL THEN '''' ELSE concat(n.nspname, ''.'', c.relname) END AS lock_object,
+-       COALESCE(w.locktag, '''')       AS locktag,
+-       round(date_part(''epoch'', clock_timestamp() - wa.query_start)::numeric, 1) AS waiter_wait_s,
+-       COALESCE(wa.usename, '''')      AS waiter_user,
+-       COALESCE(wa.application_name, '''') AS waiter_app,
+-       COALESCE(substr(wa.query, 1, 300), '''')       AS waiter_query,
+-       COALESCE(ha.state, '''')        AS holder_state,
+-       COALESCE(ha.usename, '''')      AS holder_user,
+-       COALESCE(ha.application_name, '''') AS holder_app,
+-       round(date_part(''epoch'', clock_timestamp() - ha.xact_start)::numeric, 1) AS holder_xact_age_s,
+-       COALESCE(substr(ha.query, 1, 300), '''')       AS holder_query
+-  FROM pg_locks w
+-  JOIN pg_locks h
+-    ON h.locktag = w.locktag AND h.granted AND h.pid <> w.pid
+-  LEFT JOIN pg_class c     ON c.oid = w.relation
+-  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+-  LEFT JOIN pg_stat_activity wa ON wa.pid = w.pid
+-  LEFT JOIN pg_stat_activity ha ON ha.pid = h.pid
+- WHERE w.granted = false
+- ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.partitions', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname AS schema,
++       c.relname AS "table",
++       count(*)  AS parts,
++       COALESCE(max(CASE p.partstrategy WHEN ''r'' THEN ''r'' WHEN ''i'' THEN ''i'' WHEN ''l'' THEN ''l''
++                                        WHEN ''a'' THEN ''a'' WHEN ''h'' THEN ''h'' WHEN ''n'' THEN ''n''
++                                        ELSE ''?'' END), '''') AS strategy
++  FROM pg_partition p
++  JOIN pg_class c     ON c.oid = p.parentid
++  JOIN pg_namespace n ON n.oid = c.relnamespace
++ WHERE p.parttype = ''p''
++   AND n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',
++                         ''dbe_pldeveloper'',''cstore'',''pg_toast'')
++ GROUP BY n.nspname, c.relname
++ ORDER BY parts DESC;
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.table_writes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT CASE WHEN s.schemaname = ''pg_toast'' THEN pn.nspname::text ELSE s.schemaname::text END AS schema,
++       CASE WHEN s.schemaname = ''pg_toast'' THEN pc.relname::text ELSE s.relname::text END AS "table",
++       (s.schemaname = ''pg_toast'') AS is_toast,
++       s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
++       CASE WHEN s.schemaname = ''pg_toast'' THEN pg_relation_size(s.relid) END AS toast_bytes
++  FROM pg_stat_all_tables s
++  LEFT JOIN pg_class pc     ON s.schemaname = ''pg_toast'' AND pc.reltoastrelid = s.relid
++  LEFT JOIN pg_namespace pn ON pn.oid = pc.relnamespace
++ WHERE s.n_tup_ins + s.n_tup_upd + s.n_tup_del > 0
++   AND ((s.schemaname <> ''pg_toast''
++         AND s.schemaname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore''))
++     OR (s.schemaname = ''pg_toast'' AND pn.nspname IS NOT NULL
++         AND pn.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'',''pg_toast'')))
++ ORDER BY s.last_data_changed DESC NULLS LAST
+  LIMIT {{limit}};
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.stale_stats', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT tbl_name, frozen_pages, cur_pages, frozen_tuples, live_tuples,
+        stat_columns, last_analyze, last_autoanalyze
+ FROM (
+-  SELECT concat(n.nspname, ''.'', c.relname) AS tbl_name,
++  SELECT concat(n.nspname::text, ''.'', c.relname::text) AS tbl_name,
+          c.relpages AS frozen_pages,
+          pg_relation_size(c.oid) / current_setting(''block_size'')::bigint AS cur_pages,
+          c.reltuples::bigint AS frozen_tuples,
+@@ -1323,12 +1192,12 @@ FROM (
+ ) x
+ ORDER BY (stat_columns = 0 OR frozen_pages = 0) DESC,
+          CASE WHEN frozen_pages > 0
+-              THEN CAST(abs(cur_pages - frozen_pages) AS float8) / frozen_pages
++              THEN abs(cur_pages - frozen_pages) * 1.0 / frozen_pages
+               ELSE 0 END DESC,
+          cur_pages DESC
+ LIMIT {{limit}};
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"min_rows","value":"","type":"INTEGER","autoAcquire":false},{"key":"min_pages","value":"","type":"INTEGER","autoAcquire":false},{"key":"schema_filter","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.unused_index', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT concat(s.schemaname, ''.'', s.indexrelname) AS idx_name,
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.unused_index', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT concat(s.schemaname::text, ''.'', s.indexrelname::text) AS idx_name,
+        s.relname AS table_name,
+        s.idx_scan,
+        s.idx_tup_read,
+@@ -1346,9 +1215,136 @@ WHERE pg_relation_size(s.indexrelid) > {{min_bytes}}
+ ORDER BY s.idx_scan ASC, pg_relation_size(s.indexrelid) DESC
+ LIMIT {{limit}};
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"min_bytes","value":"","type":"INTEGER","autoAcquire":false},{"key":"schema_filter","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlreview.tables', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT
++  n.nspname::text                                              AS schema,
++  c.relname::text                                              AS "table",
++  EXISTS (SELECT 1 FROM pg_constraint pk
++          WHERE pk.conrelid = c.oid AND pk.contype = ''p'')      AS has_pk,
++  COALESCE((SELECT array_to_string(array_agg(fk.conname::text), '','')
++              FROM pg_constraint fk
++             WHERE fk.conrelid = c.oid AND fk.contype = ''f''), '''') AS fks,
++  COALESCE((SELECT array_to_string(array_agg(a.attname::text ORDER BY a.attnum), '','')
++              FROM pg_attribute a
++             WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), '''') AS columns
++FROM pg_class c
++JOIN pg_namespace n ON n.oid = c.relnamespace
++WHERE c.relkind = ''r'' AND n.nspname = ''{{schema}}''
++ORDER BY c.relname;
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlreview.indexes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT
++  n.nspname::text                                              AS schema,
++  t.relname::text                                              AS "table",
++  i.relname::text                                              AS name,
++  COALESCE((SELECT array_to_string(array_agg(a.attname::text
++                     ORDER BY position(concat('' '', a.attnum::text, '' '') IN concat('' '', ix.indkey::text, '' ''))), '','')
++              FROM pg_attribute a
++             WHERE a.attrelid = t.oid AND a.attnum > 0
++               AND position(concat('' '', a.attnum::text, '' '') IN concat('' '', ix.indkey::text, '' '')) > 0), '''') AS columns,
++  ix.indisunique                                               AS is_unique,
++  ix.indisprimary                                              AS is_primary,
++  COALESCE(s.idx_scan, 0)                                      AS scans
++FROM pg_index ix
++JOIN pg_class i     ON i.oid = ix.indexrelid
++JOIN pg_class t     ON t.oid = ix.indrelid
++JOIN pg_namespace n ON n.oid = t.relnamespace
++LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = ix.indexrelid
++WHERE n.nspname = ''{{schema}}''
++ORDER BY t.relname, i.relname;
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.locate_search', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''proc'' AS kind, n.nspname::text AS nspname, COALESCE(k.pkgname::text, '''') AS pkgname, p.proname::text AS proname
++FROM pg_proc p
++LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
++LEFT JOIN gs_package k ON k.oid = p.propackageid
++WHERE lower(p.proname::text) LIKE lower(''%{{name}}%'')
++  AND (n.nspname IS NULL OR (n.nspname NOT LIKE ''pg_%'' AND n.nspname NOT LIKE ''dbe_%''
++       AND n.nspname NOT IN (''information_schema'', ''pkg_service'', ''pkg_util'', ''sqladvisor'', ''db4ai'',
++                             ''snapshot'', ''blockchain'', ''cstore'', ''pmk'', ''coverage'')))
++UNION ALL
++SELECT ''package'' AS kind, n.nspname::text AS nspname, k.pkgname::text AS pkgname, '''' AS proname
++FROM gs_package k
++LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
++WHERE COALESCE(length(''{{package}}''), 0) > 0 AND lower(k.pkgname::text) LIKE lower(''%{{package}}%'')
++ORDER BY 1, 2, 3, 4
++LIMIT 40;
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.locate_search', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''proc'' AS kind, n.nspname::text AS nspname, COALESCE(k.pkgname::text, '''') AS pkgname, p.proname::text AS proname
++FROM pg_proc p
++LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
++LEFT JOIN gs_package k ON k.oid = p.propackageid
++WHERE lower(p.proname::text) LIKE lower(''%{{name}}%'')
++  AND (n.nspname IS NULL OR (n.nspname NOT LIKE ''pg_%'' AND n.nspname NOT LIKE ''dbe_%''
++       AND n.nspname NOT IN (''information_schema'', ''pkg_service'', ''pkg_util'', ''sqladvisor'', ''db4ai'',
++                             ''snapshot'', ''blockchain'', ''cstore'', ''pmk'', ''coverage'')))
++UNION ALL
++SELECT ''package'' AS kind, n.nspname::text AS nspname, k.pkgname::text AS pkgname, '''' AS proname
++FROM gs_package k
++LEFT JOIN pg_namespace n ON n.oid = k.pkgnamespace
++WHERE COALESCE(length(''{{package}}''), 0) > 0 AND lower(k.pkgname::text) LIKE lower(''%{{package}}%'')
++ORDER BY 1, 2, 3, 4
++LIMIT 40;
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'login.current_db', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT current_database() AS db, current_user AS usr,
++       (SELECT datcompatibility::text FROM pg_database WHERE datname = current_database()) AS compat,
++       (SELECT setting FROM pg_settings WHERE name = ''lower_case_table_names'') AS lctn;
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'explain.kernel_funcs', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''version'' AS item, version() AS detail
+ UNION ALL
+-SELECT concat(''func:'', p.proname) AS item, pg_get_function_arguments(p.oid) AS detail
++SELECT concat(''func:'', p.proname::text) AS item, pg_get_function_arguments(p.oid) AS detail
+   FROM pg_proc p
+  WHERE p.proname IN (''gs_get_explain'', ''gs_get_kernel_info'');
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'lockwait.pairs', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT w.pid                         AS waiter_pid,
++       COALESCE(w.sessionid, 0)      AS waiter_sessionid,
++       w.mode                        AS waiter_mode,
++       h.pid                         AS holder_pid,
++       COALESCE(h.sessionid, 0)      AS holder_sessionid,
++       h.mode                        AS holder_mode,
++       w.locktype                    AS locktype,
++       CASE WHEN c.relname IS NULL THEN '''' ELSE concat(n.nspname::text, ''.'', c.relname::text) END AS lock_object,
++       COALESCE(w.locktag, '''')       AS locktag,
++       round(date_part(''epoch'', clock_timestamp() - wa.query_start)::numeric, 1) AS waiter_wait_s,
++       COALESCE(wa.usename::text, '''') AS waiter_user,
++       COALESCE(wa.application_name, '''') AS waiter_app,
++       COALESCE(substr(wa.query, 1, 300), '''')       AS waiter_query,
++       COALESCE(ha.state, '''')        AS holder_state,
++       COALESCE(ha.usename::text, '''') AS holder_user,
++       COALESCE(ha.application_name, '''') AS holder_app,
++       round(date_part(''epoch'', clock_timestamp() - ha.xact_start)::numeric, 1) AS holder_xact_age_s,
++       COALESCE(substr(ha.query, 1, 300), '''')       AS holder_query
++  FROM pg_locks w
++  JOIN pg_locks h
++    ON h.locktag = w.locktag AND h.granted AND h.pid <> w.pid
++  LEFT JOIN pg_class c     ON c.oid = w.relation
++  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
++  LEFT JOIN pg_stat_activity wa ON wa.pid = w.pid
++  LEFT JOIN pg_stat_activity ha ON ha.pid = h.pid
++ WHERE w.granted = false
++ ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
++ LIMIT {{limit}};
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.proc_def', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, p.proname, l.lanname, p.prosrc,
++       pg_catalog.pg_get_function_arguments(p.oid) AS args,
++       COALESCE(k.pkgname::text, '''') AS package
++FROM pg_proc p
++JOIN pg_namespace n ON n.oid = p.pronamespace
++JOIN pg_language l ON l.oid = p.prolang
++LEFT JOIN gs_package k ON k.oid = p.propackageid
++WHERE p.proname = ''{{name}}''
++  AND (''{{schema}}'' IS NULL OR ''{{schema}}'' = '''' OR n.nspname = ''{{schema}}'')
++  AND (''{{package}}'' IS NULL OR ''{{package}}'' = '''' OR k.pkgname = ''{{package}}'')
++ORDER BY (n.nspname = ''public'') DESC, n.nspname, k.pkgname
++LIMIT 5;
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.proc_def', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, p.proname, l.lanname, p.prosrc,
++       pg_catalog.pg_get_function_arguments(p.oid) AS args,
++       COALESCE(k.pkgname::text, '''') AS package
++FROM pg_proc p
++JOIN pg_namespace n ON n.oid = p.pronamespace
++JOIN pg_language l ON l.oid = p.prolang
++LEFT JOIN gs_package k ON k.oid = p.propackageid
++WHERE p.proname = ''{{name}}''
++  AND (''{{schema}}'' IS NULL OR ''{{schema}}'' = '''' OR n.nspname = ''{{schema}}'')
++  AND (''{{package}}'' IS NULL OR ''{{package}}'' = '''' OR k.pkgname = ''{{package}}'')
++ORDER BY (n.nspname = ''public'') DESC, n.nspname, k.pkgname
++LIMIT 5;
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());

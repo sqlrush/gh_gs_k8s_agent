@@ -37,11 +37,16 @@ def _is_system(schema: str) -> bool:
     return schema.startswith(_SYSTEM_PREFIXES) or schema in _SYSTEM_NAMES
 
 
-def _lookup_key(name: str) -> str:
-    """查目录用的 relname:加引号的原样(去引号、还原双引号),不加引号的小写。"""
+def _lookup_key(name: str, fold: bool = True) -> str:
+    """查目录用的 relname:加引号的原样(去引号、还原双引号),不加引号的小写。
+    M 兼容库(v1.5.1):反引号同样去掉;表名大小写看 lower_case_table_names —— 为 0 时一律原样,否则一律小写
+    (那里加了引号也不区分大小写,common/compat.py folds_unquoted)。"""
     if name.startswith('"') and name.endswith('"') and len(name) >= 2:
         return name[1:-1].replace('""', '"')
-    return name.lower()
+    if name.startswith("`") and name.endswith("`") and len(name) >= 2:
+        inner = name[1:-1].replace("``", "`")
+        return inner.lower() if fold else inner
+    return name.lower() if fold else name
 
 
 def quoted_list(keys) -> str:
@@ -49,8 +54,10 @@ def quoted_list(keys) -> str:
 
 
 def infer(runner, script: str, sql: str, guess: str = "") -> Inference:
-    names = sqlqualify.unqualified_tables(sql)
-    keys = list(dict.fromkeys(_lookup_key(n) for n in names))
+    from common import compat
+    names = sqlqualify.unqualified_tables(sql, mysql=compat.is_mysql_like(runner))
+    fold = compat.folds_unquoted(runner)
+    keys = list(dict.fromkeys(_lookup_key(n, fold) for n in names))
     if not keys:
         return Inference(reason="SQL 里没有不带 schema 的表名")
     try:

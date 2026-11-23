@@ -6,8 +6,12 @@
 知识库目录不存在 —— 每一样都是用到时才以「HTTP 400 agent诊断脚本执行失败」或「列为空」的形态冒出来,排查要一层层倒推。
 
     python3 {baseDir}/scripts/selfcheck.py --session <句柄>
+    python3 {baseDir}/scripts/selfcheck.py --session <句柄> --m-trial     # 另把 41 条业务库脚本各试跑一次
 
 只跑白名单里的只读脚本,每条 LIMIT 1 或等价的极小结果;不改任何东西。输出每一项的结论、原因和该找谁。
+
+--m-trial(v1.5.1):业务库是 M 兼容模式时,41 条切到业务库执行的脚本用安全参数(不存在的对象名、SELECT 1 的估算计划)
+各跑一次,逐条列通过 / 报错 —— 我们没有 M 兼容库可测,现场跑一次把结果发回即可核对。A 兼容库同样可以跑。
 """
 from __future__ import annotations
 
@@ -25,7 +29,7 @@ for _anc in _HERE.parents:
         break
 
 import render  # noqa: E402
-from common import access, cli, config  # noqa: E402
+from common import access, cli, compat, config  # noqa: E402
 from common.version import package_version  # noqa: E402
 from common.grmp import deltas, routing  # noqa: E402
 from common.grmp.registry import Registry, RegistryError  # noqa: E402
@@ -50,6 +54,24 @@ SWITCHES = (
     ("enable_resource_track", "on", "内存分析 L4 / L5(SQL 级、算子级)取不到"),
     ("enable_wdr_snapshot", "on", "WDR 时段报告没有快照可用"),
 )
+
+
+# --m-trial 的安全参数:按参数名给值。对象名用不存在的名字(查到 0 行也算通过),计划只取 SELECT 1 的估算计划(不执行)
+TRIAL_OBJECT = "gsdb_selfcheck_probe"
+TRIAL_VALUES = {
+    "limit": "1", "min_bytes": "0", "min_pages": "0", "min_rows": "0",
+    "name": TRIAL_OBJECT, "names": "'%s'" % TRIAL_OBJECT, "relname": TRIAL_OBJECT, "tables": "'%s'" % TRIAL_OBJECT,
+    "columns": "'id'", "order": "s.calls DESC", "package": "", "schema": "public", "schemas": "'public'",
+    "schema_filter": "('pg_catalog','information_schema')", "sql": "SELECT 1",
+}
+# M 兼容库上不适用的脚本(技能在 M 库自动不调用):不试跑,结果标「不适用」
+M_NOT_APPLICABLE = {
+    "procinfo.source_adm": "M 兼容库没有 ADM_SOURCE 视图(只在 A 兼容库提供),技能在 M 库自动跳过这一兜底",
+    "proctune.source_adm": "M 兼容库没有 ADM_SOURCE 视图(只在 A 兼容库提供),技能在 M 库自动跳过这一兜底",
+}
+# A 兼容库上:ADM_SOURCE 默认只有系统管理员可读,读不到属于授权问题,不算脚本坏了
+ADM_SCRIPTS = frozenset(M_NOT_APPLICABLE)
+SKIP = "—"
 
 
 class Item(NamedTuple):
@@ -232,15 +254,85 @@ def check_switches(runner) -> List[Item]:
     return items
 
 
-def render_report(items: List[Item]) -> str:
+def check_compat(conn) -> List[Item]:
+    """业务库兼容模式(v1.5.1):登录时探针取到的 datcompatibility。只在切到业务库时有意义。"""
+    if not conn.route_db:
+        return []
+    if compat.mode_of(conn):
+        return [Item("业务库兼容模式", OK, compat.label(conn))]
+    return [Item("业务库兼容模式", WARN, "取不到:探针 %s 还是旧版(本版白名单增量未导入),按 A 兼容处理。业务库是 M 兼容时请导入"
+                 "本版增量后重新登录 —— 否则技能不知道要按 M 兼容的写法处理" % routing.PROBE, MIDDLEWARE)]
+
+
+def _trial_params(registry, name: str):
+    """按本地脚本定义给这条脚本配安全参数;读不到定义时按参数名猜不了,返回 None。"""
+    if registry is None:
+        return None
+    try:
+        rec = registry.find(name)
+    except Exception:  # noqa: BLE001
+        return None
+    keys = [p.key for p in (getattr(rec, "params", None) or ())]
+    if any(k not in TRIAL_VALUES for k in keys):
+        return None
+    return {k: TRIAL_VALUES[k] for k in keys}
+
+
+def trial_business(conn, runner, registry) -> List[List[str]]:
+    """--m-trial:41 条业务库脚本各跑一次。返回表格行 [脚本, 结果, 说明]。只读:目录查询与不执行的估算计划。"""
+    client = getattr(runner, "client", None)
+    mysql = compat.is_mysql_like(conn)
+    rows = []
+    for name in sorted(routing.BUSINESS_DB_SCRIPTS):
+        if mysql and name in M_NOT_APPLICABLE:
+            rows.append([name, SKIP, "不适用:" + M_NOT_APPLICABLE[name]])
+            continue
+        if client is not None and not client.registered(name):
+            rows.append([name, WARN, "中间件白名单里没有这条脚本(按本版增量导入)"])
+            continue
+        values = _trial_params(registry, name)
+        if values is None:
+            rows.append([name, WARN, "读不到本地脚本定义,配不了试跑参数(技能包的 scripts/ 没放进技能目录)"])
+            continue
+        try:
+            got = runner.run(name, values)
+        except Exception as exc:  # noqa: BLE001
+            if name in ADM_SCRIPTS and not mysql:
+                rows.append([name, WARN, "读不到 ADM_SOURCE(%s):默认只有系统管理员可读,需要时由 DBA 授权" % _err(exc)])
+            else:
+                rows.append([name, FAIL, _err(exc)])
+            continue
+        rows.append([name, OK, "%d 行" % len(got or [])])
+    return rows
+
+
+def trial_summary(rows: List[List[str]], conn) -> List[Item]:
+    bad = [r for r in rows if r[1] == FAIL]
+    warn = [r for r in rows if r[1] == WARN]
+    what = "业务库脚本试跑(%s)" % (compat.mode_of(conn) or "兼容模式未知")
+    if bad:
+        return [Item(what, FAIL, "%d 条报错:%s。逐条结果见下表,把整份输出发给我方" % (len(bad), "、".join(r[0] for r in bad[:6])),
+                     DEPLOY)]
+    if warn:
+        return [Item(what, WARN, "%d 条未能试跑或受限,见下表" % len(warn), MIDDLEWARE)]
+    return [Item(what, OK, "%d 条全部通过" % sum(1 for r in rows if r[1] == OK))]
+
+
+def render_report(items: List[Item], trial: Optional[List[List[str]]] = None) -> str:
     bad = [i for i in items if i.mark != OK]
     head = "# 部署自检\n\n" + ("全部正常。\n\n" if not bad else "%d 项需要处理(✕ 功能不可用,！ 部分受限)。\n\n" % len(bad))
-    return head + render.table(["检查项", "结果", "说明", "找谁"], [[i.what, i.mark, i.detail, i.owner or "—"] for i in items])
+    out = head + render.table(["检查项", "结果", "说明", "找谁"], [[i.what, i.mark, i.detail, i.owner or "—"] for i in items])
+    if trial:
+        out += ("\n\n## 业务库脚本试跑(%d 条)\n\n安全参数:不存在的对象名 `%s`、`SELECT 1` 的估算计划;只读,不改任何东西。\n\n"
+                % (len(trial), TRIAL_OBJECT)) + render.table(["脚本", "结果", "说明"], trial)
+    return out
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("-c", "--conn", default="", help="连接名(省略则用 gaussdb-login 建立的会话)")
+    ap.add_argument("--m-trial", action="store_true",
+                    help="另把 41 条在业务库执行的脚本用安全参数各试跑一次(只读),逐条列结果 —— M 兼容业务库核对用")
     cli.add_session_arg(ap)
     args = ap.parse_args(argv)
     cli.apply_session_arg(args)
@@ -252,8 +344,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         items.append(Item("登录会话", FAIL, "%s。先用 gaussdb-login 登录再自检" % _err(exc), ""))
         print(render_report(items), end="")
         return 1
+    registry, why = _registry()
     if conn.driver == "grmp":
-        registry, why = _registry()
+        items += _safe("业务库兼容模式", check_compat, conn)
         if registry is None:
             items.append(Item("白名单", WARN, why, DEPLOY))
             items += _safe("业务库切换", check_routing, conn, runner, None, False)
@@ -262,7 +355,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             items += _safe("白名单", check_whitelist, conn, registry)
             items += _safe("业务库切换", lambda: check_routing(conn, runner, used_names(registry)))
     items += _safe("关键脚本试跑", check_scripts, runner) + _safe("数据库监控开关", check_switches, runner)
-    print(render_report(items), end="")
+    trial = None
+    if args.m_trial:
+        try:
+            trial = trial_business(conn, runner, registry)
+            items += trial_summary(trial, conn)
+        except Exception as exc:  # noqa: BLE001 —— 试跑本身出错也照常出报告
+            items.append(Item("业务库脚本试跑", FAIL, "试跑出错:%s" % _err(exc), DEPLOY))
+    print(render_report(items, trial), end="")
     return 0 if all(i.mark != FAIL for i in items) else 1
 
 

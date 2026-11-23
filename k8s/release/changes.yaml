@@ -12,6 +12,15 @@
 # 版本从新到旧;第一条必须是本仓库清单里的版本(守卫测试)。min_upgrade_from 之前的版本按《部署上线方案》§14 手工升级。
 min_upgrade_from: agent-v1.4.0
 versions:
+  - version: agent-v1.5.1
+    mixed_with: [agent-v1.5.0, agent-v1.4.14]   # 网关没改;会话多一个旁挂文件 <句柄>.compat,旧版不读它,槽位换到哪版用哪版
+    required: []
+    steps: [rebuild_kb_import]    # 导入镜像里的公共代码换了
+    whitelist: [scripts-delta-20261123.sql]
+    notes:
+      - "白名单增量 20261123 更新 13 条(M 兼容业务库上报错的脚本改成 A / M 通用写法,登录探针多取兼容模式),导完仍是 132 条;还在 v1.4.14 白名单的先导 20261119"
+      - "业务库是 M 兼容的:升级后登录输出有「兼容模式」一行;部署自检加 --m-trial 把 41 条业务库脚本试跑一遍,结果发回核对"
+      - "(按需)换过根规范的,用本版本的离线包重做 rootspec-overlay.sh 再推内网仓库(版本说明 v1.4.5「根规范模板替换」)"
   - version: agent-v1.5.0
     mixed_with: [agent-v1.4.14]   # 网关改了(新增 Fuyao 模式与资源大盘),与池子管家的协议、会话文件格式不变,槽位换到哪版用哪版
     required: []                  # Fuyao 是新增的可选模式,按需与固定池化升级没有必须新填的配置

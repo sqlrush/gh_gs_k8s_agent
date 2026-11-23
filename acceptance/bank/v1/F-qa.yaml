@@ -137,3 +137,81 @@ questions:
     forbid:
       - {veto: true, text: "编造「本行规定索引命名为 …」并上色或注明一个编号"}
       - {w: 5, text: "回答里出现「根据知识库」这类旧写法"}
+
+# ---- v1.5.1:M 兼容业务库(sql_compatibility='M')的写法 —— 模型按兼容模式写 SQL(AGENTS.md「数据库连接规则」第 5 条、
+# sqltune / proctune 的 references/gaussdb-m-compat-gotchas.md)。不连库,考的是答对 M 库的写法、不照搬 A 库习惯。
+
+- id: F6
+  title: M 兼容库的字符串拼接
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: []}
+  ask: 我们有个业务库是 GaussDB 的 M 兼容模式(sql_compatibility='M')。想把 schema 名和表名拼成「schema.表名」显示,A 库里一直用 ||,在 M 库里还能这么写吗?该怎么写?
+  rubric:
+    format: {w: 15, template: qa, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-kb}
+    points:
+      - {w: 15, text: "指出 M 兼容库里 || 是逻辑或、不是字符串拼接(照搬 A 库写法会报错或得到真假值)"}
+      - {w: 15, text: "给出 concat(a, '.', b) 的写法"}
+      - {w: 10, text: "说明 concat 的参数里有 NULL 时结果是 NULL(与 A 库不同),可能为空的列先判空"}
+      - {w: 5, text: "写法里不用双引号引用标识符(M 库双引号默认是字符串),要引用时用反引号"}
+    handling:
+      - {w: 10, text: "提醒从 A 库迁过来的 SQL、视图、存储过程里的 || 都要改,改完在 M 库上实测"}
+    cite:
+      - {w: 10, text: "引用官方文档时青色、编号正确;知识库里查不到对应条目时如实说明,不编条目编号"}
+    forbid:
+      - {w: 5, text: "说「M 兼容库里 || 照样是拼接」"}
+
+- id: F7
+  title: M 兼容库不分大小写的模糊查询
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: []}
+  ask: M 兼容的业务库上要按过程名做不区分大小写的模糊查询,A 库里写的是 WHERE proname ILIKE '%calc%',到 M 库上报 syntax error at or near "ILIKE",怎么改?
+  rubric:
+    format: {w: 15, template: qa, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-kb}
+    points:
+      - {w: 15, text: "指出 M 兼容库不支持 ILIKE"}
+      - {w: 15, text: "给出 lower(proname) LIKE lower('%calc%') 这类 A、M 两种模式都能用的写法"}
+      - {w: 10, text: "说明 M 库里 LIKE 是否区分大小写取决于列的字符序,不能直接认为 LIKE 就等于 ILIKE"}
+      - {w: 5, text: "提醒左模糊用不上普通索引(与兼容模式无关)"}
+    handling:
+      - {w: 10, text: "建议改完在 M 库上实测一次;改的若是白名单脚本,要走白名单变更"}
+    cite:
+      - {w: 10, text: "引用官方文档时青色、编号正确;知识库里查不到对应条目时如实说明,不编条目编号"}
+    forbid:
+      - {w: 5, text: "让用户去开某个参数让 M 库支持 ILIKE(文档里没有这种开关)"}
+
+- id: F8
+  title: M 兼容库的类型转换与建索引
+  smoke: false
+  env: runtime
+  phase: after
+  needs: {faultlab: [], kb: []}
+  ask: M 兼容业务库里,想给 t_order 表的 created_at 列建个索引,再把字符串列 order_no 转成整数和 100 比较,SQL 怎么写?我们 A 库的习惯是 CAST(order_no AS bigint) 或 order_no::bigint。
+  rubric:
+    format: {w: 15, template: qa, followup: true}
+    tools:
+      w: 15
+      must:
+        - {skill: gaussdb-kb}
+    points:
+      - {w: 14, text: "转换写成 CAST(order_no AS SIGNED)(或 DECIMAL);指出 M 库 CAST 不认 bigint 这类 A 库类型名,:: 能用但官方不建议"}
+      - {w: 14, text: "建索引语句写法正确:CREATE INDEX 索引名 ON t_order (created_at),要引用标识符时用反引号、不用双引号"}
+      - {w: 8, text: "说明 M 库索引名在 schema 内唯一(MySQL 是表内唯一),索引名建议带上表名"}
+      - {w: 9, text: "指出在 order_no 上套类型转换会让 order_no 上的索引用不上,建议用与列类型一致的字面量比较或改列类型"}
+    handling:
+      - {w: 10, text: "建议先在 M 库上 EXPLAIN 确认索引生效;建索引走变更流程、低峰期执行"}
+    cite:
+      - {w: 10, text: "引用官方文档时青色、编号正确;知识库里查不到对应条目时如实说明,不编条目编号"}
+    forbid:
+      - {w: 5, text: "把 CAST(order_no AS bigint) 或 order_no::bigint 当作 M 库的推荐写法"}

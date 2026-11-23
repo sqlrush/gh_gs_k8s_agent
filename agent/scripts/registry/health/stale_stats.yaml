@@ -31,6 +31,10 @@
 # pg_stats 的列数要参与排序，所以挪进了子查询，对每张候选表都数一次（og5 36 张候选 36 毫秒）。
 # 拼接一律 concat(…),不用 ||(2026-11-17 现场):本脚本切到业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、
 # 不是字符串拼接,整条报「argument … not type name」。concat 在 A / M 两种兼容模式下都是拼接。守卫:test_registry_m_compat_units.py。
+# M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
+#   M 库 CAST 的目标类型只有 SIGNED / UNSIGNED / DATE / TIME / DATETIME / BINARY / CHAR / DECIMAL / FLOAT / DOUBLE / JSON,
+#   不认 float8(官方文档「显式类型转换」),偏离比例改成 * 1.0 / 求小数,两种模式结果一致。concat 的名字列先 ::text。
+#   M 库里 / 的结果是小数,cur_pages 会带小数位;Python 侧 as_int 按截断处理(common/grmp/values.py)。
 name: health.stale_stats
 database_type: appbusiness
 description: 表的统计信息新鲜度证据（页数漂移 + 统计列数 + 上次 ANALYZE）
@@ -38,7 +42,7 @@ sql: |
   SELECT tbl_name, frozen_pages, cur_pages, frozen_tuples, live_tuples,
          stat_columns, last_analyze, last_autoanalyze
   FROM (
-    SELECT concat(n.nspname, '.', c.relname) AS tbl_name,
+    SELECT concat(n.nspname::text, '.', c.relname::text) AS tbl_name,
            c.relpages AS frozen_pages,
            pg_relation_size(c.oid) / current_setting('block_size')::bigint AS cur_pages,
            c.reltuples::bigint AS frozen_tuples,
@@ -56,7 +60,7 @@ sql: |
   ) x
   ORDER BY (stat_columns = 0 OR frozen_pages = 0) DESC,
            CASE WHEN frozen_pages > 0
-                THEN CAST(abs(cur_pages - frozen_pages) AS float8) / frozen_pages
+                THEN abs(cur_pages - frozen_pages) * 1.0 / frozen_pages
                 ELSE 0 END DESC,
            cur_pages DESC
   LIMIT {{limit}};

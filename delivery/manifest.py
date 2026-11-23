@@ -72,7 +72,7 @@ SKILL_EXCLUDE_DIRS = ("testdata", "tests", "__pycache__")
 # common/ 下每个文件的归属(相对 agent/common/;目录写法 "x/*" 表示该目录下全部文件)
 COMMON = {
     "shared": (
-        "__init__.py", "audit.py", "config.py", "credential.py", "credential_cli.py", "db.py", "finding.py",
+        "__init__.py", "audit.py", "compat.py", "config.py", "credential.py", "credential_cli.py", "db.py", "finding.py",
         "reports.py", "session.py", "version.py", "VERSION",
         "backends/__init__.py", "backends/base.py", "backends/gsql_backend.py", "backends/gsql_protocol.py",
         "backends/psycopg2_backend.py",

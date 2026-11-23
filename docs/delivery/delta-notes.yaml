@@ -59,27 +59,42 @@ added:
     - 两个 WDR 快照之差：redo 物理写次数与写入块数，对应官方 WDR 报告的 Redo size。只读
 
 changed:
-  lockwait.pairs: >-
-    **锁对象一列的拼接改用 concat**:CASE WHEN c.relname IS NULL THEN '' ELSE concat(n.nspname, '.', c.relname) END。本脚本在业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、不是字符串拼接,整条报
-    「argument of OR must be type boolean, not type name」(2026-11-17 现场反馈)。concat 在 A / M 两种兼容模式下都是拼接,
-    A 兼容库上结果与原写法一致。
-    锁对象不是表(事务号锁等)时照旧返回空串。列名、筛选、排序不变;时间差写法同 v1.4.14。只读。
+  health.partitions: >-
+    **分区策略一列不再直接聚合 "char" 列**:先用 CASE 把 partstrategy 映射成同样的单字母文字,再取 max。本脚本在业务库执行,M 兼容业务库上 max() / COALESCE() 处理 "char" 类型报「un support type」(2026-11-20 现场反馈)
+    。输出列与取值不变(r / i / l / a / h / n),A 兼容库上结果与原写法一致。只读。
+  health.table_writes: >-
+    **改成一层查询**:原写法在 M 兼容业务库上报「operator does not exist: any <> unknown」(两个 name 类型取 COALESCE 后类型推导成 any,2026-11-20 现场反馈)
+    ;外层引用的 "table" 在 M 库又是字符串常量,修好前一处后整列会变成字面值 table。现在名字列先转成文字再取,双引号只用作最外层列别名。口径不变:普通表取自身、大字段(TOAST)写入折回所属表、找不到所属表的 TOAST 与系统 schema 排除;
+    列名、排序不变,A 兼容库上结果一致。只读。
   health.stale_stats: >-
-    **表名一列的拼接改用 concat**:concat(n.nspname, '.', c.relname)。本脚本在业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、不是字符串拼接,整条报
-    「argument of OR must be type boolean, not type name」(2026-11-17 现场反馈)。concat 在 A / M 两种兼容模式下都是拼接,
-    A 兼容库上结果与原写法一致。列名、筛选、排序不变。只读。
+    **偏离比例不再用 CAST(… AS float8)**,改为 * 1.0 / 求小数:M 兼容库的 CAST 目标类型里没有 float8。表名一列 concat 里的名字列先 ::text(M 兼容库按自己的类型推导处理 name 类型)
+    。列名、筛选、排序不变,A 兼容库上结果一致。只读。
   health.unused_index: >-
-    **索引名一列的拼接改用 concat**:concat(s.schemaname, '.', s.indexrelname)。本脚本在业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、不是字符串拼接,整条报
-    「argument of OR must be type boolean, not type name」(2026-11-17 现场反馈)。concat 在 A / M 两种兼容模式下都是拼接,
-    A 兼容库上结果与原写法一致。列名、筛选、排序不变。只读。
-  perf.table_stat: >-
-    **表名一列的拼接改用 concat**:concat(schemaname, '.', relname)。本脚本在业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、不是字符串拼接,整条报
-    「argument of OR must be type boolean, not type name」(2026-11-17 现场反馈)。concat 在 A / M 两种兼容模式下都是拼接,
-    A 兼容库上结果与原写法一致。列名、筛选、排序不变。只读。
+    索引名一列 concat 里的名字列先 ::text(M 兼容库按自己的类型推导处理 name 类型,显式转成文字两种模式一致)。列名、筛选、排序不变。只读。
+  sqlreview.tables: >-
+    **表名一列的别名改成 AS "table"**:TABLE 在 M 兼容库是保留字,原写法 AS table 报「syntax error at or near "table"」(2026-11-20 现场反馈)。顺带去掉 ARRAY[]:
+    :text[] 字面量(空集仍返回空串)。列名、筛选、排序不变,A 兼容库上结果一致。只读。
+  sqlreview.indexes: >-
+    **表名一列的别名改成 AS "table"**(同 sqlreview.tables,2026-11-20 现场反馈);索引列的顺序改用 position(… IN …) 在 indkey 的文本形态里定位,不再用数组下标与 generate_series。
+    表达式列照旧不列;列名、排序不变,A 兼容库上结果一致。只读。
+  procinfo.locate_search: >-
+    **ILIKE 改成 lower(…) LIKE lower(…)**:M 兼容库不支持 ILIKE(2026-11-20 现场反馈:syntax error at or near "ILIKE")。两种写法都不分大小写;
+    名字列先转成文字(UNION 两个分支的列类型一致)。列名、排序、条数上限不变。只读。
+  proctune.locate_search: >-
+    **ILIKE 改成 lower(…) LIKE lower(…)**,同 procinfo.locate_search(2026-11-20 现场反馈)。列名、排序、条数上限不变。只读。
+  login.current_db: >-
+    **多取两列**:compat(本库的兼容模式,A / M …)、lctn(M 兼容库的表名大小写参数 lower_case_table_names,A 兼容库没有、返回空)。技能据此在 M 兼容库上按 MySQL 的写法处理(M 库没有 ADM_SOURCE、改写语句用反引号等)
+    。db / usr 两列不变。只读。
   explain.kernel_funcs: >-
-    **函数名一列的拼接改用 concat**:concat('func:', p.proname)。本脚本在业务库执行,业务库可能是 M 兼容模式,那里 || 是逻辑或、不是字符串拼接,整条报
-    「argument of OR must be type boolean, not type name」(2026-11-17 现场反馈)。concat 在 A / M 两种兼容模式下都是拼接,
-    A 兼容库上结果与原写法一致。列名、筛选不变。只读。
+    函数名一列 concat 里的名字列先 ::text(M 兼容库的类型推导)。列名、筛选不变。只读。
+  lockwait.pairs: >-
+    锁对象一列 concat 里的名字列、等待方 / 持有方账号两列先 ::text(M 兼容库按自己的类型推导处理 name 类型)。列名、筛选、排序不变;锁对象不是表时照旧返回空串。只读。
+  procinfo.proc_def: >-
+    包名一列 COALESCE 里的名字列先 ::text(M 兼容库的类型推导)。列名、筛选、排序不变。只读。
+  proctune.proc_def: >-
+    包名一列 COALESCE 里的名字列先 ::text(M 兼容库的类型推导)。列名、筛选、排序不变。只读。
+  perf.table_stat: >-
+    表名一列 concat 里的名字列先 ::text(M 兼容库的类型推导)。列名、筛选、排序不变。只读。(不在交付白名单里)
   vacuum.dead_tuples: >-
     **时间差改用 date_part('epoch', clock_timestamp() - 列)**(last_autovacuum_age_s、last_vacuum_age_s 两列):本脚本在业务库执行,
     M 兼容模式的业务库里 now() 返回 datetime,与 timestamptz 列相减后 EXTRACT(EPOCH …) 的结果类型 JDBC 驱动不认识,整条报

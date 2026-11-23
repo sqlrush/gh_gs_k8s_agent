@@ -30,7 +30,7 @@ for _anc in _HERE.parents:                      # locate common/ (repo root or i
         break
 
 import common  # noqa: E402
-from common import access, session  # noqa: E402
+from common import access, compat, session  # noqa: E402
 from common import cli  # noqa: E402
 
 for parent in _HERE.parents:
@@ -147,6 +147,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"error: {chosen[0]} 需要连接。{session.NOT_LOGGED_IN}gsql 模式也可用 -c/--conn 指定连接名。", file=sys.stderr)
             return 1
 
+    # M 兼容库(v1.5.1):有会话就按会话里业务库的兼容模式切词;贴文本、没登录时按 A 库(与 1.5.0 相同)
+    mode_src = None
+    if not needs_db:
+        try:
+            mode_src = session.current()
+        except Exception:                 # noqa: BLE001 —— 只影响词法,取不到就按 A
+            mode_src = None
+    lexer.set_mysql(compat.is_mysql_like(mode_src))
+    prefix = compat.report_line(mode_src)
+
     # --- DB-free sources -------------------------------------------------
     if not needs_db:
         try:
@@ -158,7 +168,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         except OSError as exc:
             print(f"error: 读取 SQL 失败：{exc}", file=sys.stderr)
             return 1
-        _emit(review_text(sql, rules, source), args.format)
+        _emit(review_text(sql, rules, source), args.format, prefix)
         return 0
 
     # --- DB-backed sources -----------------------------------------------
@@ -168,6 +178,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    lexer.set_mysql(compat.is_mysql_like(runner))
+    prefix = compat.report_line(runner)
     try:
         if args.schema:
             res = review_objects(runner, args.schema, rules)
@@ -177,7 +189,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         else:
             sql, notes = _sql_from_top(runner, args.top)
             res = review_text(sql, rules, f"top:{args.top}", notes)
-        _emit(res, args.format)
+        _emit(res, args.format, prefix)
         return 0
     except (ValueError, KeyError, RuleError, access.QueryError) as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -187,8 +199,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
 
-def _emit(res: ReviewResult, fmt: str) -> None:
-    out = report.render_json(res) if fmt == "json" else report.render_markdown(res)
+def _emit(res: ReviewResult, fmt: str, prefix: str = "") -> None:
+    out = report.render_json(res) if fmt == "json" else prefix + report.render_markdown(res)
     print(out, end="" if out.endswith("\n") else "\n")
 
 

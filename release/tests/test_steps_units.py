@@ -236,15 +236,16 @@ def test_the_gate_infers_where_the_whitelist_stopped_from_its_contents(tmp_path,
         old = next(d for d in deltas if d["file"] == "scripts-delta-20261111.sql")["changed"]["lockwait.pairs"]
         regs["lockwait.pairs"][1] = old                                     # 正文停在 20261111 那一版
     sh = _gate_suggest(tmp_path, monkeypatch, stopped_at_20261111)
-    assert sh["suggest"] == ["scripts-delta-20261112.sql", "scripts-delta-20261116.sql", "scripts-delta-20261119.sql"]
+    assert sh["suggest"] == ["scripts-delta-20261112.sql", "scripts-delta-20261116.sql", "scripts-delta-20261119.sql",
+                             "scripts-delta-20261123.sql"]
 
 
 def test_a_whitelist_one_delta_behind_gets_only_that_delta(tmp_path, monkeypatch):
-    def stopped_at_20261116(regs, deltas):
-        d = next(d for d in deltas if d["file"] == "scripts-delta-20261116.sql")["changed"]["lockwait.pairs"]
+    def stopped_at_20261119(regs, deltas):          # v1.5.1:最新一份是 20261123,停在 20261119 只差这一份
+        d = next(d for d in deltas if d["file"] == "scripts-delta-20261119.sql")["changed"]["lockwait.pairs"]
         regs["lockwait.pairs"][1] = d
-    sh = _gate_suggest(tmp_path, monkeypatch, stopped_at_20261116)
-    assert sh["suggest"] == ["scripts-delta-20261119.sql"]
+    sh = _gate_suggest(tmp_path, monkeypatch, stopped_at_20261119)
+    assert sh["suggest"] == ["scripts-delta-20261123.sql"]
 
 
 def test_a_body_no_delta_explains_asks_for_the_export_instead_of_guessing(tmp_path, monkeypatch):
