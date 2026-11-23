@@ -176,6 +176,7 @@ Fuyao 模式里出现的「承载 Pod」是**平台的**对象（每个承载 Po
 
 镜像有三种取法：用我方发布的离线包（本节）；能连外网时从 `ghcr.io/sqlrush` 直接拉，K8s 镜像与两个沙箱模板镜像都有，见 **§2.3**；或现场从源码自己制作，见 **§16**。
 三种做法得到的镜像内容相同，后续步骤也相同。
+离线包的全部文件（含沙箱模板 OCI 包、`release.yaml`、`MANIFEST.txt` 与各 `.sha256`）也挂在联合仓库对应版本的发布页上，可以直接下载，例如 v1.5.0：<https://github.com/sqlrush/gh_gs_k8s_agent/releases/tag/agent-v1.5.0>。下载到同一目录后 `shasum -a 256 -c *.sha256` 核对；`e2b/` 目录取联合仓库同一标签下的 `e2b/`（与离线包相同）。
 
 我方用 `scripts/package-images.sh <TAG> --e2b` 打包（`--e2b` 不能与 `--without-kbstd` 同用）。包目录 `gaussdb-agent-v<版本>-oc1.18.27/` 下：
 

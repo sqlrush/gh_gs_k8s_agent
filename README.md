@@ -16,6 +16,7 @@ GaussDB 数据库智能体的**后端**：把 opencode 与 GaussDB / openGauss �
 | 面向客户的手册与白名单 | `main` 的 [`docs/`](docs/)（白名单在 `docs/delivery/`） | `agent-v1.5.0` |
 | 诊断技能包 / 知识库导入技能包 | 分支 `diag` / `kbimport`（见下表） | `diag-v1.5.0` / `kbimport-v1.5.0` |
 | 容器镜像与沙箱模板镜像 | `ghcr.io/sqlrush/gaussdb-agent-*:agent-v1.5.0-oc1.18.27`（见下文「Fuyao 沙箱运行模式」） | — |
+| 离线交付包（全部文件：镜像、沙箱模板 OCI 包、K8s 清单与手册、发版台、`release.yaml`、校验文件） | [发布页 agent-v1.5.0](https://github.com/sqlrush/gh_gs_k8s_agent/releases/tag/agent-v1.5.0) 的附件，下载后 `shasum -a 256 -c *.sha256` 核对 | `agent-v1.5.0` |
 
 代码在开发仓库 [gh_agent_k8s](https://github.com/sqlrush/gh_agent_k8s) 开发，每次发版整体同步到本仓库 `main` 并打同名标签；两个技能包分支由转化脚本 `delivery/transform.py` 从同一发布标签自动生成。**不要在本仓库直接改代码或这两个分支**（转化脚本发现手改会停下），改动在开发仓库做、下次发版同步过来：
 
