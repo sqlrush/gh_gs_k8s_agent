@@ -2,11 +2,15 @@
 # 现场(09-09 早):模型贴文本漏了 --schema → 400;命令是模型拼的,提示词只能约束,脚本层自己查一遍目录把这条路走通。
 # 唯一匹配就用,多个候选列出来让用户选(不猜),没有就照旧报表不存在。sqltune 复用它自己的 sqltune.tables,这条是 explain 的。
 # {{names}} 是 String 型多值位:取值只来自 common/sqlqualify.py 识别出的表位置标识符,再由调用方转义单引号。
+# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
+#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
+#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
+#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
 name: explain.relation_schemas
 database_type: appbusiness
 description: 按表名查它们所在的 schema(贴文本没带 --schema 时推断 schema 用)
 sql: |
-  SELECT n.nspname, c.relname
+  SELECT n.nspname::text AS nspname, c.relname::text AS relname
   FROM pg_class c
   LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
   WHERE c.relname IN ({{names}}) AND c.relkind IN ('r','v','p','m','f');

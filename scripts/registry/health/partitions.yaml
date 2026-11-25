@@ -13,13 +13,17 @@
 #   partstrategy 是 "char" 类型,max() / COALESCE() 直接处理它在 M 库报 un support type。先用 CASE 映射成同样的单字母文字常量
 #   (取值见 PG_PARTITION:r 范围、i 间隔、l 列表、a 自动扩展列表、h 哈希、n 无),再聚合;输出与原来相同,collectors.py 不动。
 #   "char" 列与字面量比较(parttype = 'p'、relkind = 'r')在 M 库可用(现场其他脚本已跑通)。
+# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
+#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
+#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
+#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
 name: health.partitions
 database_type: appbusiness
 description: 分区表的分区数量与分区策略
 readonly: true
 sql: |
-  SELECT n.nspname AS schema,
-         c.relname AS "table",
+  SELECT n.nspname::text AS schema,
+         c.relname::text AS "table",
          count(*)  AS parts,
          COALESCE(max(CASE p.partstrategy WHEN 'r' THEN 'r' WHEN 'i' THEN 'i' WHEN 'l' THEN 'l'
                                           WHEN 'a' THEN 'a' WHEN 'h' THEN 'h' WHEN 'n' THEN 'n'

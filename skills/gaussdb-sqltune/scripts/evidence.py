@@ -46,6 +46,7 @@ COLUMN_STATS_SCRIPT = "sqltune.column_stats"
 KEY_GUCS_SCRIPT = "sqltune.key_gucs"
 STATS_FRESHNESS_SCRIPT = "sqltune.stats_freshness"
 PLAN_JSON_SCRIPT = "sqltune.plan_json"
+PLAN_YAML_SCRIPT = "sqltune.plan_yaml"   # M 兼容业务库上 JSON 计划取不到原值时的退路(v1.5.2)
 # 带 schema 时:v1.4.13 起不再用两语句模板(行方中间件拦截两段 SQL),表名按 schema 补全后走单语句模板,
 #   见 common/search_path.py
 
@@ -107,7 +108,16 @@ def explain_json_via_script(runner, sql_text: str, schema: str = ""):
     数），ANALYZE 会真执行用户 SQL 拿实际耗时，与要比对的东西不是一回事。
     调用前同样要过 ensure_explainable()：参数位是注入面。
     """
-    return sp.explain_plan(runner, PLAN_JSON_SCRIPT, sql_text, schema)[0]
+    raw = sp.explain_plan(runner, PLAN_JSON_SCRIPT, sql_text, schema)[0]
+    if str(raw).lstrip()[:1] in ("[", "{") and not str(raw).lstrip().startswith("[B@"):
+        return raw
+    # M 兼容业务库:FORMAT JSON 的输出列是 json 类型,经现场中间件取回来是 [B@…(Java 字节数组,原值丢失)。
+    # FORMAT YAML 的输出列是 text 类型、内容同构,plantree.parse 两种都认(v1.5.2)
+    try:
+        return sp.explain_plan(runner, PLAN_YAML_SCRIPT, sql_text, schema)[0]
+    except Exception as exc:  # noqa: BLE001 —— 退路也失败:把两边的情况一起说清楚
+        raise RuntimeError("JSON 格式的计划取回来是 %r;改取 YAML 格式(%s)也失败:%s"
+                           % (str(raw)[:40], PLAN_YAML_SCRIPT, str(exc).splitlines()[0][:160])) from exc
 
 
 def explain_json(db, sql_text: str):

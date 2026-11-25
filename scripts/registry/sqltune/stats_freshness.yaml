@@ -19,11 +19,15 @@
 # DateStyle/timezone 渲染，跨环境不一致；且协议下 NULL 与真空串不可区分。
 # 这里格式写死，并把 NULL 显式转成 'never'（从未 ANALYZE 过）—— 让「没查到」
 # 和「查到了，是从来没做过」在取值代码里分得开。取到空串就是协议层出了问题。
+# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
+#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
+#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
+#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
 name: sqltune.stats_freshness
 database_type: appbusiness
 description: SQL 涉及的表的统计信息新鲜度（推演前置门，不新鲜则不出代价结论）
 sql: |
-  SELECT schemaname, relname,
+  SELECT schemaname::text AS schemaname, relname::text AS relname,
          n_live_tup, n_dead_tup,
          COALESCE(to_char(last_analyze, 'YYYY-MM-DD HH24:MI:SS'), 'never') AS last_analyze,
          COALESCE(to_char(last_autoanalyze, 'YYYY-MM-DD HH24:MI:SS'), 'never') AS last_autoanalyze,

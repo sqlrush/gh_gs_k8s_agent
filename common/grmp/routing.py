@@ -49,7 +49,7 @@ BUSINESS_DB_SCRIPTS = frozenset({
     "proctune.proc_def", "proctune.source_adm", "proctune.tables",
     "sqlreview.indexes", "sqlreview.tables",
     "sqltune.column_stats", "sqltune.column_types", "sqltune.indexes", "sqltune.plan_json",
-    "sqltune.plan_text", "sqltune.plan_text_analyze",
+    "sqltune.plan_text", "sqltune.plan_text_analyze", "sqltune.plan_yaml",
     "sqltune.stats_freshness", "sqltune.tables",
     "topproc.top_procs",
     "vacuum.bloat_estimate", "vacuum.dead_tuples",

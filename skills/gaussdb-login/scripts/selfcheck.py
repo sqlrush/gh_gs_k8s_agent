@@ -6,11 +6,11 @@
 知识库目录不存在 —— 每一样都是用到时才以「HTTP 400 agent诊断脚本执行失败」或「列为空」的形态冒出来,排查要一层层倒推。
 
     python3 {baseDir}/scripts/selfcheck.py --session <句柄>
-    python3 {baseDir}/scripts/selfcheck.py --session <句柄> --m-trial     # 另把 41 条业务库脚本各试跑一次
+    python3 {baseDir}/scripts/selfcheck.py --session <句柄> --m-trial     # 另把在业务库执行的脚本各试跑一次
 
 只跑白名单里的只读脚本,每条 LIMIT 1 或等价的极小结果;不改任何东西。输出每一项的结论、原因和该找谁。
 
---m-trial(v1.5.1):业务库是 M 兼容模式时,41 条切到业务库执行的脚本用安全参数(不存在的对象名、SELECT 1 的估算计划)
+--m-trial(v1.5.1):业务库是 M 兼容模式时,切到业务库执行的脚本(1.5.2 起 42 条)用安全参数(不存在的对象名、SELECT 1 的估算计划)
 各跑一次,逐条列通过 / 报错 —— 我们没有 M 兼容库可测,现场跑一次把结果发回即可核对。A 兼容库同样可以跑。
 """
 from __future__ import annotations
@@ -278,8 +278,16 @@ def _trial_params(registry, name: str):
     return {k: TRIAL_VALUES[k] for k in keys}
 
 
+# M 兼容库上 json 类型的列经中间件取不到原值(v1.5.2):这几条有 text 类型的替身,调用方遇到时自动改用替身
+M_JSON_FALLBACK = {"sqltune.plan_json": "sqltune.plan_yaml"}
+
+
 def trial_business(conn, runner, registry) -> List[List[str]]:
-    """--m-trial:41 条业务库脚本各跑一次。返回表格行 [脚本, 结果, 说明]。只读:目录查询与不执行的估算计划。"""
+    """--m-trial:业务库脚本各跑一次。返回表格行 [脚本, 结果, 说明]。只读:目录查询与不执行的估算计划。
+
+    v1.5.2 起不只看报不报错,还看取回来的值:M 兼容库上中间件会把某些类型的列按 Java 对象转成文字(布尔列成了 [B@…,
+    原值丢失),这种情况脚本照样「成功」,1.5.1 的试跑就是这样漏过去的。
+    """
     client = getattr(runner, "client", None)
     mysql = compat.is_mysql_like(conn)
     rows = []
@@ -302,8 +310,36 @@ def trial_business(conn, runner, registry) -> List[List[str]]:
             else:
                 rows.append([name, FAIL, _err(exc)])
             continue
-        rows.append([name, OK, "%d 行" % len(got or [])])
+        broken = _java_object_columns(got)
+        if broken and name in M_JSON_FALLBACK and mysql:
+            rows.append([name, SKIP, "不适用:本库上这一列(json 类型)取回来是 %s,取不到原值;sqltune 改用 %s 取计划,"
+                         "那一条的试跑结果见本表" % (_first_bad(got, broken), M_JSON_FALLBACK[name])])
+            continue
+        if broken:
+            rows.append([name, FAIL, "取回来的值不对:列 %s 是 %s —— 中间件把这一列按 Java 对象转成了文字,原值已丢失"
+                         "(白名单没导入最新增量,或这条脚本还有没转成文字 / 整数的列)" % ("、".join(broken), _first_bad(got, broken))])
+            continue
+        rows.append([name, OK, "%d 行" % len(got or []) if got else "0 行(安全参数下没有数据,取值形态无从核对)"])
     return rows
+
+
+def _java_object_columns(got) -> List[str]:
+    """哪些列出现了 [B@… 这类 Java 对象文字(值已丢失)。"""
+    from common.grmp.values import is_java_object_text
+    bad = []
+    for row in got or []:
+        if isinstance(row, dict):
+            bad.extend(k for k, v in row.items() if k not in bad and is_java_object_text(v))
+    return bad
+
+
+def _first_bad(got, cols) -> str:
+    from common.grmp.values import is_java_object_text
+    for row in got or []:
+        for k in cols:
+            if isinstance(row, dict) and is_java_object_text(row.get(k)):
+                return repr(row.get(k))
+    return "?"
 
 
 def trial_summary(rows: List[List[str]], conn) -> List[Item]:
@@ -332,7 +368,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("-c", "--conn", default="", help="连接名(省略则用 gaussdb-login 建立的会话)")
     ap.add_argument("--m-trial", action="store_true",
-                    help="另把 41 条在业务库执行的脚本用安全参数各试跑一次(只读),逐条列结果 —— M 兼容业务库核对用")
+                    help="另把在业务库执行的脚本(%d 条)用安全参数各试跑一次(只读),逐条列结果与取值形态 —— M 兼容业务库核对用"
+                         % len(routing.BUSINESS_DB_SCRIPTS))
     cli.add_session_arg(ap)
     args = ap.parse_args(argv)
     cli.apply_session_arg(args)

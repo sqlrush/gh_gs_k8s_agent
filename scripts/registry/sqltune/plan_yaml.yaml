@@ -1,0 +1,21 @@
+# EXPLAIN 用户临时给的 SQL —— YAML 格式,给代价推演用(v1.5.2,2026-11-25 现场反馈后新增)。
+#
+# **为什么在 plan_json 之外再要一条。** 业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字:
+# FORMAT JSON 的输出列是 json 类型,不在 M 兼容 JDBC 映射表里,取回来可能是 Java 字节数组 [B@…、原值丢失;
+# FORMAT YAML 的输出列是 text 类型,两种兼容模式下都能原样取到。内容与 JSON 同构(同样的键、同样的嵌套),
+# 解析在 skills/gaussdb-sqltune/scripts/plantree.py。只在 JSON 取回来不是 JSON 时才用(sqltune evidence.py)。
+#
+# 与 sqltune.plan_json 同一个参数位、同样三道防线:
+#   1. 调用前 common.grmp.statement.ensure_explainable() 校验单语句 + 只读
+#   2. readonly: true —— 只读会话执行,DML/DDL 被数据库本身挡掉
+#   3. 模板里 ANALYZE 写死为 false —— 用户 SQL **不会被执行**,只出估算计划
+name: sqltune.plan_yaml
+database_type: appbusiness
+description: 取一条只读 SQL 的执行计划（YAML 格式，不执行该 SQL；M 兼容库上代价推演用）
+readonly: true
+sql: |
+  EXPLAIN (ANALYZE false, BUFFERS false, FORMAT YAML) {{sql}}
+params:
+  - key: sql
+    type: String
+    description: 待分析的只读 SQL（单条语句）

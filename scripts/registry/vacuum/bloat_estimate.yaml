@@ -14,6 +14,10 @@
 #
 # avg_width 从 pg_stats 按表汇总(每列一行,求和即一行的平均宽度)。
 # 某张表没有任何 pg_stats 行 = 从没 ANALYZE 过 → 这里给 NULL,判定侧据此拒绝估算。
+# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
+#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
+#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
+#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
 name: vacuum.bloat_estimate
 database_type: appbusiness
 description: 表膨胀估算的输入（页数、行数、平均行宽、真实大小）
@@ -23,8 +27,8 @@ params:
     type: INTEGER
     description: 返回表数上限
 sql: |
-  SELECT n.nspname AS schema,
-         c.relname AS "table",
+  SELECT n.nspname::text AS schema,
+         c.relname::text AS "table",
          c.relpages::bigint                       AS relpages,
          (pg_relation_size(c.oid) / 8192)::bigint AS real_pages,
          c.reltuples::bigint                      AS reltuples,

@@ -5,11 +5,15 @@
 # self_time 会把 total_time 顶掉，且不报错。加别名不改语义与结果。
 #
 # {{order}} 落在 ORDER BY 位，取值只能来自 topproc.py 的 _SORT_COLS 白名单。
+# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
+#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
+#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
+#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
 name: topproc.top_procs
 database_type: appbusiness
 description: 资源消耗最高的存储过程/函数（pg_stat_user_functions）
 sql: |
-  SELECT n.nspname, p.proname, s.calls,
+  SELECT n.nspname::text AS nspname, p.proname::text AS proname, s.calls,
          ROUND(s.total_time::numeric, 2) AS total_ms,
          ROUND(s.self_time::numeric, 2) AS self_ms
   FROM pg_stat_user_functions s

@@ -22,6 +22,10 @@
 # M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
 #   TABLE 在 M 库是保留字,`AS table` 报 syntax error:别名改成 AS "table"(M 库里双引号别名按字符串别名处理,A 库是加引号的标识符,
 #   两边列名都是 table)。顺带去掉 ARRAY[]::text[] 字面量:COALESCE 挪到 array_to_string 外面,空集仍得 ''。
+# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
+#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
+#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
+#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
 name: sqlreview.tables
 database_type: appbusiness
 description: 某模式下的表清单（主键/外键/列名）
@@ -29,8 +33,9 @@ sql: |
   SELECT
     n.nspname::text                                              AS schema,
     c.relname::text                                              AS "table",
-    EXISTS (SELECT 1 FROM pg_constraint pk
-            WHERE pk.conrelid = c.oid AND pk.contype = 'p')      AS has_pk,
+    CASE WHEN EXISTS (SELECT 1 FROM pg_constraint pk
+                      WHERE pk.conrelid = c.oid AND pk.contype = 'p')
+         THEN 1 ELSE 0 END                                       AS has_pk,
     COALESCE((SELECT array_to_string(array_agg(fk.conname::text), ',')
                 FROM pg_constraint fk
                WHERE fk.conrelid = c.oid AND fk.contype = 'f'), '') AS fks,

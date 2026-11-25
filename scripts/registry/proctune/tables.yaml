@@ -18,14 +18,18 @@
 # {{names}} 是 String 型多值位：类型校验对它等于不存在（注册时会标
 # STRING_PARAM）。防线在调用方 —— evidence.extract_tables() 只产出
 # [a-z_][\w.]* 形态的标识符，再由 _quoted_list() 双写单引号。
+# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
+#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
+#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
+#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
 name: proctune.tables
 database_type: appbusiness
 description: 游标 SQL 涉及的表的页数/行数/大小（证据包 ## Tables）
 sql: |
-  SELECT n.nspname, c.relname, c.relpages,
+  SELECT n.nspname::text AS nspname, c.relname::text AS relname, c.relpages,
          c.reltuples::bigint AS reltuples,
          pg_relation_size(c.oid) / current_setting('block_size')::bigint AS curpages,
-         c.relkind,
+         c.relkind::text AS relkind,
          pg_total_relation_size(c.oid) / 1024.0 / 1024.0 AS size_mb
   FROM pg_class c
   LEFT JOIN pg_namespace n ON c.relnamespace = n.oid

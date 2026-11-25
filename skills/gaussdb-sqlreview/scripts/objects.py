@@ -23,21 +23,21 @@ for parent in _HERE.parents:
 # 取数失败只认这一个类型。换一种数据库访问方式时，改的是访问模块，
 # 不是这里 —— 详见 common/grmp/errors.py。
 from common import access  # noqa: E402
-from common.grmp.values import as_int  # noqa: E402
+from common.grmp.values import as_bool, as_int  # noqa: E402
 
 
 TABLES_SCRIPT = "sqlreview.tables"
 INDEXES_SCRIPT = "sqlreview.indexes"
 
-# 布尔列的真值形态。协议把所有列值都渲染成字符串，而布尔的渲染形式接口文档
-# 自相矛盾（§3.1 给 true/false，§3.2 给 t/f），所以两套都认。
-# 直接 bool(值) 是不行的：bool("f") 是 True —— 每张表都会被判成「有主键」，
-# 不报错，只是结论反了。
-_TRUE_TEXTS = frozenset({"t", "true", "y", "yes", "1"})
+# 布尔列:协议把所有列值都渲染成字符串，布尔的渲染形式接口文档自相矛盾（§3.1 给 true/false，§3.2 给 t/f），
+# 1.5.2 起脚本里又统一输出 1/0 —— 都由 common.grmp.values.as_bool 认。
+# 直接 bool(值) 是不行的：bool("f") 是 True —— 每张表都会被判成「有主键」，不报错，只是结论反了。
 
 
 def _as_bool(val) -> bool:
-    return str(val).strip().lower() in _TRUE_TEXTS
+    """认不出的取值报错,不当成假(v1.5.2:M 兼容库上 has_pk 取回来是 [B@…,原先被静默当成假,
+    每张表都报成「没有主键」)。"""
+    return as_bool(val)
 
 
 def _as_tuple(val) -> tuple[str, ...]:

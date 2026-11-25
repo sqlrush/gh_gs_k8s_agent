@@ -16,6 +16,10 @@
 #   能否用没有把握),改成在 indkey 的文本形态 ' 3 1 2 ' 里找 ' <attnum> ' 的位置排序:position(… IN …) 是两种模式都有的标准写法
 #   (M 库保持原 GaussDB 行为,官方文档「系统函数兼容性概述」)。表达式列 attnum 为 0,被 attnum > 0 排除,与原口径相同;
 #   同一列在索引里出现两次时只列一次(极少见)。
+# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
+#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
+#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
+#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
 name: sqlreview.indexes
 database_type: appbusiness
 description: 某模式下的索引清单（列顺序/唯一性/扫描次数）
@@ -29,8 +33,8 @@ sql: |
                 FROM pg_attribute a
                WHERE a.attrelid = t.oid AND a.attnum > 0
                  AND position(concat(' ', a.attnum::text, ' ') IN concat(' ', ix.indkey::text, ' ')) > 0), '') AS columns,
-    ix.indisunique                                               AS is_unique,
-    ix.indisprimary                                              AS is_primary,
+    CASE WHEN ix.indisunique THEN 1 ELSE 0 END                   AS is_unique,
+    CASE WHEN ix.indisprimary THEN 1 ELSE 0 END                  AS is_primary,
     COALESCE(s.idx_scan, 0)                                      AS scans
   FROM pg_index ix
   JOIN pg_class i     ON i.oid = ix.indexrelid
