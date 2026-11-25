@@ -139,7 +139,7 @@ timedatectl | grep synchronized
 
 | 文件 | 大小 | 内容 |
 |---|---|---|
-| `gaussdb-agent-v1.5.2-oc1.18.27-arm64.tar.gz` | 459 MB | 5 个 K8s 镜像 |
+| `gaussdb-agent-v1.5.2-oc1.18.27-arm64.tar.gz` | 504 MB | 5 个 K8s 镜像 |
 | `gaussdb-agent-v1.5.2-oc1.18.27-e2b-arm64.oci.tar` | 843 MB | 2 个沙箱模板镜像 |
 | `gaussdb-agent-v1.5.2-oc1.18.27-k8s.tar.gz` | 1 MB | 部署清单、小工具和全部手册 |
 | 以上三个文件各自的 `.sha256` | 很小 | 校验值 |
