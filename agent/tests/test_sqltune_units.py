@@ -5,8 +5,11 @@ import sys
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "skills" / "gaussdb-sqltune" / "scripts"))
 
+import pytest  # noqa: E402
+
 import placeholder  # noqa: E402
 import evidence  # noqa: E402
+import plantree  # noqa: E402
 import render  # noqa: E402
 import sqlfetch  # noqa: E402
 
@@ -378,6 +381,8 @@ class _SchemaRunner:
         self.calls.append((script, dict(values or {})))
         if script == evidence.VERSION_SCRIPT:
             return [{"version": "openGauss 5.0.3"}]
+        if script == "sqltune.plan_json":
+            return [{"QUERY PLAN": '[{"Plan": {"Node Type": "Seq Scan", "Startup Cost": 0.0, "Total Cost": 1.0}}]'}]
         if script.startswith("sqltune.plan_"):
             return [{"QUERY PLAN": "Seq Scan on orders  (cost=0.00..1.00 rows=1 width=4)"}]
         return []
@@ -460,6 +465,68 @@ def test_explain_json_via_script_takes_the_applied_search_path_back():
     r = _SchemaRunner()
     evidence.explain_json_via_script(r, "select * from orders", schema="fl, public")
     assert r.calls[-1] == ("sqltune.plan_json", {"sql": "select * from fl.orders"})
+
+
+class _MCompatPlanRunner(_SchemaRunner):
+    """M 兼容业务库经现场中间件:JSON 计划的列(json 类型)取回来是 [B@…,YAML 计划(text 类型)正常(v1.5.2)。"""
+
+    YAML = ('- Plan: \n    Node Type: "Seq Scan"\n    Relation Name: "orders"\n    Alias: "orders"\n'
+            '    Startup Cost: 0.00\n    Total Cost: 1.00\n    Plan Rows: 1\n    Plan Width: 4')
+
+    def run(self, script, values=None):
+        self.calls.append((script, dict(values or {})))
+        if script == "sqltune.plan_json":
+            return [{"QUERY PLAN": "[B@6d06d69c"}]
+        if script == "sqltune.plan_yaml":
+            return [{"QUERY PLAN": self.YAML}]
+        return []
+
+
+def test_explain_json_falls_back_to_yaml_when_the_json_column_comes_back_as_java_bytes():
+    r = _MCompatPlanRunner()
+    raw = evidence.explain_json_via_script(r, "select * from orders", schema="app_trade")
+    assert [c[0] for c in r.calls] == ["sqltune.plan_json", "sqltune.plan_yaml"]
+    assert r.calls[-1][1] == {"sql": "select * from app_trade.orders"}      # 退路同样按 schema 补全表名
+    root = plantree.parse(raw)
+    assert (root.node_type, root.startup_cost, root.total_cost) == ("Seq Scan", 0.0, 1.0)
+
+
+def test_explain_json_does_not_touch_yaml_when_json_is_fine():
+    r = _SchemaRunner()
+    evidence.explain_json_via_script(r, "select * from orders")
+    assert [c[0] for c in r.calls] == ["sqltune.plan_json"]
+
+
+def test_yaml_fallback_failure_says_what_happened_on_both_sides():
+    class _NoYaml(_MCompatPlanRunner):
+        def run(self, script, values=None):
+            if script == "sqltune.plan_yaml":
+                raise RuntimeError("脚本 sqltune.plan_yaml 不存在")
+            return super().run(script, values)
+    with pytest.raises(RuntimeError) as ei:
+        evidence.explain_json_via_script(_NoYaml(), "select * from orders")
+    assert "[B@6d06d69c" in str(ei.value) and "sqltune.plan_yaml" in str(ei.value) and "不存在" in str(ei.value)
+
+
+def test_plantree_names_java_bytes_instead_of_a_json_decode_error():
+    with pytest.raises(plantree.PlanParseError) as ei:
+        plantree.parse("[B@c6323b1")
+    assert "字节数组" in str(ei.value) and "sqltune.plan_yaml" in str(ei.value)
+
+
+def test_plantree_parses_yaml_the_same_as_json():
+    import json
+    as_json = [{"Plan": {"Node Type": "Sort", "Startup Cost": 105.24, "Total Cost": 105.36, "Plan Rows": 49,
+                         "Plan Width": 9, "Sort Key": ["id"],
+                         "Plans": [{"Node Type": "Seq Scan", "Parent Relationship": "Outer", "Relation Name": "orders",
+                                    "Alias": "orders", "Startup Cost": 0.0, "Total Cost": 103.86, "Plan Rows": 49,
+                                    "Plan Width": 9, "Filter": "(cust_id = 5)"}]}}]
+    as_yaml = ('- Plan: \n    Node Type: "Sort"\n    Startup Cost: 105.24\n    Total Cost: 105.36\n    Plan Rows: 49\n'
+               '    Plan Width: 9\n    Sort Key: \n      - "id"\n    Plans: \n      - Node Type: "Seq Scan"\n'
+               '        Parent Relationship: "Outer"\n        Relation Name: "orders"\n        Alias: "orders"\n'
+               '        Startup Cost: 0.00\n        Total Cost: 103.86\n        Plan Rows: 49\n        Plan Width: 9\n'
+               '        Filter: "(cust_id = 5)"')
+    assert plantree.parse(as_yaml) == plantree.parse(json.dumps(as_json))
 
 
 def test_tune_by_id_missing_relation_hint_with_a_search_path_string(monkeypatch):

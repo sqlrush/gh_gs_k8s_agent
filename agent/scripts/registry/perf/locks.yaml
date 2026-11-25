@@ -2,12 +2,16 @@
 # M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
 #   名字类列(name 类型)进 concat / COALESCE 前先 ::text:M 库按自己的类型推导矩阵处理 name 类型,
 #   health.table_writes 就栽在 COALESCE(name, name) 上;显式转成文字,两种模式结果一致。
+# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
+#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
+#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
+#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
 name: perf.locks
 database_type: appbusiness
 description: 当前锁与持有者（pg_locks 关联 pg_class / pg_stat_activity）
 sql: |
-  select l.locktype, l.mode, l.granted,
-         l.pid::text, l.sessionid::text,
+  select l.locktype, l.mode, case when l.granted then 1 else 0 end as granted,
+         l.pid::text as pid, l.sessionid::text as sessionid,
          coalesce(c.relname::text, '-') as relname,
          coalesce(a.usename::text, '-') as usename
   from pg_locks l

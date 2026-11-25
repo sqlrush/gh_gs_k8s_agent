@@ -24,8 +24,16 @@ def test_duplicate_script_names_in_the_notes_are_refused():
 
 def test_the_notes_in_the_repo_have_no_duplicates_and_cover_this_round():
     notes = dd.load_notes(dd.NOTES.read_text(encoding="utf-8"))
-    for name in ("lockwait.pairs", "health.stale_stats", "health.unused_index", "perf.table_stat", "explain.kernel_funcs"):
+    for name in ("lockwait.pairs", "health.stale_stats", "perf.table_stat", "explain.kernel_funcs"):
         assert "concat" in notes["changed"][name], name
+    # v1.5.2 这一轮:布尔列改 1/0、名字类改 ::text(M 兼容库上取值形态),新增 YAML 计划
+    for name in ("health.unused_index", "sqltune.indexes", "proctune.indexes", "vacuum.dead_tuples"):
+        assert "1/0" in notes["changed"][name] and "::text" in notes["changed"][name], name
+    for name in ("sqlreview.tables", "sqlreview.indexes", "health.table_writes"):
+        assert "1/0" in notes["changed"][name], name
+    for name in ("explain.relation_schemas", "sqltune.column_stats", "topproc.top_procs"):
+        assert "::text" in notes["changed"][name], name
+    assert "YAML" in notes["added"]["sqltune.plan_yaml"][0]
 
 
 # ---- 文件头按实际改了哪些字段写(2026-11-19):本版 4 条只改脚本正文,模板却写「UPDATE 会同时写 database_type 与

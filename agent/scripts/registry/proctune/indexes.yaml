@@ -9,12 +9,17 @@
 # 理由见那一份。
 #
 # ⚠️ 顺带修掉的既有缺陷同 proctune.tables（Python 列表拼进 IN，语法错误）。
+# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
+#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
+#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
+#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
 name: proctune.indexes
 database_type: appbusiness
 description: 游标 SQL 涉及的表上的索引定义（证据包 ## Indexes）
 sql: |
-  SELECT n.nspname AS schema_name, t.relname AS table_name, i.relname AS index_name,
-         ix.indisunique, ix.indisprimary,
+  SELECT n.nspname::text AS schema_name, t.relname::text AS table_name, i.relname::text AS index_name,
+         CASE WHEN ix.indisunique THEN 1 ELSE 0 END AS indisunique,
+         CASE WHEN ix.indisprimary THEN 1 ELSE 0 END AS indisprimary,
          pg_get_indexdef(ix.indexrelid) AS index_def
   FROM pg_class t
   JOIN pg_index ix ON t.oid = ix.indrelid

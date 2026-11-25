@@ -125,7 +125,7 @@ def test_m_trial_runs_all_business_scripts_readonly(sc):
     runner = _TrialRunner(broken={"health.partitions": "ERROR: un support type"})
     rows = sc.trial_business(replace(CONN, compat="M"), runner, Registry())
     names = [r[0] for r in rows]
-    assert names == sorted(routing.BUSINESS_DB_SCRIPTS) and len(names) == 41
+    assert names == sorted(routing.BUSINESS_DB_SCRIPTS) and len(names) == 42   # v1.5.2 加 sqltune.plan_yaml
     by = {r[0]: r for r in rows}
     assert by["procinfo.source_adm"][1] == sc.SKIP and "不适用" in by["procinfo.source_adm"][2]
     assert "procinfo.source_adm" not in runner.calls and "proctune.source_adm" not in runner.calls
@@ -134,7 +134,32 @@ def test_m_trial_runs_all_business_scripts_readonly(sc):
     summary = sc.trial_summary(rows, replace(CONN, compat="M"))
     assert summary[0].mark == sc.FAIL and "health.partitions" in summary[0].detail
     report = sc.render_report(summary, rows)
-    assert "## 业务库脚本试跑(41 条)" in report and sc.TRIAL_OBJECT in report
+    assert "## 业务库脚本试跑(42 条)" in report and sc.TRIAL_OBJECT in report
+
+
+def test_m_trial_flags_values_that_came_back_as_java_objects(sc):
+    """v1.5.2(2026-11-25 现场):M 兼容库上布尔列经中间件取回来是 [B@…,脚本照样「成功」—— 试跑要按值认出来。"""
+    runner = _TrialRunner(rows={
+        "health.unused_index": [{"idx_name": "app.ix_a", "indisprimary": "[B@276fe535", "indisunique": "0"}],
+        "health.partitions": [{"schema": "app", "table": "t", "parts": "3", "strategy": "r"}],
+    })
+    by = {r[0]: r for r in sc.trial_business(replace(CONN, compat="M"), runner, Registry())}
+    assert by["health.unused_index"][1] == sc.FAIL
+    assert "indisprimary" in by["health.unused_index"][2] and "[B@276fe535" in by["health.unused_index"][2]
+    assert "indisunique" not in by["health.unused_index"][2]
+    assert by["health.partitions"][1] == sc.OK and by["health.partitions"][2] == "1 行"
+    assert by["health.invalid_index"][1] == sc.OK and "无从核对" in by["health.invalid_index"][2]
+
+
+def test_m_trial_json_plan_is_not_applicable_on_m_because_sqltune_falls_back_to_yaml(sc):
+    runner = _TrialRunner(rows={"sqltune.plan_json": [{"QUERY PLAN": "[B@3be7717a"}],
+                                "sqltune.plan_yaml": [{"QUERY PLAN": "- Plan: \n    Node Type: \"Result\""}]})
+    by = {r[0]: r for r in sc.trial_business(replace(CONN, compat="M"), runner, Registry())}
+    assert by["sqltune.plan_json"][1] == sc.SKIP and "sqltune.plan_yaml" in by["sqltune.plan_json"][2]
+    assert by["sqltune.plan_yaml"][1] == sc.OK
+    # A 兼容库上 JSON 计划取回来是 [B@… 就是真问题,照报
+    by_a = {r[0]: r for r in sc.trial_business(replace(CONN, compat="A"), runner, Registry())}
+    assert by_a["sqltune.plan_json"][1] == sc.FAIL
 
 
 def test_m_trial_params_are_safe(sc):

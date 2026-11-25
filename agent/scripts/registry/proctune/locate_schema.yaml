@@ -1,11 +1,15 @@
 # 过程「找不到」时的排查脚本之二:目标 schema 在不在本库、执行账号有没有 USAGE。
 # og5 实测:对象隔离(ENABLE PRIVATE OBJECT)藏的正是 pg_namespace 这一行——0 行既可能是「本库没有」也可能是
 # 「对执行账号不可见」,靠 locate_search 里 LEFT JOIN 的 nspname 为空来分。有行、usage=f 则是普通的权限不足。
+# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
+#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
+#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
+#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
 name: proctune.locate_schema
 database_type: appbusiness
 description: 过程找不到时的排查:目标 schema 在不在本库、执行账号有没有 USAGE 权限
 sql: |
-  SELECT n.nspname, pg_catalog.has_schema_privilege(n.oid, 'USAGE') AS usage
+  SELECT n.nspname::text AS nspname, CASE WHEN pg_catalog.has_schema_privilege(n.oid, 'USAGE') THEN 1 ELSE 0 END AS usage
   FROM pg_namespace n
   WHERE n.nspname = '{{schema}}';
 params:

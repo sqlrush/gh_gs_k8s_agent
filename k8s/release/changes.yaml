@@ -12,6 +12,15 @@
 # 版本从新到旧;第一条必须是本仓库清单里的版本(守卫测试)。min_upgrade_from 之前的版本按《部署上线方案》§14 手工升级。
 min_upgrade_from: agent-v1.4.0
 versions:
+  - version: agent-v1.5.2
+    mixed_with: [agent-v1.5.1, agent-v1.5.0, agent-v1.4.14]   # 网关没改;会话格式不变,槽位换到哪版用哪版
+    required: []
+    steps: [rebuild_kb_import]    # 导入镜像里的公共代码换了
+    whitelist: [scripts-delta-20261125.sql]
+    notes:
+      - "白名单增量 20261125 新增 1 条(YAML 格式执行计划)、更新 21 条(业务库脚本输出列改成 M 兼容库能原样取回的类型),导完 133 条;还在 v1.5.0 白名单的先导 20261123"
+      - "业务库是 M 兼容的:升级、导完增量后跑一次部署自检 --m-trial(v1.5.2 起检查取回来的值),结果发回核对"
+      - "(按需)换过根规范的,用本版本的离线包重做 rootspec-overlay.sh 再推内网仓库(版本说明 v1.4.5「根规范模板替换」)"
   - version: agent-v1.5.1
     mixed_with: [agent-v1.5.0, agent-v1.4.14]   # 网关没改;会话多一个旁挂文件 <句柄>.compat,旧版不读它,槽位换到哪版用哪版
     required: []

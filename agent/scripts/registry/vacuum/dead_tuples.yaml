@@ -17,13 +17,17 @@
 # 类型 GaussDB JDBC 驱动不认识,整条报 un support type(2026-11-16 现场反馈与实测)。clock_timestamp() 两种
 # 兼容模式下都返回 timestamptz,date_part 返回 double precision,A 兼容(postgres 库、og5)下结果与原写法一致。
 # 守卫测试 test_registry_m_compat_units.py:业务库脚本不许再出现 now()。
+# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
+#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
+#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
+#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
 name: vacuum.dead_tuples
 database_type: appbusiness
 description: 用户表死元组清单（含存活/死元组数、表大小、autovacuum 服务历史）
 readonly: true
 sql: |
-  SELECT n.nspname AS schema,
-         t.relname AS "table",
+  SELECT n.nspname::text AS schema,
+         t.relname::text AS "table",
          t.n_live_tup AS n_live_tup,
          t.n_dead_tup AS n_dead_tup,
          c.reltuples AS reltuples,
@@ -35,7 +39,7 @@ sql: |
          t.n_tup_upd AS n_tup_upd,
          t.n_tup_hot_upd AS n_tup_hot_upd,
          t.n_tup_del AS n_tup_del,
-         CASE WHEN 'autovacuum_enabled=false' = ANY(c.reloptions) THEN false ELSE true END AS autovac_enabled,
+         CASE WHEN 'autovacuum_enabled=false' = ANY(c.reloptions) THEN 0 ELSE 1 END AS autovac_enabled,
          COALESCE(array_to_string(c.reloptions, ','), '') AS reloptions
     FROM pg_stat_user_tables t
     JOIN pg_class c ON c.oid = t.relid

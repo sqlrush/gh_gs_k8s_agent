@@ -1,0 +1,1868 @@
+diff --git a/.delivery.json b/.delivery.json
+index 3e5c768..b20e657 100644
+--- a/.delivery.json
++++ b/.delivery.json
+@@ -1,22 +1,22 @@
+ {
+   "format": 1,
+   "package": "diag",
+-  "version": "diag-v1.5.1",
++  "version": "diag-v1.5.2",
+   "source": {
+     "repo": "gh_agent_k8s",
+-    "ref": "agent-v1.5.1",
+-    "commit": "a91425d72c649ed5ba75d4a9b04312f47c7a1986",
+-    "date": "2026-11-23T18:41:49+08:00"
++    "ref": "agent-v1.5.2",
++    "commit": "9f501ff55e669c51456c5b3b6dd48e225de326c8",
++    "date": "2026-11-25T17:22:34+08:00"
+   },
+   "base": {
+-    "version": "diag-v1.5.0",
++    "version": "diag-v1.5.1",
+     "source": {
+       "repo": "gh_agent_k8s",
+-      "ref": "agent-v1.5.0",
+-      "commit": "ef0c07795c295caf85ab44fc213b083aa1a4ba60",
+-      "date": "2026-11-19T13:32:04+08:00"
++      "ref": "agent-v1.5.1",
++      "commit": "a91425d72c649ed5ba75d4a9b04312f47c7a1986",
++      "date": "2026-11-23T18:41:49+08:00"
+     }
+   },
+-  "files": 436,
+-  "digest": "a01aebb60b19a96d3725a70bc78fa5382be9ddc1245ea9047eee84b7f1128f89"
++  "files": 438,
++  "digest": "beecad7e485fb8ce21b7bbc54e50d657001aae640f13aaa13ffabe9769c2783b"
+ }
+diff --git a/common/VERSION b/common/VERSION
+index f8ec219..870a221 100644
+--- a/common/VERSION
++++ b/common/VERSION
+@@ -1 +1 @@
+-agent-v1.5.1
++agent-v1.5.2
+diff --git a/common/grmp/deltas.py b/common/grmp/deltas.py
+index b936aa1..573dbde 100644
+--- a/common/grmp/deltas.py
++++ b/common/grmp/deltas.py
+@@ -152,6 +152,19 @@ DELTAS: Tuple[Delta, ...] = (
+               "sqlreview.tables",
+           ),
+           routing=()),
++    Delta("scripts-delta-20261125.sql",
++          added=(
++              "sqltune.plan_yaml",
++          ),
++          changed=(
++              "explain.relation_schemas", "health.partitions", "health.table_writes", "health.unused_index",
++              "procinfo.locate_schema", "procinfo.proc_def", "proctune.column_stats", "proctune.indexes",
++              "proctune.locate_schema", "proctune.proc_def", "proctune.tables", "sqlreview.indexes",
++              "sqlreview.tables", "sqltune.column_stats", "sqltune.column_types", "sqltune.indexes",
++              "sqltune.stats_freshness", "sqltune.tables", "topproc.top_procs", "vacuum.bloat_estimate",
++              "vacuum.dead_tuples",
++          ),
++          routing=()),
+ )
+ 
+ 
+diff --git a/common/grmp/routing.py b/common/grmp/routing.py
+index c0a9078..b36bffe 100644
+--- a/common/grmp/routing.py
++++ b/common/grmp/routing.py
+@@ -49,7 +49,7 @@ BUSINESS_DB_SCRIPTS = frozenset({
+     "proctune.proc_def", "proctune.source_adm", "proctune.tables",
+     "sqlreview.indexes", "sqlreview.tables",
+     "sqltune.column_stats", "sqltune.column_types", "sqltune.indexes", "sqltune.plan_json",
+-    "sqltune.plan_text", "sqltune.plan_text_analyze",
++    "sqltune.plan_text", "sqltune.plan_text_analyze", "sqltune.plan_yaml",
+     "sqltune.stats_freshness", "sqltune.tables",
+     "topproc.top_procs",
+     "vacuum.bloat_estimate", "vacuum.dead_tuples",
+diff --git a/common/grmp/values.py b/common/grmp/values.py
+index bce93ab..8ceed63 100644
+--- a/common/grmp/values.py
++++ b/common/grmp/values.py
+@@ -55,6 +55,11 @@ def as_bool(value: Any) -> bool:
+         return True
+     if text in _FALSE:
+         return False
++    if is_java_object_text(text):
++        raise ValueError(
++            "布尔列取回来是 %r:中间件把这一列按 Java 对象(字节数组)转成了文字,原值已丢失 —— M 兼容业务库上的布尔列"
++            "就是这样(2026-11-25 现场)。脚本里应把布尔列转成 1/0 输出(CASE WHEN … THEN 1 ELSE 0 END),"
++            "见 agent/tests/test_registry_output_types_units.py;现场请确认白名单已导入最新增量。" % (value,))
+     raise ValueError(
+         "无法识别的布尔取值 %r。已知形式：%s / %s。"
+         "中间件对布尔的渲染形式文档自相矛盾（§3.1 true/false、§3.2 t/f），"
+@@ -63,6 +68,19 @@ def as_bool(value: Any) -> bool:
+     )
+ 
+ 
++_JAVA_OBJECT_TEXT = ("[b@", "[c@", "[i@", "[l@")
++
++
++def is_java_object_text(value: Any) -> bool:
++    """形如 [B@276fe535:Java 对数组调 toString() 的样子(类型码 + @ + 对象哈希)。
++
++    现场中间件按 JDBC 类型映射取值再转文字;取出来是字节数组等对象时就成了这样,原值已经丢了,
++    任何解析都只会得到错的结果 —— 调用方遇到它要报错,不能当成某个普通取值(v1.5.2)。
++    """
++    text = str(value or "").strip().lower()
++    return text.startswith(_JAVA_OBJECT_TEXT) and len(text) > 3 and all(c in "0123456789abcdef" for c in text[3:])
++
++
+ def as_int(value: Any, default: int = 0) -> int:
+     """把字符串数值还原成 int。空串/None 取默认值（NULL 渲染成空串）。
+ 
+diff --git a/common/proc_locate.py b/common/proc_locate.py
+index 780f94b..bd0fedb 100644
+--- a/common/proc_locate.py
++++ b/common/proc_locate.py
+@@ -26,8 +26,6 @@ CONTEXT = "locate_context"
+ SCHEMA = "locate_schema"
+ SEARCH = "locate_search"
+ 
+-_TRUE = {"t", "true", "1", "yes", "y", "on"}
+-
+ 
+ @dataclass(frozen=True)
+ class Hit:
+@@ -59,11 +57,13 @@ class Verdict:
+ # ---------------------------------------------------------------- probe
+ 
+ def _flag(v: Any) -> bool:
++    """布尔列 → bool。认不出的取值报错,不当成假(v1.5.2:M 兼容库上的 [B@… 曾被静默当成「没有 USAGE 权限」)。"""
+     if isinstance(v, bool):
+         return v
+     if isinstance(v, (int, float)):
+         return v != 0
+-    return str(v or "").strip().lower() in _TRUE
++    from common.grmp.values import as_bool
++    return as_bool(v)
+ 
+ 
+ def _s(v: Any) -> str:
+diff --git a/scripts/registry/explain/relation_schemas.yaml b/scripts/registry/explain/relation_schemas.yaml
+index 198c4ca..fbd5c5e 100644
+--- a/scripts/registry/explain/relation_schemas.yaml
++++ b/scripts/registry/explain/relation_schemas.yaml
+@@ -2,11 +2,15 @@
+ # 现场(09-09 早):模型贴文本漏了 --schema → 400;命令是模型拼的,提示词只能约束,脚本层自己查一遍目录把这条路走通。
+ # 唯一匹配就用,多个候选列出来让用户选(不猜),没有就照旧报表不存在。sqltune 复用它自己的 sqltune.tables,这条是 explain 的。
+ # {{names}} 是 String 型多值位:取值只来自 common/sqlqualify.py 识别出的表位置标识符,再由调用方转义单引号。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: explain.relation_schemas
+ database_type: appbusiness
+ description: 按表名查它们所在的 schema(贴文本没带 --schema 时推断 schema 用)
+ sql: |
+-  SELECT n.nspname, c.relname
++  SELECT n.nspname::text AS nspname, c.relname::text AS relname
+   FROM pg_class c
+   LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
+   WHERE c.relname IN ({{names}}) AND c.relkind IN ('r','v','p','m','f');
+diff --git a/scripts/registry/health/partitions.yaml b/scripts/registry/health/partitions.yaml
+index f846419..27d47d4 100644
+--- a/scripts/registry/health/partitions.yaml
++++ b/scripts/registry/health/partitions.yaml
+@@ -13,13 +13,17 @@
+ #   partstrategy 是 "char" 类型,max() / COALESCE() 直接处理它在 M 库报 un support type。先用 CASE 映射成同样的单字母文字常量
+ #   (取值见 PG_PARTITION:r 范围、i 间隔、l 列表、a 自动扩展列表、h 哈希、n 无),再聚合;输出与原来相同,collectors.py 不动。
+ #   "char" 列与字面量比较(parttype = 'p'、relkind = 'r')在 M 库可用(现场其他脚本已跑通)。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: health.partitions
+ database_type: appbusiness
+ description: 分区表的分区数量与分区策略
+ readonly: true
+ sql: |
+-  SELECT n.nspname AS schema,
+-         c.relname AS "table",
++  SELECT n.nspname::text AS schema,
++         c.relname::text AS "table",
+          count(*)  AS parts,
+          COALESCE(max(CASE p.partstrategy WHEN 'r' THEN 'r' WHEN 'i' THEN 'i' WHEN 'l' THEN 'l'
+                                           WHEN 'a' THEN 'a' WHEN 'h' THEN 'h' WHEN 'n' THEN 'n'
+diff --git a/scripts/registry/health/table_writes.yaml b/scripts/registry/health/table_writes.yaml
+index d7a42fe..6228fd8 100644
+--- a/scripts/registry/health/table_writes.yaml
++++ b/scripts/registry/health/table_writes.yaml
+@@ -13,6 +13,10 @@
+ #   「operator does not exist: any <> unknown」;② 外层 SELECT 里的 "table" 在 M 库是字符串常量(双引号默认是字符串),
+ #   修好①之后整列会静默变成字面值 'table'。改成一层查询:名字列先 ::text 再进 CASE,双引号只留在最外层别名 AS "table"。
+ #   口径不变:普通表取自身;TOAST 折回所属表;找不到所属表的 TOAST(pn 为空)与系统 schema 一并排除。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: health.table_writes
+ database_type: appbusiness
+ description: 各表（大字段写入折回所属表）的插入 / 更新 / 删除行数与 TOAST 大小
+@@ -24,7 +28,7 @@ params:
+ sql: |
+   SELECT CASE WHEN s.schemaname = 'pg_toast' THEN pn.nspname::text ELSE s.schemaname::text END AS schema,
+          CASE WHEN s.schemaname = 'pg_toast' THEN pc.relname::text ELSE s.relname::text END AS "table",
+-         (s.schemaname = 'pg_toast') AS is_toast,
++         CASE WHEN s.schemaname = 'pg_toast' THEN 1 ELSE 0 END AS is_toast,
+          s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
+          CASE WHEN s.schemaname = 'pg_toast' THEN pg_relation_size(s.relid) END AS toast_bytes
+     FROM pg_stat_all_tables s
+diff --git a/scripts/registry/health/unused_index.yaml b/scripts/registry/health/unused_index.yaml
+index a0ba8ee..1379dd6 100644
+--- a/scripts/registry/health/unused_index.yaml
++++ b/scripts/registry/health/unused_index.yaml
+@@ -24,18 +24,22 @@
+ # M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
+ #   名字类列(name 类型)进 concat / COALESCE 前先 ::text:M 库按自己的类型推导矩阵处理 name 类型,
+ #   health.table_writes 就栽在 COALESCE(name, name) 上;显式转成文字,两种模式结果一致。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: health.unused_index
+ database_type: appbusiness
+ description: 索引用量全局视图（含扫描次数、大小、是否约束背书、所属表的扫描分布）
+ sql: |
+   SELECT concat(s.schemaname::text, '.', s.indexrelname::text) AS idx_name,
+-         s.relname AS table_name,
++         s.relname::text AS table_name,
+          s.idx_scan,
+          s.idx_tup_read,
+          s.idx_tup_fetch,
+          pg_relation_size(s.indexrelid) AS idx_bytes,
+-         i.indisprimary,
+-         i.indisunique,
++         CASE WHEN i.indisprimary THEN 1 ELSE 0 END AS indisprimary,
++         CASE WHEN i.indisunique THEN 1 ELSE 0 END AS indisunique,
+          COALESCE(ts.seq_scan, 0) AS table_seq_scan,
+          COALESCE(ts.idx_scan, 0) AS table_idx_scan
+   FROM pg_stat_user_indexes s
+diff --git a/scripts/registry/procinfo/locate_schema.yaml b/scripts/registry/procinfo/locate_schema.yaml
+index e7e5380..9076972 100644
+--- a/scripts/registry/procinfo/locate_schema.yaml
++++ b/scripts/registry/procinfo/locate_schema.yaml
+@@ -1,11 +1,15 @@
+ # 过程「找不到」时的排查脚本之二:目标 schema 在不在本库、执行账号有没有 USAGE。
+ # og5 实测:对象隔离(ENABLE PRIVATE OBJECT)藏的正是 pg_namespace 这一行——0 行既可能是「本库没有」也可能是
+ # 「对执行账号不可见」,靠 locate_search 里 LEFT JOIN 的 nspname 为空来分。有行、usage=f 则是普通的权限不足。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: procinfo.locate_schema
+ database_type: appbusiness
+ description: 过程找不到时的排查:目标 schema 在不在本库、执行账号有没有 USAGE 权限
+ sql: |
+-  SELECT n.nspname, pg_catalog.has_schema_privilege(n.oid, 'USAGE') AS usage
++  SELECT n.nspname::text AS nspname, CASE WHEN pg_catalog.has_schema_privilege(n.oid, 'USAGE') THEN 1 ELSE 0 END AS usage
+   FROM pg_namespace n
+   WHERE n.nspname = '{{schema}}';
+ params:
+diff --git a/scripts/registry/procinfo/proc_def.yaml b/scripts/registry/procinfo/proc_def.yaml
+index 40fbbc0..62fca42 100644
+--- a/scripts/registry/procinfo/proc_def.yaml
++++ b/scripts/registry/procinfo/proc_def.yaml
+@@ -9,11 +9,15 @@
+ # M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
+ #   名字类列(name 类型)进 concat / COALESCE 前先 ::text:M 库按自己的类型推导矩阵处理 name 类型,
+ #   health.table_writes 就栽在 COALESCE(name, name) 上;显式转成文字,两种模式结果一致。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: procinfo.proc_def
+ database_type: appbusiness
+ description: 按名字取存储过程/函数的定义(源码 + 语言 + 形参 + 所属包);支持包内过程与按包名过滤
+ sql: |
+-  SELECT n.nspname, p.proname, l.lanname, p.prosrc,
++  SELECT n.nspname::text AS nspname, p.proname::text AS proname, l.lanname::text AS lanname, p.prosrc,
+          pg_catalog.pg_get_function_arguments(p.oid) AS args,
+          COALESCE(k.pkgname::text, '') AS package
+   FROM pg_proc p
+diff --git a/scripts/registry/proctune/column_stats.yaml b/scripts/registry/proctune/column_stats.yaml
+index e302701..36cb11e 100644
+--- a/scripts/registry/proctune/column_stats.yaml
++++ b/scripts/registry/proctune/column_stats.yaml
+@@ -8,11 +8,15 @@
+ # 区分）。调用方 evidence.py 把空串按 NULL 处理 —— 这是数值列，空串只可能
+ # 来自 NULL；填 0.0 会被读成「物理顺序与索引顺序完全无关」，那是一个结论，
+ # 不是「不知道」。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: proctune.column_stats
+ database_type: appbusiness
+ description: 游标 SQL 涉及的表的列级统计信息（证据包 ## Column Statistics）
+ sql: |
+-  SELECT schemaname, tablename, attname, n_distinct, null_frac, avg_width, correlation,
++  SELECT schemaname::text AS schemaname, tablename::text AS tablename, attname::text AS attname, n_distinct, null_frac, avg_width, correlation,
+          COALESCE(most_common_vals::text, '') AS most_common_vals,
+          COALESCE(most_common_freqs::text, '') AS most_common_freqs,
+          COALESCE(histogram_bounds::text, '') AS histogram_bounds
+diff --git a/scripts/registry/proctune/indexes.yaml b/scripts/registry/proctune/indexes.yaml
+index b96826e..93f573e 100644
+--- a/scripts/registry/proctune/indexes.yaml
++++ b/scripts/registry/proctune/indexes.yaml
+@@ -9,12 +9,17 @@
+ # 理由见那一份。
+ #
+ # ⚠️ 顺带修掉的既有缺陷同 proctune.tables（Python 列表拼进 IN，语法错误）。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: proctune.indexes
+ database_type: appbusiness
+ description: 游标 SQL 涉及的表上的索引定义（证据包 ## Indexes）
+ sql: |
+-  SELECT n.nspname AS schema_name, t.relname AS table_name, i.relname AS index_name,
+-         ix.indisunique, ix.indisprimary,
++  SELECT n.nspname::text AS schema_name, t.relname::text AS table_name, i.relname::text AS index_name,
++         CASE WHEN ix.indisunique THEN 1 ELSE 0 END AS indisunique,
++         CASE WHEN ix.indisprimary THEN 1 ELSE 0 END AS indisprimary,
+          pg_get_indexdef(ix.indexrelid) AS index_def
+   FROM pg_class t
+   JOIN pg_index ix ON t.oid = ix.indrelid
+diff --git a/scripts/registry/proctune/locate_schema.yaml b/scripts/registry/proctune/locate_schema.yaml
+index b67e346..640e91b 100644
+--- a/scripts/registry/proctune/locate_schema.yaml
++++ b/scripts/registry/proctune/locate_schema.yaml
+@@ -1,11 +1,15 @@
+ # 过程「找不到」时的排查脚本之二:目标 schema 在不在本库、执行账号有没有 USAGE。
+ # og5 实测:对象隔离(ENABLE PRIVATE OBJECT)藏的正是 pg_namespace 这一行——0 行既可能是「本库没有」也可能是
+ # 「对执行账号不可见」,靠 locate_search 里 LEFT JOIN 的 nspname 为空来分。有行、usage=f 则是普通的权限不足。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: proctune.locate_schema
+ database_type: appbusiness
+ description: 过程找不到时的排查:目标 schema 在不在本库、执行账号有没有 USAGE 权限
+ sql: |
+-  SELECT n.nspname, pg_catalog.has_schema_privilege(n.oid, 'USAGE') AS usage
++  SELECT n.nspname::text AS nspname, CASE WHEN pg_catalog.has_schema_privilege(n.oid, 'USAGE') THEN 1 ELSE 0 END AS usage
+   FROM pg_namespace n
+   WHERE n.nspname = '{{schema}}';
+ params:
+diff --git a/scripts/registry/proctune/proc_def.yaml b/scripts/registry/proctune/proc_def.yaml
+index a72606c..a35f09c 100644
+--- a/scripts/registry/proctune/proc_def.yaml
++++ b/scripts/registry/proctune/proc_def.yaml
+@@ -9,11 +9,15 @@
+ # M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
+ #   名字类列(name 类型)进 concat / COALESCE 前先 ::text:M 库按自己的类型推导矩阵处理 name 类型,
+ #   health.table_writes 就栽在 COALESCE(name, name) 上;显式转成文字,两种模式结果一致。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: proctune.proc_def
+ database_type: appbusiness
+ description: 按名字取存储过程/函数的定义(源码 + 语言 + 形参 + 所属包);支持包内过程与按包名过滤
+ sql: |
+-  SELECT n.nspname, p.proname, l.lanname, p.prosrc,
++  SELECT n.nspname::text AS nspname, p.proname::text AS proname, l.lanname::text AS lanname, p.prosrc,
+          pg_catalog.pg_get_function_arguments(p.oid) AS args,
+          COALESCE(k.pkgname::text, '') AS package
+   FROM pg_proc p
+diff --git a/scripts/registry/proctune/tables.yaml b/scripts/registry/proctune/tables.yaml
+index 241cf83..57e08ca 100644
+--- a/scripts/registry/proctune/tables.yaml
++++ b/scripts/registry/proctune/tables.yaml
+@@ -18,14 +18,18 @@
+ # {{names}} 是 String 型多值位：类型校验对它等于不存在（注册时会标
+ # STRING_PARAM）。防线在调用方 —— evidence.extract_tables() 只产出
+ # [a-z_][\w.]* 形态的标识符，再由 _quoted_list() 双写单引号。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: proctune.tables
+ database_type: appbusiness
+ description: 游标 SQL 涉及的表的页数/行数/大小（证据包 ## Tables）
+ sql: |
+-  SELECT n.nspname, c.relname, c.relpages,
++  SELECT n.nspname::text AS nspname, c.relname::text AS relname, c.relpages,
+          c.reltuples::bigint AS reltuples,
+          pg_relation_size(c.oid) / current_setting('block_size')::bigint AS curpages,
+-         c.relkind,
++         c.relkind::text AS relkind,
+          pg_total_relation_size(c.oid) / 1024.0 / 1024.0 AS size_mb
+   FROM pg_class c
+   LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
+diff --git a/scripts/registry/sqlreview/indexes.yaml b/scripts/registry/sqlreview/indexes.yaml
+index bfd7f82..c200876 100644
+--- a/scripts/registry/sqlreview/indexes.yaml
++++ b/scripts/registry/sqlreview/indexes.yaml
+@@ -16,6 +16,10 @@
+ #   能否用没有把握),改成在 indkey 的文本形态 ' 3 1 2 ' 里找 ' <attnum> ' 的位置排序:position(… IN …) 是两种模式都有的标准写法
+ #   (M 库保持原 GaussDB 行为,官方文档「系统函数兼容性概述」)。表达式列 attnum 为 0,被 attnum > 0 排除,与原口径相同;
+ #   同一列在索引里出现两次时只列一次(极少见)。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: sqlreview.indexes
+ database_type: appbusiness
+ description: 某模式下的索引清单（列顺序/唯一性/扫描次数）
+@@ -29,8 +33,8 @@ sql: |
+                 FROM pg_attribute a
+                WHERE a.attrelid = t.oid AND a.attnum > 0
+                  AND position(concat(' ', a.attnum::text, ' ') IN concat(' ', ix.indkey::text, ' ')) > 0), '') AS columns,
+-    ix.indisunique                                               AS is_unique,
+-    ix.indisprimary                                              AS is_primary,
++    CASE WHEN ix.indisunique THEN 1 ELSE 0 END                   AS is_unique,
++    CASE WHEN ix.indisprimary THEN 1 ELSE 0 END                  AS is_primary,
+     COALESCE(s.idx_scan, 0)                                      AS scans
+   FROM pg_index ix
+   JOIN pg_class i     ON i.oid = ix.indexrelid
+diff --git a/scripts/registry/sqlreview/tables.yaml b/scripts/registry/sqlreview/tables.yaml
+index c5ec8f0..5f33ede 100644
+--- a/scripts/registry/sqlreview/tables.yaml
++++ b/scripts/registry/sqlreview/tables.yaml
+@@ -22,6 +22,10 @@
+ # M 兼容(v1.5.1,2026-11-20 现场反馈):本脚本切到业务库执行,业务库可能是 M 兼容模式(sql_compatibility='M')。
+ #   TABLE 在 M 库是保留字,`AS table` 报 syntax error:别名改成 AS "table"(M 库里双引号别名按字符串别名处理,A 库是加引号的标识符,
+ #   两边列名都是 table)。顺带去掉 ARRAY[]::text[] 字面量:COALESCE 挪到 array_to_string 外面,空集仍得 ''。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: sqlreview.tables
+ database_type: appbusiness
+ description: 某模式下的表清单（主键/外键/列名）
+@@ -29,8 +33,9 @@ sql: |
+   SELECT
+     n.nspname::text                                              AS schema,
+     c.relname::text                                              AS "table",
+-    EXISTS (SELECT 1 FROM pg_constraint pk
+-            WHERE pk.conrelid = c.oid AND pk.contype = 'p')      AS has_pk,
++    CASE WHEN EXISTS (SELECT 1 FROM pg_constraint pk
++                      WHERE pk.conrelid = c.oid AND pk.contype = 'p')
++         THEN 1 ELSE 0 END                                       AS has_pk,
+     COALESCE((SELECT array_to_string(array_agg(fk.conname::text), ',')
+                 FROM pg_constraint fk
+                WHERE fk.conrelid = c.oid AND fk.contype = 'f'), '') AS fks,
+diff --git a/scripts/registry/sqltune/column_stats.yaml b/scripts/registry/sqltune/column_stats.yaml
+index b3cf126..276f1aa 100644
+--- a/scripts/registry/sqltune/column_stats.yaml
++++ b/scripts/registry/sqltune/column_stats.yaml
+@@ -5,11 +5,15 @@
+ #
+ # 注意 correlation 允许为 NULL：协议把 NULL 渲染成空串（与真空串不可区分），
+ # 取值代码要把空串当 None 处理，不能直接 float()。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: sqltune.column_stats
+ database_type: appbusiness
+ description: SQL 涉及的表的列统计信息（证据包 ## Column Statistics）
+ sql: |
+-  SELECT schemaname, tablename, attname, n_distinct, null_frac, avg_width, correlation,
++  SELECT schemaname::text AS schemaname, tablename::text AS tablename, attname::text AS attname, n_distinct, null_frac, avg_width, correlation,
+          COALESCE(most_common_vals::text, '') AS most_common_vals,
+          COALESCE(most_common_freqs::text, '') AS most_common_freqs,
+          COALESCE(histogram_bounds::text, '') AS histogram_bounds
+diff --git a/scripts/registry/sqltune/column_types.yaml b/scripts/registry/sqltune/column_types.yaml
+index d2a29ef..24be1c9 100644
+--- a/scripts/registry/sqltune/column_types.yaml
++++ b/scripts/registry/sqltune/column_types.yaml
+@@ -16,12 +16,16 @@
+ # 与 tables.yaml 同约定，避免双层括号。
+ #
+ # 同名列跨表类型冲突这里不裁决，原样多行返回，由调用方保守放弃该列。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: sqltune.column_types
+ database_type: appbusiness
+ description: 占位符比较列的真实类型（替换前探测，让合成值类型正确）
+ sql: |
+-  SELECT n.nspname AS schema_name, c.relname AS table_name,
+-         a.attname, format_type(a.atttypid, NULL) AS type_name
++  SELECT n.nspname::text AS schema_name, c.relname::text AS table_name,
++         a.attname::text AS attname, format_type(a.atttypid, NULL) AS type_name
+   FROM pg_attribute a
+   JOIN pg_class c ON c.oid = a.attrelid
+   JOIN pg_namespace n ON n.oid = c.relnamespace
+diff --git a/scripts/registry/sqltune/indexes.yaml b/scripts/registry/sqltune/indexes.yaml
+index 987e9c8..5e35a03 100644
+--- a/scripts/registry/sqltune/indexes.yaml
++++ b/scripts/registry/sqltune/indexes.yaml
+@@ -17,14 +17,18 @@
+ # 决定每次探测的随机 IO 次数）与按选择率折算的索引页数。取自 pg_class 里
+ # **索引那一行**（i.relpages/i.reltuples），不是表那一行 —— 两者差着数量级，
+ # 取错了算出来的树高会小得离谱，而结果依然是个像模像样的数字。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: sqltune.indexes
+ database_type: appbusiness
+ description: SQL 涉及的表上已有的索引（证据包 ## Indexes）
+ sql: |
+-  SELECT n.nspname AS schema_name, t.relname AS table_name,
+-         i.relname AS index_name,
+-         ix.indisunique,
+-         ix.indisprimary,
++  SELECT n.nspname::text AS schema_name, t.relname::text AS table_name,
++         i.relname::text AS index_name,
++         CASE WHEN ix.indisunique THEN 1 ELSE 0 END AS indisunique,
++         CASE WHEN ix.indisprimary THEN 1 ELSE 0 END AS indisprimary,
+          i.relpages AS index_relpages,
+          i.reltuples::bigint AS index_reltuples,
+          pg_get_indexdef(ix.indexrelid) AS index_def
+diff --git a/scripts/registry/sqltune/plan_yaml.yaml b/scripts/registry/sqltune/plan_yaml.yaml
+new file mode 100644
+index 0000000..046a6b1
+--- /dev/null
++++ b/scripts/registry/sqltune/plan_yaml.yaml
+@@ -0,0 +1,21 @@
++# EXPLAIN 用户临时给的 SQL —— YAML 格式,给代价推演用(v1.5.2,2026-11-25 现场反馈后新增)。
++#
++# **为什么在 plan_json 之外再要一条。** 业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字:
++# FORMAT JSON 的输出列是 json 类型,不在 M 兼容 JDBC 映射表里,取回来可能是 Java 字节数组 [B@…、原值丢失;
++# FORMAT YAML 的输出列是 text 类型,两种兼容模式下都能原样取到。内容与 JSON 同构(同样的键、同样的嵌套),
++# 解析在 skills/gaussdb-sqltune/scripts/plantree.py。只在 JSON 取回来不是 JSON 时才用(sqltune evidence.py)。
++#
++# 与 sqltune.plan_json 同一个参数位、同样三道防线:
++#   1. 调用前 common.grmp.statement.ensure_explainable() 校验单语句 + 只读
++#   2. readonly: true —— 只读会话执行,DML/DDL 被数据库本身挡掉
++#   3. 模板里 ANALYZE 写死为 false —— 用户 SQL **不会被执行**,只出估算计划
++name: sqltune.plan_yaml
++database_type: appbusiness
++description: 取一条只读 SQL 的执行计划（YAML 格式，不执行该 SQL；M 兼容库上代价推演用）
++readonly: true
++sql: |
++  EXPLAIN (ANALYZE false, BUFFERS false, FORMAT YAML) {{sql}}
++params:
++  - key: sql
++    type: String
++    description: 待分析的只读 SQL（单条语句）
+diff --git a/scripts/registry/sqltune/stats_freshness.yaml b/scripts/registry/sqltune/stats_freshness.yaml
+index c804e01..616c761 100644
+--- a/scripts/registry/sqltune/stats_freshness.yaml
++++ b/scripts/registry/sqltune/stats_freshness.yaml
+@@ -19,11 +19,15 @@
+ # DateStyle/timezone 渲染，跨环境不一致；且协议下 NULL 与真空串不可区分。
+ # 这里格式写死，并把 NULL 显式转成 'never'（从未 ANALYZE 过）—— 让「没查到」
+ # 和「查到了，是从来没做过」在取值代码里分得开。取到空串就是协议层出了问题。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: sqltune.stats_freshness
+ database_type: appbusiness
+ description: SQL 涉及的表的统计信息新鲜度（推演前置门，不新鲜则不出代价结论）
+ sql: |
+-  SELECT schemaname, relname,
++  SELECT schemaname::text AS schemaname, relname::text AS relname,
+          n_live_tup, n_dead_tup,
+          COALESCE(to_char(last_analyze, 'YYYY-MM-DD HH24:MI:SS'), 'never') AS last_analyze,
+          COALESCE(to_char(last_autoanalyze, 'YYYY-MM-DD HH24:MI:SS'), 'never') AS last_autoanalyze,
+diff --git a/scripts/registry/sqltune/tables.yaml b/scripts/registry/sqltune/tables.yaml
+index 5de7020..96edb71 100644
+--- a/scripts/registry/sqltune/tables.yaml
++++ b/scripts/registry/sqltune/tables.yaml
+@@ -26,14 +26,18 @@
+ # 实时 51359 页 → 换算 554914 行，**正是 EXPLAIN 报的 Plan Rows**。
+ # 拿冻结值复算的话，这张表的 Seq Scan 代价会差 3.5%，校准闸会判模型不适用
+ # —— 而真正的原因是取错了页数来源。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: sqltune.tables
+ database_type: appbusiness
+ description: SQL 涉及的表的页数/行数/大小（证据包 ## Tables）
+ sql: |
+-  SELECT n.nspname, c.relname, c.relpages,
++  SELECT n.nspname::text AS nspname, c.relname::text AS relname, c.relpages,
+          c.reltuples::bigint AS reltuples,
+          pg_relation_size(c.oid) / current_setting('block_size')::bigint AS curpages,
+-         c.relkind,
++         c.relkind::text AS relkind,
+          pg_total_relation_size(c.oid) / 1024.0 / 1024.0 AS size_mb
+   FROM pg_class c
+   LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
+diff --git a/scripts/registry/topproc/top_procs.yaml b/scripts/registry/topproc/top_procs.yaml
+index 2cdfdc3..b9ffae3 100644
+--- a/scripts/registry/topproc/top_procs.yaml
++++ b/scripts/registry/topproc/top_procs.yaml
+@@ -5,11 +5,15 @@
+ # self_time 会把 total_time 顶掉，且不报错。加别名不改语义与结果。
+ #
+ # {{order}} 落在 ORDER BY 位，取值只能来自 topproc.py 的 _SORT_COLS 白名单。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: topproc.top_procs
+ database_type: appbusiness
+ description: 资源消耗最高的存储过程/函数（pg_stat_user_functions）
+ sql: |
+-  SELECT n.nspname, p.proname, s.calls,
++  SELECT n.nspname::text AS nspname, p.proname::text AS proname, s.calls,
+          ROUND(s.total_time::numeric, 2) AS total_ms,
+          ROUND(s.self_time::numeric, 2) AS self_ms
+   FROM pg_stat_user_functions s
+diff --git a/scripts/registry/vacuum/bloat_estimate.yaml b/scripts/registry/vacuum/bloat_estimate.yaml
+index c31905f..7eae928 100644
+--- a/scripts/registry/vacuum/bloat_estimate.yaml
++++ b/scripts/registry/vacuum/bloat_estimate.yaml
+@@ -14,6 +14,10 @@
+ #
+ # avg_width 从 pg_stats 按表汇总(每列一行,求和即一行的平均宽度)。
+ # 某张表没有任何 pg_stats 行 = 从没 ANALYZE 过 → 这里给 NULL,判定侧据此拒绝估算。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: vacuum.bloat_estimate
+ database_type: appbusiness
+ description: 表膨胀估算的输入（页数、行数、平均行宽、真实大小）
+@@ -23,8 +27,8 @@ params:
+     type: INTEGER
+     description: 返回表数上限
+ sql: |
+-  SELECT n.nspname AS schema,
+-         c.relname AS "table",
++  SELECT n.nspname::text AS schema,
++         c.relname::text AS "table",
+          c.relpages::bigint                       AS relpages,
+          (pg_relation_size(c.oid) / 8192)::bigint AS real_pages,
+          c.reltuples::bigint                      AS reltuples,
+diff --git a/scripts/registry/vacuum/dead_tuples.yaml b/scripts/registry/vacuum/dead_tuples.yaml
+index c14af4b..d01bbcd 100644
+--- a/scripts/registry/vacuum/dead_tuples.yaml
++++ b/scripts/registry/vacuum/dead_tuples.yaml
+@@ -17,13 +17,17 @@
+ # 类型 GaussDB JDBC 驱动不认识,整条报 un support type(2026-11-16 现场反馈与实测)。clock_timestamp() 两种
+ # 兼容模式下都返回 timestamptz,date_part 返回 double precision,A 兼容(postgres 库、og5)下结果与原写法一致。
+ # 守卫测试 test_registry_m_compat_units.py:业务库脚本不许再出现 now()。
++# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
++#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
++#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
++#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
+ name: vacuum.dead_tuples
+ database_type: appbusiness
+ description: 用户表死元组清单（含存活/死元组数、表大小、autovacuum 服务历史）
+ readonly: true
+ sql: |
+-  SELECT n.nspname AS schema,
+-         t.relname AS "table",
++  SELECT n.nspname::text AS schema,
++         t.relname::text AS "table",
+          t.n_live_tup AS n_live_tup,
+          t.n_dead_tup AS n_dead_tup,
+          c.reltuples AS reltuples,
+@@ -35,7 +39,7 @@ sql: |
+          t.n_tup_upd AS n_tup_upd,
+          t.n_tup_hot_upd AS n_tup_hot_upd,
+          t.n_tup_del AS n_tup_del,
+-         CASE WHEN 'autovacuum_enabled=false' = ANY(c.reloptions) THEN false ELSE true END AS autovac_enabled,
++         CASE WHEN 'autovacuum_enabled=false' = ANY(c.reloptions) THEN 0 ELSE 1 END AS autovac_enabled,
+          COALESCE(array_to_string(c.reloptions, ','), '') AS reloptions
+     FROM pg_stat_user_tables t
+     JOIN pg_class c ON c.oid = t.relid
+diff --git a/skills/gaussdb-login/scripts/selfcheck.py b/skills/gaussdb-login/scripts/selfcheck.py
+index 74b5995..3711fd9 100644
+--- a/skills/gaussdb-login/scripts/selfcheck.py
++++ b/skills/gaussdb-login/scripts/selfcheck.py
+@@ -6,11 +6,11 @@
+ 知识库目录不存在 —— 每一样都是用到时才以「HTTP 400 agent诊断脚本执行失败」或「列为空」的形态冒出来,排查要一层层倒推。
+ 
+     python3 {baseDir}/scripts/selfcheck.py --session <句柄>
+-    python3 {baseDir}/scripts/selfcheck.py --session <句柄> --m-trial     # 另把 41 条业务库脚本各试跑一次
++    python3 {baseDir}/scripts/selfcheck.py --session <句柄> --m-trial     # 另把在业务库执行的脚本各试跑一次
+ 
+ 只跑白名单里的只读脚本,每条 LIMIT 1 或等价的极小结果;不改任何东西。输出每一项的结论、原因和该找谁。
+ 
+---m-trial(v1.5.1):业务库是 M 兼容模式时,41 条切到业务库执行的脚本用安全参数(不存在的对象名、SELECT 1 的估算计划)
++--m-trial(v1.5.1):业务库是 M 兼容模式时,切到业务库执行的脚本(1.5.2 起 42 条)用安全参数(不存在的对象名、SELECT 1 的估算计划)
+ 各跑一次,逐条列通过 / 报错 —— 我们没有 M 兼容库可测,现场跑一次把结果发回即可核对。A 兼容库同样可以跑。
+ """
+ from __future__ import annotations
+@@ -278,8 +278,16 @@ def _trial_params(registry, name: str):
+     return {k: TRIAL_VALUES[k] for k in keys}
+ 
+ 
++# M 兼容库上 json 类型的列经中间件取不到原值(v1.5.2):这几条有 text 类型的替身,调用方遇到时自动改用替身
++M_JSON_FALLBACK = {"sqltune.plan_json": "sqltune.plan_yaml"}
++
++
+ def trial_business(conn, runner, registry) -> List[List[str]]:
+-    """--m-trial:41 条业务库脚本各跑一次。返回表格行 [脚本, 结果, 说明]。只读:目录查询与不执行的估算计划。"""
++    """--m-trial:业务库脚本各跑一次。返回表格行 [脚本, 结果, 说明]。只读:目录查询与不执行的估算计划。
++
++    v1.5.2 起不只看报不报错,还看取回来的值:M 兼容库上中间件会把某些类型的列按 Java 对象转成文字(布尔列成了 [B@…,
++    原值丢失),这种情况脚本照样「成功」,1.5.1 的试跑就是这样漏过去的。
++    """
+     client = getattr(runner, "client", None)
+     mysql = compat.is_mysql_like(conn)
+     rows = []
+@@ -302,10 +310,38 @@ def trial_business(conn, runner, registry) -> List[List[str]]:
+             else:
+                 rows.append([name, FAIL, _err(exc)])
+             continue
+-        rows.append([name, OK, "%d 行" % len(got or [])])
++        broken = _java_object_columns(got)
++        if broken and name in M_JSON_FALLBACK and mysql:
++            rows.append([name, SKIP, "不适用:本库上这一列(json 类型)取回来是 %s,取不到原值;sqltune 改用 %s 取计划,"
++                         "那一条的试跑结果见本表" % (_first_bad(got, broken), M_JSON_FALLBACK[name])])
++            continue
++        if broken:
++            rows.append([name, FAIL, "取回来的值不对:列 %s 是 %s —— 中间件把这一列按 Java 对象转成了文字,原值已丢失"
++                         "(白名单没导入最新增量,或这条脚本还有没转成文字 / 整数的列)" % ("、".join(broken), _first_bad(got, broken))])
++            continue
++        rows.append([name, OK, "%d 行" % len(got or []) if got else "0 行(安全参数下没有数据,取值形态无从核对)"])
+     return rows
+ 
+ 
++def _java_object_columns(got) -> List[str]:
++    """哪些列出现了 [B@… 这类 Java 对象文字(值已丢失)。"""
++    from common.grmp.values import is_java_object_text
++    bad = []
++    for row in got or []:
++        if isinstance(row, dict):
++            bad.extend(k for k, v in row.items() if k not in bad and is_java_object_text(v))
++    return bad
++
++
++def _first_bad(got, cols) -> str:
++    from common.grmp.values import is_java_object_text
++    for row in got or []:
++        for k in cols:
++            if isinstance(row, dict) and is_java_object_text(row.get(k)):
++                return repr(row.get(k))
++    return "?"
++
++
+ def trial_summary(rows: List[List[str]], conn) -> List[Item]:
+     bad = [r for r in rows if r[1] == FAIL]
+     warn = [r for r in rows if r[1] == WARN]
+@@ -332,7 +368,8 @@ def main(argv: Optional[List[str]] = None) -> int:
+     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+     ap.add_argument("-c", "--conn", default="", help="连接名(省略则用 gaussdb-login 建立的会话)")
+     ap.add_argument("--m-trial", action="store_true",
+-                    help="另把 41 条在业务库执行的脚本用安全参数各试跑一次(只读),逐条列结果 —— M 兼容业务库核对用")
++                    help="另把在业务库执行的脚本(%d 条)用安全参数各试跑一次(只读),逐条列结果与取值形态 —— M 兼容业务库核对用"
++                         % len(routing.BUSINESS_DB_SCRIPTS))
+     cli.add_session_arg(ap)
+     args = ap.parse_args(argv)
+     cli.apply_session_arg(args)
+diff --git a/skills/gaussdb-sqlreview/scripts/objects.py b/skills/gaussdb-sqlreview/scripts/objects.py
+index cb59bb4..9cc1108 100644
+--- a/skills/gaussdb-sqlreview/scripts/objects.py
++++ b/skills/gaussdb-sqlreview/scripts/objects.py
+@@ -23,21 +23,21 @@ for parent in _HERE.parents:
+ # 取数失败只认这一个类型。换一种数据库访问方式时，改的是访问模块，
+ # 不是这里 —— 详见 common/grmp/errors.py。
+ from common import access  # noqa: E402
+-from common.grmp.values import as_int  # noqa: E402
++from common.grmp.values import as_bool, as_int  # noqa: E402
+ 
+ 
+ TABLES_SCRIPT = "sqlreview.tables"
+ INDEXES_SCRIPT = "sqlreview.indexes"
+ 
+-# 布尔列的真值形态。协议把所有列值都渲染成字符串，而布尔的渲染形式接口文档
+-# 自相矛盾（§3.1 给 true/false，§3.2 给 t/f），所以两套都认。
+-# 直接 bool(值) 是不行的：bool("f") 是 True —— 每张表都会被判成「有主键」，
+-# 不报错，只是结论反了。
+-_TRUE_TEXTS = frozenset({"t", "true", "y", "yes", "1"})
++# 布尔列:协议把所有列值都渲染成字符串，布尔的渲染形式接口文档自相矛盾（§3.1 给 true/false，§3.2 给 t/f），
++# 1.5.2 起脚本里又统一输出 1/0 —— 都由 common.grmp.values.as_bool 认。
++# 直接 bool(值) 是不行的：bool("f") 是 True —— 每张表都会被判成「有主键」，不报错，只是结论反了。
+ 
+ 
+ def _as_bool(val) -> bool:
+-    return str(val).strip().lower() in _TRUE_TEXTS
++    """认不出的取值报错,不当成假(v1.5.2:M 兼容库上 has_pk 取回来是 [B@…,原先被静默当成假,
++    每张表都报成「没有主键」)。"""
++    return as_bool(val)
+ 
+ 
+ def _as_tuple(val) -> tuple[str, ...]:
+diff --git a/skills/gaussdb-sqltune/scripts/evidence.py b/skills/gaussdb-sqltune/scripts/evidence.py
+index 39ac914..45c67e4 100644
+--- a/skills/gaussdb-sqltune/scripts/evidence.py
++++ b/skills/gaussdb-sqltune/scripts/evidence.py
+@@ -46,6 +46,7 @@ COLUMN_STATS_SCRIPT = "sqltune.column_stats"
+ KEY_GUCS_SCRIPT = "sqltune.key_gucs"
+ STATS_FRESHNESS_SCRIPT = "sqltune.stats_freshness"
+ PLAN_JSON_SCRIPT = "sqltune.plan_json"
++PLAN_YAML_SCRIPT = "sqltune.plan_yaml"   # M 兼容业务库上 JSON 计划取不到原值时的退路(v1.5.2)
+ # 带 schema 时:v1.4.13 起不再用两语句模板(行方中间件拦截两段 SQL),表名按 schema 补全后走单语句模板,
+ #   见 common/search_path.py
+ 
+@@ -107,7 +108,16 @@ def explain_json_via_script(runner, sql_text: str, schema: str = ""):
+     数），ANALYZE 会真执行用户 SQL 拿实际耗时，与要比对的东西不是一回事。
+     调用前同样要过 ensure_explainable()：参数位是注入面。
+     """
+-    return sp.explain_plan(runner, PLAN_JSON_SCRIPT, sql_text, schema)[0]
++    raw = sp.explain_plan(runner, PLAN_JSON_SCRIPT, sql_text, schema)[0]
++    if str(raw).lstrip()[:1] in ("[", "{") and not str(raw).lstrip().startswith("[B@"):
++        return raw
++    # M 兼容业务库:FORMAT JSON 的输出列是 json 类型,经现场中间件取回来是 [B@…(Java 字节数组,原值丢失)。
++    # FORMAT YAML 的输出列是 text 类型、内容同构,plantree.parse 两种都认(v1.5.2)
++    try:
++        return sp.explain_plan(runner, PLAN_YAML_SCRIPT, sql_text, schema)[0]
++    except Exception as exc:  # noqa: BLE001 —— 退路也失败:把两边的情况一起说清楚
++        raise RuntimeError("JSON 格式的计划取回来是 %r;改取 YAML 格式(%s)也失败:%s"
++                           % (str(raw)[:40], PLAN_YAML_SCRIPT, str(exc).splitlines()[0][:160])) from exc
+ 
+ 
+ def explain_json(db, sql_text: str):
+diff --git a/skills/gaussdb-sqltune/scripts/plantree.py b/skills/gaussdb-sqltune/scripts/plantree.py
+index a20324d..0e0bf5f 100644
+--- a/skills/gaussdb-sqltune/scripts/plantree.py
++++ b/skills/gaussdb-sqltune/scripts/plantree.py
+@@ -91,11 +91,32 @@ def _as_document(raw: Any) -> Any:
+     try:
+         return json.loads(text)
+     except ValueError as exc:
++        if text.startswith("- Plan:"):
++            return _yaml_document(text)
++        if text.startswith("[B@"):
++            raise PlanParseError(
++                "EXPLAIN 取回来的是 %r —— 中间件把这一列当成字节数组转成了文字(M 兼容业务库上 json 类型的列就是这样),"
++                "原值已丢失。改用 YAML 格式的计划脚本 sqltune.plan_yaml 取" % text[:40]) from exc
+         raise PlanParseError(
+             "EXPLAIN 输出不是合法 JSON：%s。开头 120 字符：%r"
+             % (exc, text[:120])) from exc
+ 
+ 
++def _yaml_document(text: str) -> Any:
++    """EXPLAIN (FORMAT YAML) 的输出:与 JSON 同构(同样的键与嵌套),输出列是 text 类型。
++
++    M 兼容业务库上 JSON 计划的列(json 类型)经中间件取不到原值,只能走这一种(v1.5.2)。
++    数据库给 YAML 里的字符串值都加了引号,数值不加,yaml.safe_load 出来的类型与 json.loads 一致。
++    """
++    import yaml
++    try:
++        doc = yaml.safe_load(text)
++    except yaml.YAMLError as exc:
++        raise PlanParseError("EXPLAIN 输出不是合法 YAML：%s。开头 120 字符：%r"
++                             % (str(exc).splitlines()[0], text[:120])) from exc
++    return doc
++
++
+ def _node(raw: Any, path: str) -> PlanNode:
+     if not isinstance(raw, dict):
+         raise PlanParseError("%s 不是对象，而是 %s" % (path, type(raw).__name__))
+diff --git a/whitelist/scripts-delta-20261125.sql b/whitelist/scripts-delta-20261125.sql
+new file mode 100644
+index 0000000..6ee4812
+--- /dev/null
++++ b/whitelist/scripts-delta-20261125.sql
+@@ -0,0 +1,473 @@
++-- =====================================================================
++-- GRMP 诊断脚本白名单 · 增量导入（2026-11-25）
++-- =====================================================================
++--
++-- 适用前提：已导入过上一版的 132 条脚本。本文件只含相对那一版的**增量**，
++-- 不要整份重导（整份见同目录 scripts.sql，共 133 条）。
++--
++-- 从 v1.5.1 升级到 v1.5.2;更早的版本先按顺序导到 scripts-delta-20261123.sql,再导这一份
++--
++--   新增   1 条 INSERT
++--   更新   21 条 UPDATE
++--
++-- 全部脚本均为**只读查询**，只访问系统视图与系统表，不读业务数据、
++-- 不含 DML/DDL、不修改任何对象。
++--
++-- 执行库（database_type）：appbusiness 的脚本 parameter_config 最前面带
++--   {"key":"dbName","value":"","type":"String","autoAcquire":false}，
++-- 中间件按调用时传入的 dbName 切到该业务库执行；postgres 的脚本不带 dbName，在 postgres 库执行。
++-- 本文件里的 INSERT 带完整的执行库(database_type)与参数定义(parameter_config)。
++-- 本文件里的 UPDATE 只改脚本正文(script_content),不动执行库(database_type)与参数定义(parameter_config)。
++--
++-- 导入前请确认两处与现有规范的对齐：
++--   1. `create_user` / `last_modify_user` 当前填 '999999999'，与上一版保持一致；
++--      若要求填真实工号，请统一替换。
++--   2. id 用 `grmp.script_config_seq.nextval`，不硬编码，避免与现有记录冲突。
++--
++-- =====================================================================
++-- 一、新增 1 条
++-- =====================================================================
++
++-- [sqltune.plan_yaml] 取一条只读 SQL 的执行计划（YAML 格式，M 兼容业务库上代价推演用）
++--   读取：EXPLAIN (ANALYZE false, BUFFERS false, FORMAT YAML) <用户 SQL>（不执行该 SQL，只出估算计划）
++--   用途：与 sqltune.plan_json 内容相同、格式不同:M 兼容业务库上 JSON 计划的列(json 类型)经中间件取不到原值,YAML 计划的列是文字类型;只在 JSON 计划取不到时调用。业务库类,带 dbName。只读
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.plan_yaml', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'EXPLAIN (ANALYZE false, BUFFERS false, FORMAT YAML) {{sql}}
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"sql","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++
++-- =====================================================================
++-- 二、更新 21 条已有脚本（SQL 正文 / 参数定义 / 执行库）
++-- =====================================================================
++
++-- [explain.relation_schemas]
++--   **名字类(name)列改为 ::text 输出**:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname::text AS nspname, c.relname::text AS relname
++FROM pg_class c
++LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
++WHERE c.relname IN ({{names}}) AND c.relkind IN (''r'',''v'',''p'',''m'',''f'');
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'explain.relation_schemas';
++
++-- [health.partitions]
++--   **名字类(name)列改为 ::text 输出**:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname::text AS schema,
++       c.relname::text AS "table",
++       count(*)  AS parts,
++       COALESCE(max(CASE p.partstrategy WHEN ''r'' THEN ''r'' WHEN ''i'' THEN ''i'' WHEN ''l'' THEN ''l''
++                                        WHEN ''a'' THEN ''a'' WHEN ''h'' THEN ''h'' WHEN ''n'' THEN ''n''
++                                        ELSE ''?'' END), '''') AS strategy
++  FROM pg_partition p
++  JOIN pg_class c     ON c.oid = p.parentid
++  JOIN pg_namespace n ON n.oid = c.relnamespace
++ WHERE p.parttype = ''p''
++   AND n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',
++                         ''dbe_pldeveloper'',''cstore'',''pg_toast'')
++ GROUP BY n.nspname, c.relname
++ ORDER BY parts DESC;
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'health.partitions';
++
++-- [health.table_writes]
++--   **是否 TOAST 一列改为输出 1/0**(CASE WHEN … THEN 1 ELSE 0 END):业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT CASE WHEN s.schemaname = ''pg_toast'' THEN pn.nspname::text ELSE s.schemaname::text END AS schema,
++       CASE WHEN s.schemaname = ''pg_toast'' THEN pc.relname::text ELSE s.relname::text END AS "table",
++       CASE WHEN s.schemaname = ''pg_toast'' THEN 1 ELSE 0 END AS is_toast,
++       s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
++       CASE WHEN s.schemaname = ''pg_toast'' THEN pg_relation_size(s.relid) END AS toast_bytes
++  FROM pg_stat_all_tables s
++  LEFT JOIN pg_class pc     ON s.schemaname = ''pg_toast'' AND pc.reltoastrelid = s.relid
++  LEFT JOIN pg_namespace pn ON pn.oid = pc.relnamespace
++ WHERE s.n_tup_ins + s.n_tup_upd + s.n_tup_del > 0
++   AND ((s.schemaname <> ''pg_toast''
++         AND s.schemaname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore''))
++     OR (s.schemaname = ''pg_toast'' AND pn.nspname IS NOT NULL
++         AND pn.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'',''pg_toast'')))
++ ORDER BY s.last_data_changed DESC NULLS LAST
++ LIMIT {{limit}};
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'health.table_writes';
++
++-- [health.unused_index]
++--   **布尔列改为输出 1/0**(CASE WHEN … THEN 1 ELSE 0 END),名字类(name)列改为 ::text:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT concat(s.schemaname::text, ''.'', s.indexrelname::text) AS idx_name,
++       s.relname::text AS table_name,
++       s.idx_scan,
++       s.idx_tup_read,
++       s.idx_tup_fetch,
++       pg_relation_size(s.indexrelid) AS idx_bytes,
++       CASE WHEN i.indisprimary THEN 1 ELSE 0 END AS indisprimary,
++       CASE WHEN i.indisunique THEN 1 ELSE 0 END AS indisunique,
++       COALESCE(ts.seq_scan, 0) AS table_seq_scan,
++       COALESCE(ts.idx_scan, 0) AS table_idx_scan
++FROM pg_stat_user_indexes s
++JOIN pg_index i ON i.indexrelid = s.indexrelid
++LEFT JOIN pg_stat_user_tables ts ON ts.relid = s.relid
++WHERE pg_relation_size(s.indexrelid) > {{min_bytes}}
++  AND s.schemaname NOT IN {{schema_filter}}
++ORDER BY s.idx_scan ASC, pg_relation_size(s.indexrelid) DESC
++LIMIT {{limit}};
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'health.unused_index';
++
++-- [procinfo.locate_schema]
++--   **布尔列改为输出 1/0**(CASE WHEN … THEN 1 ELSE 0 END),名字类(name)列改为 ::text:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname::text AS nspname, CASE WHEN pg_catalog.has_schema_privilege(n.oid, ''USAGE'') THEN 1 ELSE 0 END AS usage
++FROM pg_namespace n
++WHERE n.nspname = ''{{schema}}'';
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'procinfo.locate_schema';
++
++-- [procinfo.proc_def]
++--   **名字类(name)列改为 ::text 输出**:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname::text AS nspname, p.proname::text AS proname, l.lanname::text AS lanname, p.prosrc,
++       pg_catalog.pg_get_function_arguments(p.oid) AS args,
++       COALESCE(k.pkgname::text, '''') AS package
++FROM pg_proc p
++JOIN pg_namespace n ON n.oid = p.pronamespace
++JOIN pg_language l ON l.oid = p.prolang
++LEFT JOIN gs_package k ON k.oid = p.propackageid
++WHERE p.proname = ''{{name}}''
++  AND (''{{schema}}'' IS NULL OR ''{{schema}}'' = '''' OR n.nspname = ''{{schema}}'')
++  AND (''{{package}}'' IS NULL OR ''{{package}}'' = '''' OR k.pkgname = ''{{package}}'')
++ORDER BY (n.nspname = ''public'') DESC, n.nspname, k.pkgname
++LIMIT 5;
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'procinfo.proc_def';
++
++-- [proctune.column_stats]
++--   **名字类(name)列改为 ::text 输出**:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT schemaname::text AS schemaname, tablename::text AS tablename, attname::text AS attname, n_distinct, null_frac, avg_width, correlation,
++       COALESCE(most_common_vals::text, '''') AS most_common_vals,
++       COALESCE(most_common_freqs::text, '''') AS most_common_freqs,
++       COALESCE(histogram_bounds::text, '''') AS histogram_bounds
++FROM pg_stats
++WHERE tablename IN ({{names}});
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'proctune.column_stats';
++
++-- [proctune.indexes]
++--   **布尔列改为输出 1/0**(CASE WHEN … THEN 1 ELSE 0 END),名字类(name)列改为 ::text:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname::text AS schema_name, t.relname::text AS table_name, i.relname::text AS index_name,
++       CASE WHEN ix.indisunique THEN 1 ELSE 0 END AS indisunique,
++       CASE WHEN ix.indisprimary THEN 1 ELSE 0 END AS indisprimary,
++       pg_get_indexdef(ix.indexrelid) AS index_def
++FROM pg_class t
++JOIN pg_index ix ON t.oid = ix.indrelid
++JOIN pg_class i ON i.oid = ix.indexrelid
++JOIN pg_namespace n ON n.oid = t.relnamespace
++WHERE t.relname IN ({{names}});
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'proctune.indexes';
++
++-- [proctune.locate_schema]
++--   **布尔列改为输出 1/0**(CASE WHEN … THEN 1 ELSE 0 END),名字类(name)列改为 ::text:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname::text AS nspname, CASE WHEN pg_catalog.has_schema_privilege(n.oid, ''USAGE'') THEN 1 ELSE 0 END AS usage
++FROM pg_namespace n
++WHERE n.nspname = ''{{schema}}'';
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'proctune.locate_schema';
++
++-- [proctune.proc_def]
++--   **名字类(name)列改为 ::text 输出**:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname::text AS nspname, p.proname::text AS proname, l.lanname::text AS lanname, p.prosrc,
++       pg_catalog.pg_get_function_arguments(p.oid) AS args,
++       COALESCE(k.pkgname::text, '''') AS package
++FROM pg_proc p
++JOIN pg_namespace n ON n.oid = p.pronamespace
++JOIN pg_language l ON l.oid = p.prolang
++LEFT JOIN gs_package k ON k.oid = p.propackageid
++WHERE p.proname = ''{{name}}''
++  AND (''{{schema}}'' IS NULL OR ''{{schema}}'' = '''' OR n.nspname = ''{{schema}}'')
++  AND (''{{package}}'' IS NULL OR ''{{package}}'' = '''' OR k.pkgname = ''{{package}}'')
++ORDER BY (n.nspname = ''public'') DESC, n.nspname, k.pkgname
++LIMIT 5;
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'proctune.proc_def';
++
++-- [proctune.tables]
++--   **relkind("char" 类型)与名字类列改为 ::text 输出**:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname::text AS nspname, c.relname::text AS relname, c.relpages,
++       c.reltuples::bigint AS reltuples,
++       pg_relation_size(c.oid) / current_setting(''block_size'')::bigint AS curpages,
++       c.relkind::text AS relkind,
++       pg_total_relation_size(c.oid) / 1024.0 / 1024.0 AS size_mb
++FROM pg_class c
++LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
++WHERE c.relname IN ({{names}}) AND c.relkind IN (''r'',''v'',''p'',''m'');
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'proctune.tables';
++
++-- [sqlreview.indexes]
++--   **是否唯一 / 是否主键两列改为输出 1/0**(CASE WHEN … THEN 1 ELSE 0 END):业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT
++  n.nspname::text                                              AS schema,
++  t.relname::text                                              AS "table",
++  i.relname::text                                              AS name,
++  COALESCE((SELECT array_to_string(array_agg(a.attname::text
++                     ORDER BY position(concat('' '', a.attnum::text, '' '') IN concat('' '', ix.indkey::text, '' ''))), '','')
++              FROM pg_attribute a
++             WHERE a.attrelid = t.oid AND a.attnum > 0
++               AND position(concat('' '', a.attnum::text, '' '') IN concat('' '', ix.indkey::text, '' '')) > 0), '''') AS columns,
++  CASE WHEN ix.indisunique THEN 1 ELSE 0 END                   AS is_unique,
++  CASE WHEN ix.indisprimary THEN 1 ELSE 0 END                  AS is_primary,
++  COALESCE(s.idx_scan, 0)                                      AS scans
++FROM pg_index ix
++JOIN pg_class i     ON i.oid = ix.indexrelid
++JOIN pg_class t     ON t.oid = ix.indrelid
++JOIN pg_namespace n ON n.oid = t.relnamespace
++LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = ix.indexrelid
++WHERE n.nspname = ''{{schema}}''
++ORDER BY t.relname, i.relname;
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'sqlreview.indexes';
++
++-- [sqlreview.tables]
++--   **是否有主键一列改为输出 1/0**(CASE WHEN EXISTS … THEN 1 ELSE 0 END):业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT
++  n.nspname::text                                              AS schema,
++  c.relname::text                                              AS "table",
++  CASE WHEN EXISTS (SELECT 1 FROM pg_constraint pk
++                    WHERE pk.conrelid = c.oid AND pk.contype = ''p'')
++       THEN 1 ELSE 0 END                                       AS has_pk,
++  COALESCE((SELECT array_to_string(array_agg(fk.conname::text), '','')
++              FROM pg_constraint fk
++             WHERE fk.conrelid = c.oid AND fk.contype = ''f''), '''') AS fks,
++  COALESCE((SELECT array_to_string(array_agg(a.attname::text ORDER BY a.attnum), '','')
++              FROM pg_attribute a
++             WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), '''') AS columns
++FROM pg_class c
++JOIN pg_namespace n ON n.oid = c.relnamespace
++WHERE c.relkind = ''r'' AND n.nspname = ''{{schema}}''
++ORDER BY c.relname;
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'sqlreview.tables';
++
++-- [sqltune.column_stats]
++--   **名字类(name)列改为 ::text 输出**:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT schemaname::text AS schemaname, tablename::text AS tablename, attname::text AS attname, n_distinct, null_frac, avg_width, correlation,
++       COALESCE(most_common_vals::text, '''') AS most_common_vals,
++       COALESCE(most_common_freqs::text, '''') AS most_common_freqs,
++       COALESCE(histogram_bounds::text, '''') AS histogram_bounds
++FROM pg_stats
++WHERE tablename IN ({{names}});
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'sqltune.column_stats';
++
++-- [sqltune.column_types]
++--   **名字类(name)列改为 ::text 输出**:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname::text AS schema_name, c.relname::text AS table_name,
++       a.attname::text AS attname, format_type(a.atttypid, NULL) AS type_name
++FROM pg_attribute a
++JOIN pg_class c ON c.oid = a.attrelid
++JOIN pg_namespace n ON n.oid = c.relnamespace
++WHERE c.relname IN ({{tables}})
++  AND a.attname IN ({{columns}})
++  AND a.attnum > 0 AND NOT a.attisdropped
++  AND c.relkind IN (''r'',''v'',''p'',''m'')
++  AND n.nspname NOT IN (''pg_catalog'',''information_schema'');
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'sqltune.column_types';
++
++-- [sqltune.indexes]
++--   **布尔列改为输出 1/0**(CASE WHEN … THEN 1 ELSE 0 END),名字类(name)列改为 ::text:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname::text AS schema_name, t.relname::text AS table_name,
++       i.relname::text AS index_name,
++       CASE WHEN ix.indisunique THEN 1 ELSE 0 END AS indisunique,
++       CASE WHEN ix.indisprimary THEN 1 ELSE 0 END AS indisprimary,
++       i.relpages AS index_relpages,
++       i.reltuples::bigint AS index_reltuples,
++       pg_get_indexdef(ix.indexrelid) AS index_def
++FROM pg_class t
++JOIN pg_index ix ON t.oid = ix.indrelid
++JOIN pg_class i ON i.oid = ix.indexrelid
++JOIN pg_namespace n ON n.oid = t.relnamespace
++WHERE t.relname IN ({{names}});
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'sqltune.indexes';
++
++-- [sqltune.stats_freshness]
++--   **名字类(name)列改为 ::text 输出**:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT schemaname::text AS schemaname, relname::text AS relname,
++       n_live_tup, n_dead_tup,
++       COALESCE(to_char(last_analyze, ''YYYY-MM-DD HH24:MI:SS''), ''never'') AS last_analyze,
++       COALESCE(to_char(last_autoanalyze, ''YYYY-MM-DD HH24:MI:SS''), ''never'') AS last_autoanalyze,
++       analyze_count, autoanalyze_count
++FROM pg_stat_user_tables
++WHERE relname IN ({{names}});
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'sqltune.stats_freshness';
++
++-- [sqltune.tables]
++--   **relkind("char" 类型)与名字类列改为 ::text 输出**:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname::text AS nspname, c.relname::text AS relname, c.relpages,
++       c.reltuples::bigint AS reltuples,
++       pg_relation_size(c.oid) / current_setting(''block_size'')::bigint AS curpages,
++       c.relkind::text AS relkind,
++       pg_total_relation_size(c.oid) / 1024.0 / 1024.0 AS size_mb
++FROM pg_class c
++LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
++WHERE c.relname IN ({{names}}) AND c.relkind IN (''r'',''v'',''p'',''m'');
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'sqltune.tables';
++
++-- [topproc.top_procs]
++--   **名字类(name)列改为 ::text 输出**:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname::text AS nspname, p.proname::text AS proname, s.calls,
++       ROUND(s.total_time::numeric, 2) AS total_ms,
++       ROUND(s.self_time::numeric, 2) AS self_ms
++FROM pg_stat_user_functions s
++JOIN pg_proc p ON p.oid = s.funcid
++JOIN pg_namespace n ON n.oid = p.pronamespace
++ORDER BY {{order}} NULLS LAST
++LIMIT {{limit}};
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'topproc.top_procs';
++
++-- [vacuum.bloat_estimate]
++--   **名字类(name)列改为 ::text 输出**:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname::text AS schema,
++       c.relname::text AS "table",
++       c.relpages::bigint                       AS relpages,
++       (pg_relation_size(c.oid) / 8192)::bigint AS real_pages,
++       c.reltuples::bigint                      AS reltuples,
++       pg_relation_size(c.oid)::bigint          AS real_bytes,
++       (SELECT sum(s.avg_width)
++          FROM pg_stats s
++         WHERE s.schemaname = n.nspname AND s.tablename = c.relname) AS avg_row_width
++  FROM pg_class c
++  JOIN pg_namespace n ON n.oid = c.relnamespace
++ WHERE c.relkind = ''r''
++   AND n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',
++                         ''dbe_pldeveloper'',''cstore'',''pg_toast'')
++   AND pg_relation_size(c.oid) > 8192 * 128
++ ORDER BY pg_relation_size(c.oid) DESC
++ LIMIT {{limit}};
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'vacuum.bloat_estimate';
++
++-- [vacuum.dead_tuples]
++--   **布尔列改为输出 1/0**(CASE WHEN … THEN 1 ELSE 0 END),名字类(name)列改为 ::text:业务库是 M 兼容模式时,现场中间件按 JDBC 类型映射取值再转成文字,类型不在 M 兼容 JDBC 映射表里的列可能取不到原值(2026-11-25 现场:布尔列取回来是 Java 字节数组 [B@…,健康检查报「无法识别的布尔取值」)。列名、筛选、排序与取值含义不变(布尔列由 true/false 变为 1/0,技能两种都认),A 兼容库上结果一致。只读。
++UPDATE grmp.script_config
++   SET script_content   = 'SELECT n.nspname::text AS schema,
++       t.relname::text AS "table",
++       t.n_live_tup AS n_live_tup,
++       t.n_dead_tup AS n_dead_tup,
++       c.reltuples AS reltuples,
++       pg_total_relation_size(c.oid) AS table_bytes,
++       date_part(''epoch'', clock_timestamp() - t.last_autovacuum) AS last_autovacuum_age_s,
++       date_part(''epoch'', clock_timestamp() - t.last_vacuum) AS last_vacuum_age_s,
++       t.vacuum_count AS vacuum_count,
++       t.autovacuum_count AS autovacuum_count,
++       t.n_tup_upd AS n_tup_upd,
++       t.n_tup_hot_upd AS n_tup_hot_upd,
++       t.n_tup_del AS n_tup_del,
++       CASE WHEN ''autovacuum_enabled=false'' = ANY(c.reloptions) THEN 0 ELSE 1 END AS autovac_enabled,
++       COALESCE(array_to_string(c.reloptions, '',''), '''') AS reloptions
++  FROM pg_stat_user_tables t
++  JOIN pg_class c ON c.oid = t.relid
++  JOIN pg_namespace n ON n.oid = c.relnamespace
++ WHERE n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'')
++ ORDER BY t.n_dead_tup DESC
++ LIMIT {{limit}};
++',
++       last_modify_user = '999999999',
++       last_modify_time = now()
++ WHERE script_name = 'vacuum.dead_tuples';
++
++-- =====================================================================
++-- 三、导入后自检
++-- =====================================================================
++-- 应为 133：
++--   SELECT count(*) FROM grmp.script_config WHERE scene = 'AGENT';
++-- 新增的 1 条应全部在列：
++--   SELECT script_name FROM grmp.script_config WHERE script_name IN ('sqltune.plan_yaml');
++-- 更新应已生效（应返回 0 行；库编码为 UTF8 时 md5 与这里一致）：
++--   SELECT c.script_name FROM grmp.script_config c
++--     JOIN (VALUES
++--     ('explain.relation_schemas', '408ddeb7b91395ff0fa53ad794b47ba1'),
++--     ('health.partitions', 'f6e1b8ce279a7fe5d464dd24290457da'),
++--     ('health.table_writes', '15f23c63dcdb1cb0e4d080bb35999ab7'),
++--     ('health.unused_index', '3462a0a36063251844d0239adc5be44e'),
++--     ('procinfo.locate_schema', 'bafffcec3535f22f739c887e69f79d11'),
++--     ('procinfo.proc_def', '29a5bc2f5578ca1c12058e204b685c43'),
++--     ('proctune.column_stats', '172aa48c7e995b4af9c7836c55dfabd3'),
++--     ('proctune.indexes', '456b672c7a0fa35bcc52939416eece4c'),
++--     ('proctune.locate_schema', 'bafffcec3535f22f739c887e69f79d11'),
++--     ('proctune.proc_def', '29a5bc2f5578ca1c12058e204b685c43'),
++--     ('proctune.tables', '8ae7339cf964d40aa572e26b721118c8'),
++--     ('sqlreview.indexes', '19a4ba21ab26f485afc8df6a0f4392cf'),
++--     ('sqlreview.tables', '521948c1c2b6b573968a4a165103e28a'),
++--     ('sqltune.column_stats', '172aa48c7e995b4af9c7836c55dfabd3'),
++--     ('sqltune.column_types', '043f909ba46a8d79fa8e30aabe4c8b87'),
++--     ('sqltune.indexes', '71b10a0062fe0099d4de1be19cebc97d'),
++--     ('sqltune.stats_freshness', 'b1b4b60b863280fe4dd11d02a6f81b9d'),
++--     ('sqltune.tables', '8ae7339cf964d40aa572e26b721118c8'),
++--     ('topproc.top_procs', 'c9b7b75f9dff3848494428089d5cadc7'),
++--     ('vacuum.bloat_estimate', '7c57869002f7b31779614b55bfdf3659'),
++--     ('vacuum.dead_tuples', 'eef6217b4dfc89438182caf0bf2d2d4d')) AS v(name, sum) ON c.script_name = v.name
++--    WHERE md5(c.script_content) <> v.sum;
++-- 参数定义也一起更新了的（应列出这些脚本、且 parameter_config 与 scripts.sql 里一致）：
++--   SELECT script_name, parameter_config FROM grmp.script_config WHERE script_name IN ('-');
++-- 执行库应与本版一致（appbusiness 应为 40 条，且都以 dbName 开头）：
++--   SELECT count(*) FROM grmp.script_config WHERE scene = 'AGENT' AND database_type = 'appbusiness';
++--   SELECT script_name FROM grmp.script_config WHERE scene = 'AGENT' AND database_type = 'appbusiness'
++--      AND parameter_config NOT LIKE '[{"key":"dbName",%';     -- 应返回 0 行
+diff --git a/whitelist/scripts.sql b/whitelist/scripts.sql
+index 432c69e..5064b15 100644
+--- a/whitelist/scripts.sql
++++ b/whitelist/scripts.sql
+@@ -102,16 +102,6 @@ WHERE unique_query_id = {{sid}}
+ ORDER BY start_time DESC
+ LIMIT 1;
+ ', '[{"key":"sid","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.tables', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, c.relname, c.relpages,
+-       c.reltuples::bigint AS reltuples,
+-       pg_relation_size(c.oid) / current_setting(''block_size'')::bigint AS curpages,
+-       c.relkind,
+-       pg_total_relation_size(c.oid) / 1024.0 / 1024.0 AS size_mb
+-FROM pg_class c
+-LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
+-WHERE c.relname IN ({{names}}) AND c.relkind IN (''r'',''v'',''p'',''m'');
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlfetch.from_history', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT schema_name, query
+ FROM dbe_perf.statement_history
+ WHERE unique_query_id = {{sid}}
+@@ -156,34 +146,8 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"sql","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.plan_text_analyze', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'EXPLAIN (ANALYZE false, BUFFERS false, FORMAT TEXT) {{sql}}
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"sql","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.stats_freshness', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT schemaname, relname,
+-       n_live_tup, n_dead_tup,
+-       COALESCE(to_char(last_analyze, ''YYYY-MM-DD HH24:MI:SS''), ''never'') AS last_analyze,
+-       COALESCE(to_char(last_autoanalyze, ''YYYY-MM-DD HH24:MI:SS''), ''never'') AS last_autoanalyze,
+-       analyze_count, autoanalyze_count
+-FROM pg_stat_user_tables
+-WHERE relname IN ({{names}});
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.tables', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, c.relname, c.relpages,
+-       c.reltuples::bigint AS reltuples,
+-       pg_relation_size(c.oid) / current_setting(''block_size'')::bigint AS curpages,
+-       c.relkind,
+-       pg_total_relation_size(c.oid) / 1024.0 / 1024.0 AS size_mb
+-FROM pg_class c
+-LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
+-WHERE c.relname IN ({{names}}) AND c.relkind IN (''r'',''v'',''p'',''m'');
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.version', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT version() AS version;
+ ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'topproc.top_procs', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, p.proname, s.calls,
+-       ROUND(s.total_time::numeric, 2) AS total_ms,
+-       ROUND(s.self_time::numeric, 2) AS self_ms
+-FROM pg_stat_user_functions s
+-JOIN pg_proc p ON p.oid = s.funcid
+-JOIN pg_namespace n ON n.oid = p.pronamespace
+-ORDER BY {{order}} NULLS LAST
+-LIMIT {{limit}};
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"order","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'wdr.cache', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'WITH b AS (SELECT db_name, snap_schemaname, snap_relname,
+                   (COALESCE(snap_heap_blks_read,0)+COALESCE(snap_idx_blks_read,0)) AS phys,
+                   (COALESCE(snap_heap_blks_hit,0)+COALESCE(snap_idx_blks_hit,0))   AS logi
+@@ -389,67 +353,12 @@ WHERE unique_sql_id = {{sid}}
+   AND LENGTH(TRIM(query)) > 0
+ LIMIT 1;
+ ', '[{"key":"sid","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.indexes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname AS schema_name, t.relname AS table_name,
+-       i.relname AS index_name,
+-       ix.indisunique,
+-       ix.indisprimary,
+-       i.relpages AS index_relpages,
+-       i.reltuples::bigint AS index_reltuples,
+-       pg_get_indexdef(ix.indexrelid) AS index_def
+-FROM pg_class t
+-JOIN pg_index ix ON t.oid = ix.indrelid
+-JOIN pg_class i ON i.oid = ix.indexrelid
+-JOIN pg_namespace n ON n.oid = t.relnamespace
+-WHERE t.relname IN ({{names}});
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.indexes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname AS schema_name, t.relname AS table_name, i.relname AS index_name,
+-       ix.indisunique, ix.indisprimary,
+-       pg_get_indexdef(ix.indexrelid) AS index_def
+-FROM pg_class t
+-JOIN pg_index ix ON t.oid = ix.indrelid
+-JOIN pg_class i ON i.oid = ix.indexrelid
+-JOIN pg_namespace n ON n.oid = t.relnamespace
+-WHERE t.relname IN ({{names}});
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.column_stats', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT schemaname, tablename, attname, n_distinct, null_frac, avg_width, correlation,
+-       COALESCE(most_common_vals::text, '''') AS most_common_vals,
+-       COALESCE(most_common_freqs::text, '''') AS most_common_freqs,
+-       COALESCE(histogram_bounds::text, '''') AS histogram_bounds
+-FROM pg_stats
+-WHERE tablename IN ({{names}});
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.column_stats', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT schemaname, tablename, attname, n_distinct, null_frac, avg_width, correlation,
+-       COALESCE(most_common_vals::text, '''') AS most_common_vals,
+-       COALESCE(most_common_freqs::text, '''') AS most_common_freqs,
+-       COALESCE(histogram_bounds::text, '''') AS histogram_bounds
+-FROM pg_stats
+-WHERE tablename IN ({{names}});
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.column_types', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname AS schema_name, c.relname AS table_name,
+-       a.attname, format_type(a.atttypid, NULL) AS type_name
+-FROM pg_attribute a
+-JOIN pg_class c ON c.oid = a.attrelid
+-JOIN pg_namespace n ON n.oid = c.relnamespace
+-WHERE c.relname IN ({{tables}})
+-  AND a.attname IN ({{columns}})
+-  AND a.attnum > 0 AND NOT a.attisdropped
+-  AND c.relkind IN (''r'',''v'',''p'',''m'')
+-  AND n.nspname NOT IN (''pg_catalog'',''information_schema'');
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"tables","value":"","type":"STRING","autoAcquire":false},{"key":"columns","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.locate_context', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT current_database() AS db, current_user AS usr,
+        (SELECT string_agg(datname, '', '' ORDER BY datname) FROM pg_database WHERE NOT datistemplate) AS databases;
+ ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.locate_schema', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, pg_catalog.has_schema_privilege(n.oid, ''USAGE'') AS usage
+-FROM pg_namespace n
+-WHERE n.nspname = ''{{schema}}'';
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.locate_context', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT current_database() AS db, current_user AS usr,
+        (SELECT string_agg(datname, '', '' ORDER BY datname) FROM pg_database WHERE NOT datistemplate) AS databases;
+ ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.locate_schema', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, pg_catalog.has_schema_privilege(n.oid, ''USAGE'') AS usage
+-FROM pg_namespace n
+-WHERE n.nspname = ''{{schema}}'';
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'explain.from_history', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT schema_name, query
+ FROM dbe_perf.statement_history
+ WHERE unique_query_id = {{sid}}
+@@ -463,11 +372,6 @@ WHERE unique_sql_id = {{sid}}
+   AND LENGTH(TRIM(query)) > 0
+ LIMIT 1;
+ ', '[{"key":"sid","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'explain.relation_schemas', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, c.relname
+-FROM pg_class c
+-LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
+-WHERE c.relname IN ({{names}}) AND c.relkind IN (''r'',''v'',''p'',''m'',''f'');
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'config.settings', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT name,
+        COALESCE(setting,'''')    AS setting,
+        COALESCE(unit,'''')       AS unit,
+@@ -517,24 +421,6 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
+  WHERE restart_lsn IS NOT NULL
+  ORDER BY lag_bytes DESC;
+ ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'vacuum.bloat_estimate', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname AS schema,
+-       c.relname AS "table",
+-       c.relpages::bigint                       AS relpages,
+-       (pg_relation_size(c.oid) / 8192)::bigint AS real_pages,
+-       c.reltuples::bigint                      AS reltuples,
+-       pg_relation_size(c.oid)::bigint          AS real_bytes,
+-       (SELECT sum(s.avg_width)
+-          FROM pg_stats s
+-         WHERE s.schemaname = n.nspname AND s.tablename = c.relname) AS avg_row_width
+-  FROM pg_class c
+-  JOIN pg_namespace n ON n.oid = c.relnamespace
+- WHERE c.relkind = ''r''
+-   AND n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',
+-                         ''dbe_pldeveloper'',''cstore'',''pg_toast'')
+-   AND pg_relation_size(c.oid) > 8192 * 128
+- ORDER BY pg_relation_size(c.oid) DESC
+- LIMIT {{limit}};
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'vacuum.freeze_age', 'postgres', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT d.datname,
+        (txid_snapshot_xmin(txid_current_snapshot())
+         - d.datfrozenxid64::text::numeric)::bigint      AS freeze_age,
+@@ -1118,59 +1004,6 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
+        COALESCE(SUM(phyblkwrt), 0) AS blocks
+   FROM dbe_perf.file_redo_iostat;
+ ', '[]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'vacuum.dead_tuples', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname AS schema,
+-       t.relname AS "table",
+-       t.n_live_tup AS n_live_tup,
+-       t.n_dead_tup AS n_dead_tup,
+-       c.reltuples AS reltuples,
+-       pg_total_relation_size(c.oid) AS table_bytes,
+-       date_part(''epoch'', clock_timestamp() - t.last_autovacuum) AS last_autovacuum_age_s,
+-       date_part(''epoch'', clock_timestamp() - t.last_vacuum) AS last_vacuum_age_s,
+-       t.vacuum_count AS vacuum_count,
+-       t.autovacuum_count AS autovacuum_count,
+-       t.n_tup_upd AS n_tup_upd,
+-       t.n_tup_hot_upd AS n_tup_hot_upd,
+-       t.n_tup_del AS n_tup_del,
+-       CASE WHEN ''autovacuum_enabled=false'' = ANY(c.reloptions) THEN false ELSE true END AS autovac_enabled,
+-       COALESCE(array_to_string(c.reloptions, '',''), '''') AS reloptions
+-  FROM pg_stat_user_tables t
+-  JOIN pg_class c ON c.oid = t.relid
+-  JOIN pg_namespace n ON n.oid = c.relnamespace
+- WHERE n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'')
+- ORDER BY t.n_dead_tup DESC
+- LIMIT {{limit}};
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.partitions', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname AS schema,
+-       c.relname AS "table",
+-       count(*)  AS parts,
+-       COALESCE(max(CASE p.partstrategy WHEN ''r'' THEN ''r'' WHEN ''i'' THEN ''i'' WHEN ''l'' THEN ''l''
+-                                        WHEN ''a'' THEN ''a'' WHEN ''h'' THEN ''h'' WHEN ''n'' THEN ''n''
+-                                        ELSE ''?'' END), '''') AS strategy
+-  FROM pg_partition p
+-  JOIN pg_class c     ON c.oid = p.parentid
+-  JOIN pg_namespace n ON n.oid = c.relnamespace
+- WHERE p.parttype = ''p''
+-   AND n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',
+-                         ''dbe_pldeveloper'',''cstore'',''pg_toast'')
+- GROUP BY n.nspname, c.relname
+- ORDER BY parts DESC;
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.table_writes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT CASE WHEN s.schemaname = ''pg_toast'' THEN pn.nspname::text ELSE s.schemaname::text END AS schema,
+-       CASE WHEN s.schemaname = ''pg_toast'' THEN pc.relname::text ELSE s.relname::text END AS "table",
+-       (s.schemaname = ''pg_toast'') AS is_toast,
+-       s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
+-       CASE WHEN s.schemaname = ''pg_toast'' THEN pg_relation_size(s.relid) END AS toast_bytes
+-  FROM pg_stat_all_tables s
+-  LEFT JOIN pg_class pc     ON s.schemaname = ''pg_toast'' AND pc.reltoastrelid = s.relid
+-  LEFT JOIN pg_namespace pn ON pn.oid = pc.relnamespace
+- WHERE s.n_tup_ins + s.n_tup_upd + s.n_tup_del > 0
+-   AND ((s.schemaname <> ''pg_toast''
+-         AND s.schemaname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore''))
+-     OR (s.schemaname = ''pg_toast'' AND pn.nspname IS NOT NULL
+-         AND pn.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'',''pg_toast'')))
+- ORDER BY s.last_data_changed DESC NULLS LAST
+- LIMIT {{limit}};
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.stale_stats', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT tbl_name, frozen_pages, cur_pages, frozen_tuples, live_tuples,
+        stat_columns, last_analyze, last_autoanalyze
+ FROM (
+@@ -1197,60 +1030,6 @@ ORDER BY (stat_columns = 0 OR frozen_pages = 0) DESC,
+          cur_pages DESC
+ LIMIT {{limit}};
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"min_rows","value":"","type":"INTEGER","autoAcquire":false},{"key":"min_pages","value":"","type":"INTEGER","autoAcquire":false},{"key":"schema_filter","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.unused_index', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT concat(s.schemaname::text, ''.'', s.indexrelname::text) AS idx_name,
+-       s.relname AS table_name,
+-       s.idx_scan,
+-       s.idx_tup_read,
+-       s.idx_tup_fetch,
+-       pg_relation_size(s.indexrelid) AS idx_bytes,
+-       i.indisprimary,
+-       i.indisunique,
+-       COALESCE(ts.seq_scan, 0) AS table_seq_scan,
+-       COALESCE(ts.idx_scan, 0) AS table_idx_scan
+-FROM pg_stat_user_indexes s
+-JOIN pg_index i ON i.indexrelid = s.indexrelid
+-LEFT JOIN pg_stat_user_tables ts ON ts.relid = s.relid
+-WHERE pg_relation_size(s.indexrelid) > {{min_bytes}}
+-  AND s.schemaname NOT IN {{schema_filter}}
+-ORDER BY s.idx_scan ASC, pg_relation_size(s.indexrelid) DESC
+-LIMIT {{limit}};
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"min_bytes","value":"","type":"INTEGER","autoAcquire":false},{"key":"schema_filter","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlreview.tables', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT
+-  n.nspname::text                                              AS schema,
+-  c.relname::text                                              AS "table",
+-  EXISTS (SELECT 1 FROM pg_constraint pk
+-          WHERE pk.conrelid = c.oid AND pk.contype = ''p'')      AS has_pk,
+-  COALESCE((SELECT array_to_string(array_agg(fk.conname::text), '','')
+-              FROM pg_constraint fk
+-             WHERE fk.conrelid = c.oid AND fk.contype = ''f''), '''') AS fks,
+-  COALESCE((SELECT array_to_string(array_agg(a.attname::text ORDER BY a.attnum), '','')
+-              FROM pg_attribute a
+-             WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), '''') AS columns
+-FROM pg_class c
+-JOIN pg_namespace n ON n.oid = c.relnamespace
+-WHERE c.relkind = ''r'' AND n.nspname = ''{{schema}}''
+-ORDER BY c.relname;
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlreview.indexes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT
+-  n.nspname::text                                              AS schema,
+-  t.relname::text                                              AS "table",
+-  i.relname::text                                              AS name,
+-  COALESCE((SELECT array_to_string(array_agg(a.attname::text
+-                     ORDER BY position(concat('' '', a.attnum::text, '' '') IN concat('' '', ix.indkey::text, '' ''))), '','')
+-              FROM pg_attribute a
+-             WHERE a.attrelid = t.oid AND a.attnum > 0
+-               AND position(concat('' '', a.attnum::text, '' '') IN concat('' '', ix.indkey::text, '' '')) > 0), '''') AS columns,
+-  ix.indisunique                                               AS is_unique,
+-  ix.indisprimary                                              AS is_primary,
+-  COALESCE(s.idx_scan, 0)                                      AS scans
+-FROM pg_index ix
+-JOIN pg_class i     ON i.oid = ix.indexrelid
+-JOIN pg_class t     ON t.oid = ix.indrelid
+-JOIN pg_namespace n ON n.oid = t.relnamespace
+-LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = ix.indexrelid
+-WHERE n.nspname = ''{{schema}}''
+-ORDER BY t.relname, i.relname;
+-', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.locate_search', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT ''proc'' AS kind, n.nspname::text AS nspname, COALESCE(k.pkgname::text, '''') AS pkgname, p.proname::text AS proname
+ FROM pg_proc p
+ LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
+@@ -1322,7 +1101,65 @@ INSERT INTO grmp.script_config (id, script_type, script_name, database_type, ref
+  ORDER BY waiter_wait_s DESC NULLS FIRST -- 未知时长（见上）排最前，不许沉底
+  LIMIT {{limit}};
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.proc_def', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, p.proname, l.lanname, p.prosrc,
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'explain.relation_schemas', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname::text AS nspname, c.relname::text AS relname
++FROM pg_class c
++LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
++WHERE c.relname IN ({{names}}) AND c.relkind IN (''r'',''v'',''p'',''m'',''f'');
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.partitions', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname::text AS schema,
++       c.relname::text AS "table",
++       count(*)  AS parts,
++       COALESCE(max(CASE p.partstrategy WHEN ''r'' THEN ''r'' WHEN ''i'' THEN ''i'' WHEN ''l'' THEN ''l''
++                                        WHEN ''a'' THEN ''a'' WHEN ''h'' THEN ''h'' WHEN ''n'' THEN ''n''
++                                        ELSE ''?'' END), '''') AS strategy
++  FROM pg_partition p
++  JOIN pg_class c     ON c.oid = p.parentid
++  JOIN pg_namespace n ON n.oid = c.relnamespace
++ WHERE p.parttype = ''p''
++   AND n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',
++                         ''dbe_pldeveloper'',''cstore'',''pg_toast'')
++ GROUP BY n.nspname, c.relname
++ ORDER BY parts DESC;
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.table_writes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT CASE WHEN s.schemaname = ''pg_toast'' THEN pn.nspname::text ELSE s.schemaname::text END AS schema,
++       CASE WHEN s.schemaname = ''pg_toast'' THEN pc.relname::text ELSE s.relname::text END AS "table",
++       CASE WHEN s.schemaname = ''pg_toast'' THEN 1 ELSE 0 END AS is_toast,
++       s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
++       CASE WHEN s.schemaname = ''pg_toast'' THEN pg_relation_size(s.relid) END AS toast_bytes
++  FROM pg_stat_all_tables s
++  LEFT JOIN pg_class pc     ON s.schemaname = ''pg_toast'' AND pc.reltoastrelid = s.relid
++  LEFT JOIN pg_namespace pn ON pn.oid = pc.relnamespace
++ WHERE s.n_tup_ins + s.n_tup_upd + s.n_tup_del > 0
++   AND ((s.schemaname <> ''pg_toast''
++         AND s.schemaname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore''))
++     OR (s.schemaname = ''pg_toast'' AND pn.nspname IS NOT NULL
++         AND pn.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'',''pg_toast'')))
++ ORDER BY s.last_data_changed DESC NULLS LAST
++ LIMIT {{limit}};
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'health.unused_index', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT concat(s.schemaname::text, ''.'', s.indexrelname::text) AS idx_name,
++       s.relname::text AS table_name,
++       s.idx_scan,
++       s.idx_tup_read,
++       s.idx_tup_fetch,
++       pg_relation_size(s.indexrelid) AS idx_bytes,
++       CASE WHEN i.indisprimary THEN 1 ELSE 0 END AS indisprimary,
++       CASE WHEN i.indisunique THEN 1 ELSE 0 END AS indisunique,
++       COALESCE(ts.seq_scan, 0) AS table_seq_scan,
++       COALESCE(ts.idx_scan, 0) AS table_idx_scan
++FROM pg_stat_user_indexes s
++JOIN pg_index i ON i.indexrelid = s.indexrelid
++LEFT JOIN pg_stat_user_tables ts ON ts.relid = s.relid
++WHERE pg_relation_size(s.indexrelid) > {{min_bytes}}
++  AND s.schemaname NOT IN {{schema_filter}}
++ORDER BY s.idx_scan ASC, pg_relation_size(s.indexrelid) DESC
++LIMIT {{limit}};
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"min_bytes","value":"","type":"INTEGER","autoAcquire":false},{"key":"schema_filter","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.locate_schema', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname::text AS nspname, CASE WHEN pg_catalog.has_schema_privilege(n.oid, ''USAGE'') THEN 1 ELSE 0 END AS usage
++FROM pg_namespace n
++WHERE n.nspname = ''{{schema}}'';
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'procinfo.proc_def', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname::text AS nspname, p.proname::text AS proname, l.lanname::text AS lanname, p.prosrc,
+        pg_catalog.pg_get_function_arguments(p.oid) AS args,
+        COALESCE(k.pkgname::text, '''') AS package
+ FROM pg_proc p
+@@ -1335,7 +1172,28 @@ WHERE p.proname = ''{{name}}''
+ ORDER BY (n.nspname = ''public'') DESC, n.nspname, k.pkgname
+ LIMIT 5;
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
+-INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.proc_def', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname, p.proname, l.lanname, p.prosrc,
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.column_stats', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT schemaname::text AS schemaname, tablename::text AS tablename, attname::text AS attname, n_distinct, null_frac, avg_width, correlation,
++       COALESCE(most_common_vals::text, '''') AS most_common_vals,
++       COALESCE(most_common_freqs::text, '''') AS most_common_freqs,
++       COALESCE(histogram_bounds::text, '''') AS histogram_bounds
++FROM pg_stats
++WHERE tablename IN ({{names}});
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.indexes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname::text AS schema_name, t.relname::text AS table_name, i.relname::text AS index_name,
++       CASE WHEN ix.indisunique THEN 1 ELSE 0 END AS indisunique,
++       CASE WHEN ix.indisprimary THEN 1 ELSE 0 END AS indisprimary,
++       pg_get_indexdef(ix.indexrelid) AS index_def
++FROM pg_class t
++JOIN pg_index ix ON t.oid = ix.indrelid
++JOIN pg_class i ON i.oid = ix.indexrelid
++JOIN pg_namespace n ON n.oid = t.relnamespace
++WHERE t.relname IN ({{names}});
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.locate_schema', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname::text AS nspname, CASE WHEN pg_catalog.has_schema_privilege(n.oid, ''USAGE'') THEN 1 ELSE 0 END AS usage
++FROM pg_namespace n
++WHERE n.nspname = ''{{schema}}'';
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.proc_def', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname::text AS nspname, p.proname::text AS proname, l.lanname::text AS lanname, p.prosrc,
+        pg_catalog.pg_get_function_arguments(p.oid) AS args,
+        COALESCE(k.pkgname::text, '''') AS package
+ FROM pg_proc p
+@@ -1348,3 +1206,148 @@ WHERE p.proname = ''{{name}}''
+ ORDER BY (n.nspname = ''public'') DESC, n.nspname, k.pkgname
+ LIMIT 5;
+ ', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"name","value":"","type":"STRING","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false},{"key":"package","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'proctune.tables', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname::text AS nspname, c.relname::text AS relname, c.relpages,
++       c.reltuples::bigint AS reltuples,
++       pg_relation_size(c.oid) / current_setting(''block_size'')::bigint AS curpages,
++       c.relkind::text AS relkind,
++       pg_total_relation_size(c.oid) / 1024.0 / 1024.0 AS size_mb
++FROM pg_class c
++LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
++WHERE c.relname IN ({{names}}) AND c.relkind IN (''r'',''v'',''p'',''m'');
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlreview.indexes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT
++  n.nspname::text                                              AS schema,
++  t.relname::text                                              AS "table",
++  i.relname::text                                              AS name,
++  COALESCE((SELECT array_to_string(array_agg(a.attname::text
++                     ORDER BY position(concat('' '', a.attnum::text, '' '') IN concat('' '', ix.indkey::text, '' ''))), '','')
++              FROM pg_attribute a
++             WHERE a.attrelid = t.oid AND a.attnum > 0
++               AND position(concat('' '', a.attnum::text, '' '') IN concat('' '', ix.indkey::text, '' '')) > 0), '''') AS columns,
++  CASE WHEN ix.indisunique THEN 1 ELSE 0 END                   AS is_unique,
++  CASE WHEN ix.indisprimary THEN 1 ELSE 0 END                  AS is_primary,
++  COALESCE(s.idx_scan, 0)                                      AS scans
++FROM pg_index ix
++JOIN pg_class i     ON i.oid = ix.indexrelid
++JOIN pg_class t     ON t.oid = ix.indrelid
++JOIN pg_namespace n ON n.oid = t.relnamespace
++LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = ix.indexrelid
++WHERE n.nspname = ''{{schema}}''
++ORDER BY t.relname, i.relname;
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqlreview.tables', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT
++  n.nspname::text                                              AS schema,
++  c.relname::text                                              AS "table",
++  CASE WHEN EXISTS (SELECT 1 FROM pg_constraint pk
++                    WHERE pk.conrelid = c.oid AND pk.contype = ''p'')
++       THEN 1 ELSE 0 END                                       AS has_pk,
++  COALESCE((SELECT array_to_string(array_agg(fk.conname::text), '','')
++              FROM pg_constraint fk
++             WHERE fk.conrelid = c.oid AND fk.contype = ''f''), '''') AS fks,
++  COALESCE((SELECT array_to_string(array_agg(a.attname::text ORDER BY a.attnum), '','')
++              FROM pg_attribute a
++             WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), '''') AS columns
++FROM pg_class c
++JOIN pg_namespace n ON n.oid = c.relnamespace
++WHERE c.relkind = ''r'' AND n.nspname = ''{{schema}}''
++ORDER BY c.relname;
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"schema","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.column_stats', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT schemaname::text AS schemaname, tablename::text AS tablename, attname::text AS attname, n_distinct, null_frac, avg_width, correlation,
++       COALESCE(most_common_vals::text, '''') AS most_common_vals,
++       COALESCE(most_common_freqs::text, '''') AS most_common_freqs,
++       COALESCE(histogram_bounds::text, '''') AS histogram_bounds
++FROM pg_stats
++WHERE tablename IN ({{names}});
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.column_types', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname::text AS schema_name, c.relname::text AS table_name,
++       a.attname::text AS attname, format_type(a.atttypid, NULL) AS type_name
++FROM pg_attribute a
++JOIN pg_class c ON c.oid = a.attrelid
++JOIN pg_namespace n ON n.oid = c.relnamespace
++WHERE c.relname IN ({{tables}})
++  AND a.attname IN ({{columns}})
++  AND a.attnum > 0 AND NOT a.attisdropped
++  AND c.relkind IN (''r'',''v'',''p'',''m'')
++  AND n.nspname NOT IN (''pg_catalog'',''information_schema'');
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"tables","value":"","type":"STRING","autoAcquire":false},{"key":"columns","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.indexes', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname::text AS schema_name, t.relname::text AS table_name,
++       i.relname::text AS index_name,
++       CASE WHEN ix.indisunique THEN 1 ELSE 0 END AS indisunique,
++       CASE WHEN ix.indisprimary THEN 1 ELSE 0 END AS indisprimary,
++       i.relpages AS index_relpages,
++       i.reltuples::bigint AS index_reltuples,
++       pg_get_indexdef(ix.indexrelid) AS index_def
++FROM pg_class t
++JOIN pg_index ix ON t.oid = ix.indrelid
++JOIN pg_class i ON i.oid = ix.indexrelid
++JOIN pg_namespace n ON n.oid = t.relnamespace
++WHERE t.relname IN ({{names}});
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.stats_freshness', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT schemaname::text AS schemaname, relname::text AS relname,
++       n_live_tup, n_dead_tup,
++       COALESCE(to_char(last_analyze, ''YYYY-MM-DD HH24:MI:SS''), ''never'') AS last_analyze,
++       COALESCE(to_char(last_autoanalyze, ''YYYY-MM-DD HH24:MI:SS''), ''never'') AS last_autoanalyze,
++       analyze_count, autoanalyze_count
++FROM pg_stat_user_tables
++WHERE relname IN ({{names}});
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.tables', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname::text AS nspname, c.relname::text AS relname, c.relpages,
++       c.reltuples::bigint AS reltuples,
++       pg_relation_size(c.oid) / current_setting(''block_size'')::bigint AS curpages,
++       c.relkind::text AS relkind,
++       pg_total_relation_size(c.oid) / 1024.0 / 1024.0 AS size_mb
++FROM pg_class c
++LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
++WHERE c.relname IN ({{names}}) AND c.relkind IN (''r'',''v'',''p'',''m'');
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"names","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'topproc.top_procs', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname::text AS nspname, p.proname::text AS proname, s.calls,
++       ROUND(s.total_time::numeric, 2) AS total_ms,
++       ROUND(s.self_time::numeric, 2) AS self_ms
++FROM pg_stat_user_functions s
++JOIN pg_proc p ON p.oid = s.funcid
++JOIN pg_namespace n ON n.oid = p.pronamespace
++ORDER BY {{order}} NULLS LAST
++LIMIT {{limit}};
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"order","value":"","type":"STRING","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'vacuum.bloat_estimate', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname::text AS schema,
++       c.relname::text AS "table",
++       c.relpages::bigint                       AS relpages,
++       (pg_relation_size(c.oid) / 8192)::bigint AS real_pages,
++       c.reltuples::bigint                      AS reltuples,
++       pg_relation_size(c.oid)::bigint          AS real_bytes,
++       (SELECT sum(s.avg_width)
++          FROM pg_stats s
++         WHERE s.schemaname = n.nspname AND s.tablename = c.relname) AS avg_row_width
++  FROM pg_class c
++  JOIN pg_namespace n ON n.oid = c.relnamespace
++ WHERE c.relkind = ''r''
++   AND n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',
++                         ''dbe_pldeveloper'',''cstore'',''pg_toast'')
++   AND pg_relation_size(c.oid) > 8192 * 128
++ ORDER BY pg_relation_size(c.oid) DESC
++ LIMIT {{limit}};
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'vacuum.dead_tuples', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'SELECT n.nspname::text AS schema,
++       t.relname::text AS "table",
++       t.n_live_tup AS n_live_tup,
++       t.n_dead_tup AS n_dead_tup,
++       c.reltuples AS reltuples,
++       pg_total_relation_size(c.oid) AS table_bytes,
++       date_part(''epoch'', clock_timestamp() - t.last_autovacuum) AS last_autovacuum_age_s,
++       date_part(''epoch'', clock_timestamp() - t.last_vacuum) AS last_vacuum_age_s,
++       t.vacuum_count AS vacuum_count,
++       t.autovacuum_count AS autovacuum_count,
++       t.n_tup_upd AS n_tup_upd,
++       t.n_tup_hot_upd AS n_tup_hot_upd,
++       t.n_tup_del AS n_tup_del,
++       CASE WHEN ''autovacuum_enabled=false'' = ANY(c.reloptions) THEN 0 ELSE 1 END AS autovac_enabled,
++       COALESCE(array_to_string(c.reloptions, '',''), '''') AS reloptions
++  FROM pg_stat_user_tables t
++  JOIN pg_class c ON c.oid = t.relid
++  JOIN pg_namespace n ON n.oid = c.relnamespace
++ WHERE n.nspname NOT IN (''pg_catalog'',''information_schema'',''snapshot'',''dbe_perf'',''dbe_pldeveloper'',''cstore'')
++ ORDER BY t.n_dead_tup DESC
++ LIMIT {{limit}};
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"limit","value":"","type":"INTEGER","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());
++INSERT INTO grmp.script_config (id, script_type, script_name, database_type, refered_appbusiness, kernel_version, region, deployment_form, execute_node_type, cluster_deployment_mode, script_content, parameter_config, scene, is_valid, create_user, create_time, last_modify_user, last_modify_time, is_asyn, "extend", compliance_mode, uuid) VALUES (grmp.script_config_seq.nextval, 'SQL', 'sqltune.plan_yaml', 'appbusiness', 1, 'ALL', NULL, NULL, NULL, 'centralization', 'EXPLAIN (ANALYZE false, BUFFERS false, FORMAT YAML) {{sql}}
++', '[{"key":"dbName","value":"","type":"String","autoAcquire":false},{"key":"sql","value":"","type":"STRING","autoAcquire":false}]', 'AGENT', 1, '999999999', now(), '999999999', NULL, 0, NULL, 'ALL', uuid());

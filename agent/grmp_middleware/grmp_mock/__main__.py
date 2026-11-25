@@ -14,13 +14,13 @@ from typing import Sequence
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from grmp_middleware.grmp_mock import instances as inst, signature  # noqa: E402
+from grmp_middleware.grmp_mock import instances as inst, mjdbc, signature  # noqa: E402
 from grmp_middleware.grmp_mock.executor import (  # noqa: E402
     DEFAULT_MAX_RESULT_ROWS,
     DEFAULT_STATEMENT_TIMEOUT_SECONDS,
 )
 from grmp_middleware.grmp_mock.http_server import BIND_HOST, serve  # noqa: E402
-from grmp_middleware.grmp_mock.server import App  # noqa: E402
+from grmp_middleware.grmp_mock.server import App, _default_open_db  # noqa: E402
 from common.grmp.settings import Settings  # noqa: E402
 from grmp_middleware.grmp_mock.store import ScriptStore  # noqa: E402
 
@@ -94,6 +94,10 @@ def main(argv: Sequence[str] = None) -> int:
         "--bank-like", action="store_true",
         help="行方模式:一条脚本里有多条语句时回 HTTP 400、执行失败只回「agent诊断脚本执行失败」(与行方真实 GRMP 一致)",
     )
+    parser.add_argument(
+        "--m-jdbc", action="store_true",
+        help="模拟现场中间件连 M 兼容业务库(本地用 B 兼容库代替):输出列类型不在 M 兼容 JDBC 映射表安全集合里的,"
+             "值渲染成 [B@… (2026-11-25 现场:布尔列就是这样),见 grmp_mock/mjdbc.py")
     parser.add_argument("--dbname-missing", choices=("reject", "postgres"), default="reject",
                         help="appbusiness 的脚本没带 dbName 时:按行方实测报「数据库[]在目标高斯实例中不存在」(默认,11-11 现场)"
                              "或连实例默认库(postgres,旧假设)")
@@ -153,7 +157,10 @@ def main(argv: Sequence[str] = None) -> int:
         opaque_errors=args.bank_like,
         dbname_missing=args.dbname_missing,
         dbname_on_postgres=args.dbname_on_postgres,
+        open_db=mjdbc.wrap(_default_open_db) if args.m_jdbc else None,
     )
+    if args.m_jdbc:
+        print("M 兼容取值模拟:开启(B / M 兼容库上,不安全类型的列渲染成 [B@…)", file=sys.stderr, flush=True)
     if policy is not None:
         print("签名校验:开启(Appkey=%s, userId=%r, %s/%s/%s, 窗口 ±%ds)" % (
             policy.appkey, policy.user_id.decode("utf-8"), policy.timestamp_unit, policy.signature_format,

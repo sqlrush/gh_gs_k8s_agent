@@ -75,8 +75,9 @@ def render(manifest, package: str, root: pathlib.Path, source: Dict[str, str], v
         # 2026-11-20 现场:M 兼容业务库上 15 条脚本报错。v1.5.1 起识别兼容模式;我方没有 M 兼容库可测,现场试跑一次发回核对
         L += ["**业务库是 M 兼容模式(sql_compatibility='M')的**(v1.5.1 起):登录输出有「兼容模式」一行;导完本版白名单增量后显示 "
               "M(MySQL 兼容),没导时显示「未知」并按 A 兼容处理。部署自检加 `--m-trial`:"
-              "`python3 $GSDB_SKILLS_DIR/gaussdb-login/scripts/selfcheck.py --session <句柄> --m-trial`,把 41 条在业务库执行的脚本"
-              "用安全参数(不存在的对象名、`SELECT 1` 的估算计划)各试跑一次,只读,逐条列通过 / 报错 —— 把整份输出发给我方核对。"
+              "`python3 $GSDB_SKILLS_DIR/gaussdb-login/scripts/selfcheck.py --session <句柄> --m-trial`,把在业务库执行的 42 条脚本"
+              "用安全参数(不存在的对象名、`SELECT 1` 的估算计划)各试跑一次,只读,逐条列通过 / 报错;v1.5.2 起还检查取回来的值,"
+              "中间件把哪一列转坏成 `[B@…`(原值丢失)会逐列列出 —— 把整份输出发给我方核对。"
               "M 库没有 ADM_SOURCE 视图,存储过程源码的 ADM_SOURCE 兜底在 M 库上自动不用;内存分析的实时 WLM 一层需要 DBA 给执行账号授权"
               "(一般为监控管理员或系统管理员),没授权时改从 SQL 执行历史取。", ""]
     if (root / "common" / "timing" / "cli.py").is_file():

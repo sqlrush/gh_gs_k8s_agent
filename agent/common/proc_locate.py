@@ -26,8 +26,6 @@ CONTEXT = "locate_context"
 SCHEMA = "locate_schema"
 SEARCH = "locate_search"
 
-_TRUE = {"t", "true", "1", "yes", "y", "on"}
-
 
 @dataclass(frozen=True)
 class Hit:
@@ -59,11 +57,13 @@ class Verdict:
 # ---------------------------------------------------------------- probe
 
 def _flag(v: Any) -> bool:
+    """布尔列 → bool。认不出的取值报错,不当成假(v1.5.2:M 兼容库上的 [B@… 曾被静默当成「没有 USAGE 权限」)。"""
     if isinstance(v, bool):
         return v
     if isinstance(v, (int, float)):
         return v != 0
-    return str(v or "").strip().lower() in _TRUE
+    from common.grmp.values import as_bool
+    return as_bool(v)
 
 
 def _s(v: Any) -> str:

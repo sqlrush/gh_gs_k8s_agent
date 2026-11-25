@@ -152,6 +152,19 @@ DELTAS: Tuple[Delta, ...] = (
               "sqlreview.tables",
           ),
           routing=()),
+    Delta("scripts-delta-20261125.sql",
+          added=(
+              "sqltune.plan_yaml",
+          ),
+          changed=(
+              "explain.relation_schemas", "health.partitions", "health.table_writes", "health.unused_index",
+              "procinfo.locate_schema", "procinfo.proc_def", "proctune.column_stats", "proctune.indexes",
+              "proctune.locate_schema", "proctune.proc_def", "proctune.tables", "sqlreview.indexes",
+              "sqlreview.tables", "sqltune.column_stats", "sqltune.column_types", "sqltune.indexes",
+              "sqltune.stats_freshness", "sqltune.tables", "topproc.top_procs", "vacuum.bloat_estimate",
+              "vacuum.dead_tuples",
+          ),
+          routing=()),
 )
 
 

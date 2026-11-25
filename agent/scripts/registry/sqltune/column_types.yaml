@@ -16,12 +16,16 @@
 # 与 tables.yaml 同约定，避免双层括号。
 #
 # 同名列跨表类型冲突这里不裁决，原样多行返回，由调用方保守放弃该列。
+# 输出类型(v1.5.2,2026-11-25 现场反馈):业务库可能是 M 兼容模式,中间件按 JDBC 类型映射取值再转成文字,布尔列在那里
+#   变成 Java 字节数组 [B@…、原值丢失。输出列一律收口到《M-Compatibility 开发指南》JDBC 映射表里取出来就是文字 / 整数 /
+#   小数的类型:布尔 → CASE WHEN … THEN 1 ELSE 0 END,名字类(name)与 "char" → ::text,表达式列都写别名;列名不变。
+#   守卫:test_registry_output_types_units.py(类型清单 tests/fixtures/registry_output_types.json)。
 name: sqltune.column_types
 database_type: appbusiness
 description: 占位符比较列的真实类型（替换前探测，让合成值类型正确）
 sql: |
-  SELECT n.nspname AS schema_name, c.relname AS table_name,
-         a.attname, format_type(a.atttypid, NULL) AS type_name
+  SELECT n.nspname::text AS schema_name, c.relname::text AS table_name,
+         a.attname::text AS attname, format_type(a.atttypid, NULL) AS type_name
   FROM pg_attribute a
   JOIN pg_class c ON c.oid = a.attrelid
   JOIN pg_namespace n ON n.oid = c.relnamespace

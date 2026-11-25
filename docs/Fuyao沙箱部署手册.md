@@ -1,6 +1,6 @@
 # Fuyao 沙箱部署手册：从零到上线（预览）
 
-> 本文随本仓库标签 `agent-v1.5.1` 发布。文中提到的 `k8s/`、`docker/`、`scripts/`、`gateway/`、`e2b/` 等路径，指本仓库或离线交付包里的同名目录。
+> 本文随本仓库标签 `agent-v1.5.2` 发布。文中提到的 `k8s/`、`docker/`、`scripts/`、`gateway/`、`e2b/` 等路径，指本仓库或离线交付包里的同名目录。
 
 > **预览**：Fuyao 沙箱模式随 `agent-v1.5.0` 发布，属于**预览**功能。平台的三项安全前提（envd 认证、沙箱出网限制、OpenSandbox 认证）落实之前，**只用于测试环境**：只用测试账号、测试库与模拟中间件，不接生产数据库与真实的中间件令牌。按需、固定池化两种模式不受影响。
 
@@ -178,7 +178,7 @@ Fuyao 模式里出现的「承载 Pod」是**平台的**对象（每个承载 Po
 
 镜像有三种取法：用我方发布的离线包（本节）；能连外网时从 `ghcr.io/sqlrush` 直接拉，K8s 镜像与两个沙箱模板镜像都有，见 **§2.3**；或现场从源码自己制作，见 **§16**。
 三种做法得到的镜像内容相同，后续步骤也相同。
-离线包的全部文件（含沙箱模板 OCI 包、`release.yaml`、`MANIFEST.txt` 与各 `.sha256`）也挂在联合仓库对应版本的发布页上，可以直接下载，例如 v1.5.1：<https://github.com/sqlrush/gh_gs_k8s_agent/releases/tag/agent-v1.5.1>。下载到同一目录后 `shasum -a 256 -c *.sha256` 核对；`e2b/` 目录取联合仓库同一标签下的 `e2b/`（与离线包相同）。
+离线包的全部文件（含沙箱模板 OCI 包、`release.yaml`、`MANIFEST.txt` 与各 `.sha256`）也挂在联合仓库对应版本的发布页上，可以直接下载，例如 v1.5.2：<https://github.com/sqlrush/gh_gs_k8s_agent/releases/tag/agent-v1.5.2>。下载到同一目录后 `shasum -a 256 -c *.sha256` 核对；`e2b/` 目录取联合仓库同一标签下的 `e2b/`（与离线包相同）。
 
 我方用 `scripts/package-images.sh <TAG> --e2b` 打包（`--e2b` 不能与 `--without-kbstd` 同用）。包目录 `gaussdb-agent-v<版本>-oc1.18.27/` 下：
 
@@ -192,12 +192,12 @@ Fuyao 模式里出现的「承载 Pod」是**平台的**对象（每个承载 Po
 | `rootspec-overlay.sh` | 换根规范；包里有模板 OCI 包时一并重建模板 | 按需 |
 | `*.sha256`、`MANIFEST.txt` | 校验和、实际镜像标签 | 全程 |
 
-`<包名>`：标签以 `agent-` 开头时为 `gaussdb-<标签>`，例如标签 `agent-v1.5.1-oc1.18.27` 的包名是 `gaussdb-agent-v1.5.1-oc1.18.27`。
+`<包名>`：标签以 `agent-` 开头时为 `gaussdb-<标签>`，例如标签 `agent-v1.5.2-oc1.18.27` 的包名是 `gaussdb-agent-v1.5.2-oc1.18.27`。
 
 ### 2.2 校验（跳板机上）
 
 ```bash
-cd gaussdb-agent-v1.5.1-oc1.18.27
+cd gaussdb-agent-v1.5.2-oc1.18.27
 shasum -a 256 -c *.sha256          # Linux 也可 sha256sum -c *.sha256
 cat MANIFEST.txt
 ```
@@ -207,18 +207,18 @@ cat MANIFEST.txt
 
 ### 2.3 不用离线包：从 GHCR 直接拉
 
-能连外网的机器可以直接从 GHCR 拉，不用传离线包。镜像公开，**不用登录**。版本 `agent-v1.5.1` 的地址：
+能连外网的机器可以直接从 GHCR 拉，不用传离线包。镜像公开，**不用登录**。版本 `agent-v1.5.2` 的地址：
 
 | 镜像 | 地址 | 架构 | 用在 |
 |---|---|---|---|
-| runtime | `ghcr.io/sqlrush/gaussdb-agent-runtime:agent-v1.5.1-oc1.18.27` | amd64、arm64 | 状态服务、凭据代理（§3） |
-| kb-import | `ghcr.io/sqlrush/gaussdb-agent-kb-import:agent-v1.5.1-oc1.18.27` | amd64、arm64 | 标准知识库安装 Job（§3） |
-| gateway | `ghcr.io/sqlrush/gaussdb-agent-gateway:agent-v1.5.1-oc1.18.27` | amd64、arm64 | 网关（§3） |
-| frontend | `ghcr.io/sqlrush/gaussdb-agent-frontend:agent-v1.5.1-oc1.18.27` | amd64、arm64 | 前端（§3） |
-| kbstd | `ghcr.io/sqlrush/gaussdb-agent-kbstd:agent-v1.5.1-oc1.18.27` | amd64、arm64 | 标准知识库安装 Job（§3） |
-| runtime-e2b | `ghcr.io/sqlrush/gaussdb-agent-runtime-e2b:agent-v1.5.1-oc1.18.27` | 只有 arm64 | 诊断沙箱模板（§4） |
-| kb-import-e2b | `ghcr.io/sqlrush/gaussdb-agent-kb-import-e2b:agent-v1.5.1-oc1.18.27` | 只有 arm64 | 导入沙箱模板（§4） |
-| release（可选） | `ghcr.io/sqlrush/gaussdb-agent-release:agent-v1.5.1-oc1.18.27` | amd64、arm64 | 发版台，升级用（§10） |
+| runtime | `ghcr.io/sqlrush/gaussdb-agent-runtime:agent-v1.5.2-oc1.18.27` | amd64、arm64 | 状态服务、凭据代理（§3） |
+| kb-import | `ghcr.io/sqlrush/gaussdb-agent-kb-import:agent-v1.5.2-oc1.18.27` | amd64、arm64 | 标准知识库安装 Job（§3） |
+| gateway | `ghcr.io/sqlrush/gaussdb-agent-gateway:agent-v1.5.2-oc1.18.27` | amd64、arm64 | 网关（§3） |
+| frontend | `ghcr.io/sqlrush/gaussdb-agent-frontend:agent-v1.5.2-oc1.18.27` | amd64、arm64 | 前端（§3） |
+| kbstd | `ghcr.io/sqlrush/gaussdb-agent-kbstd:agent-v1.5.2-oc1.18.27` | amd64、arm64 | 标准知识库安装 Job（§3） |
+| runtime-e2b | `ghcr.io/sqlrush/gaussdb-agent-runtime-e2b:agent-v1.5.2-oc1.18.27` | 只有 arm64 | 诊断沙箱模板（§4） |
+| kb-import-e2b | `ghcr.io/sqlrush/gaussdb-agent-kb-import-e2b:agent-v1.5.2-oc1.18.27` | 只有 arm64 | 导入沙箱模板（§4） |
+| release（可选） | `ghcr.io/sqlrush/gaussdb-agent-release:agent-v1.5.2-oc1.18.27` | amd64、arm64 | 发版台，升级用（§10） |
 
 前五个是多架构镜像，`docker pull` 会按本机架构自动取；也有带后缀的单架构标签（`…-oc1.18.27-arm64`、`…-oc1.18.27-amd64`），在 x86 跳板机上要拉 arm64 时用。
 两个沙箱模板镜像只出 arm64，另有同内容的 `…-oc1.18.27-arm64` 标签。
@@ -226,7 +226,7 @@ cat MANIFEST.txt
 **K8s 镜像**：拉下来推进内网仓库，再按 §3 往后做（`docker load` 那一行换成 `docker pull`）：
 
 ```bash
-TAG=agent-v1.5.1-oc1.18.27
+TAG=agent-v1.5.2-oc1.18.27
 REG=registry.example/gaussdb-agent         # 内网仓库前缀,按现场填
 ARCH=arm64                                 # 集群节点的架构(鲲鹏为 arm64)
 for img in runtime kb-import gateway frontend kbstd; do
@@ -240,8 +240,8 @@ done
 得到的文件与离线包里的 `<包名>-e2b-arm64.oci.tar` 等价，再按 §4.1 用 `--from-oci` 注册。下面两种工具任选一种：
 
 ```bash
-TAG=agent-v1.5.1-oc1.18.27
-OUT=gaussdb-agent-v1.5.1-oc1.18.27-e2b-arm64.oci.tar
+TAG=agent-v1.5.2-oc1.18.27
+OUT=gaussdb-agent-v1.5.2-oc1.18.27-e2b-arm64.oci.tar
 R=ghcr.io/sqlrush/gaussdb-agent-runtime-e2b:$TAG
 K=ghcr.io/sqlrush/gaussdb-agent-kb-import-e2b:$TAG
 
@@ -259,10 +259,10 @@ ctr -n gsdb-e2b images rm $R $K                       # 导出后可删
 
 **预期**：`tar -tf $OUT | grep -c '^blobs/sha256/'` 不少于 5；`tar -xOf $OUT index.json` 里能看到两个镜像名。
 `--from-oci` 按镜像名最后一段（`gaussdb-agent-runtime-e2b`、`gaussdb-agent-kb-import-e2b`）和标签找镜像，带 `ghcr.io/sqlrush/` 前缀不影响。
-模板注册脚本不在镜像里：从联合仓库 [gh_gs_k8s_agent](https://github.com/sqlrush/gh_gs_k8s_agent) 标签 `agent-v1.5.1` 的 `e2b/` 目录取（与离线包的 `e2b/` 目录逐字节相同），整个目录拷到构建主机，§4.1 的命令照用：
+模板注册脚本不在镜像里：从联合仓库 [gh_gs_k8s_agent](https://github.com/sqlrush/gh_gs_k8s_agent) 标签 `agent-v1.5.2` 的 `e2b/` 目录取（与离线包的 `e2b/` 目录逐字节相同），整个目录拷到构建主机，§4.1 的命令照用：
 
 ```bash
-git clone -b agent-v1.5.1 --depth 1 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-src
+git clone -b agent-v1.5.2 --depth 1 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-src
 cp -r gaussdb-src/e2b /root/gsdb-e2b/
 ```
 
@@ -273,11 +273,11 @@ cp -r gaussdb-src/e2b /root/gsdb-e2b/
 与《部署手册-从零到上线》§1.2–§1.3 相同，五个镜像都要导入并推进内网仓库（不用离线包、直接从 GHCR 拉的见 §2.3）：
 
 ```bash
-TAG=agent-v1.5.1-oc1.18.27
+TAG=agent-v1.5.2-oc1.18.27
 REG=registry.example/gaussdb-agent         # 内网仓库前缀,按现场填
 SFX=-arm64                                 # MANIFEST.txt 里标签没有后缀时写空:SFX=
 
-gunzip -c gaussdb-agent-v1.5.1-oc1.18.27-arm64.tar.gz | docker load
+gunzip -c gaussdb-agent-v1.5.2-oc1.18.27-arm64.tar.gz | docker load
 for img in runtime kb-import gateway frontend kbstd; do
   docker tag gaussdb-agent-$img:$TAG$SFX $REG/gaussdb-agent-$img:$TAG
   docker push $REG/gaussdb-agent-$img:$TAG
@@ -287,7 +287,7 @@ done
 节点用 containerd、又没有内网仓库时，在**每个可能调度到的节点**上导入：
 
 ```bash
-gunzip -c gaussdb-agent-v1.5.1-oc1.18.27-arm64.tar.gz | ctr -n k8s.io images import -
+gunzip -c gaussdb-agent-v1.5.2-oc1.18.27-arm64.tar.gz | ctr -n k8s.io images import -
 ctr -n k8s.io images ls -q | grep gaussdb-agent      # 预期五行
 ```
 
@@ -316,13 +316,13 @@ root 权限；`/root/.e2b/config.json` 里有团队 API Key（`teamApiKey`）；
 
 ```bash
 cd /root/gsdb-e2b
-python3 e2b/scripts/build-e2b-template.py --tag agent-v1.5.1-oc1.18.27 --arch arm64 \
-    --from-oci gaussdb-agent-v1.5.1-oc1.18.27-e2b-arm64.oci.tar --cpu 2 --memory 4096
+python3 e2b/scripts/build-e2b-template.py --tag agent-v1.5.2-oc1.18.27 --arch arm64 \
+    --from-oci gaussdb-agent-v1.5.2-oc1.18.27-e2b-arm64.oci.tar --cpu 2 --memory 4096
 ```
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `--tag` | 必填 | 版本标签。模板名由它派生：`agent-v1.5.1-…` → `gsdb-runtime-v1-5-1`、`gsdb-import-v1-5-1`；不以 `agent-v<主>.<次>.<修订>` 开头的标签按字面转成小写连字符 |
+| `--tag` | 必填 | 版本标签。模板名由它派生：`agent-v1.5.2-…` → `gsdb-runtime-v1-5-2`、`gsdb-import-v1-5-2`；不以 `agent-v<主>.<次>.<修订>` 开头的标签按字面转成小写连字符 |
 | `--from-oci` | 空 | 离线包里的模板 OCI 包，或按 §2.3 从 GHCR 导出的（tar 或已解开的目录）。**推荐用这个**：构建服务没有根证书，拉不了公网仓库（实测 `x509 unknown authority`），脚本在本机 `127.0.0.1:5050` 起只读临时仓库供它拉取 |
 | `--arch` | `arm64` | 与包一致。非本机架构的镜像标签带 `-<架构>` 后缀，脚本两种写法都认 |
 | `--cpu` / `--memory` | `2` / `4096`（MB） | **虚拟机的实际规格**。沙箱组的每台上限（§5）与 `FUYAO_CPU` / `FUYAO_MEMORY`（§6.2）要与它一致 |
@@ -337,10 +337,10 @@ python3 e2b/scripts/build-e2b-template.py --tag agent-v1.5.1-oc1.18.27 --arch ar
 **预期输出**（每种模板先一行「注册模板 …」，构建完一行「就绪」，最后打印两个模板的 JSON）：
 
 ```
-模板构建:注册模板 gsdb-runtime-v1-5-1(…,2 vCPU / 4096 MB),构建服务拉取并制作快照,通常几分钟
-模板构建:模板 gsdb-runtime-v1-5-1 就绪(55 秒,templateID …)
-模板构建:注册模板 gsdb-import-v1-5-1(…)…
-模板构建:模板 gsdb-import-v1-5-1 就绪(…秒,templateID …)
+模板构建:注册模板 gsdb-runtime-v1-5-2(…,2 vCPU / 4096 MB),构建服务拉取并制作快照,通常几分钟
+模板构建:模板 gsdb-runtime-v1-5-2 就绪(55 秒,templateID …)
+模板构建:注册模板 gsdb-import-v1-5-2(…)…
+模板构建:模板 gsdb-import-v1-5-2 就绪(…秒,templateID …)
 模板构建:把模板名填进 gateway-config:FUYAO_RUNTIME_TEMPLATE / FUYAO_IMPORT_TEMPLATE
 ```
 
@@ -466,8 +466,8 @@ Fuyao 相关键（默认值取自 `k8s/base/configmap-gateway.yaml`，下限由�
 |---|---|---|---|
 | `RUNTIME_MODE` | `ondemand` | 是 | 设 `fuyao`（overlay `k8s/overlays/fuyao` 已设） |
 | `FUYAO_API` | 空 | 是 | OpenSandbox 地址，如 `http://opensandbox-server.flux-system.svc:80` |
-| `FUYAO_RUNTIME_TEMPLATE` | 空 | 是 | 诊断模板名（§4），如 `gsdb-runtime-v1-5-1`；发版台升级时自动改 |
-| `FUYAO_IMPORT_TEMPLATE` | 空 | 是 | 导入模板名，如 `gsdb-import-v1-5-1`；发版台升级时自动改 |
+| `FUYAO_RUNTIME_TEMPLATE` | 空 | 是 | 诊断模板名（§4），如 `gsdb-runtime-v1-5-2`；发版台升级时自动改 |
+| `FUYAO_IMPORT_TEMPLATE` | 空 | 是 | 导入模板名，如 `gsdb-import-v1-5-2`；发版台升级时自动改 |
 | `FUYAO_RUNTIME_GROUP` | 空 | 是 | 诊断沙箱组名（§5） |
 | `FUYAO_IMPORT_GROUP` | 空 | 是 | 导入沙箱组名；可与诊断组相同 |
 | `FUYAO_CPU` | `2` | 否 | 建沙箱请求里的资源字段（平台要求必填），与虚拟机规格一致 |
@@ -517,7 +517,7 @@ Fuyao 相关键（默认值取自 `k8s/base/configmap-gateway.yaml`，下限由�
 解开 `<包名>-k8s.tar.gz`，在 `k8s/overlays/` 下建现场目录 `site/`（名字自定），以仓库的 `k8s/overlays/fuyao` 为底：
 
 ```bash
-mkdir deploy && tar xzf gaussdb-agent-v1.5.1-oc1.18.27-k8s.tar.gz -C deploy && cd deploy
+mkdir deploy && tar xzf gaussdb-agent-v1.5.2-oc1.18.27-k8s.tar.gz -C deploy && cd deploy
 mkdir k8s/overlays/site
 ```
 
@@ -539,11 +539,11 @@ resources:
   - ../fuyao                     # = base + k8s/fuyao(状态服务、凭据代理、网络策略、平台只读授权)+ 网关切 fuyao
   - nas-pv-nfs.yaml              # 有 RWX StorageClass 时去掉这一行,改 base/nas-pvc.yaml 的 storageClassName
 images:
-  - {name: gaussdb-agent-gateway,   newName: registry.example/gaussdb-agent/gaussdb-agent-gateway,   newTag: agent-v1.5.1-oc1.18.27}
-  - {name: gaussdb-agent-frontend,  newName: registry.example/gaussdb-agent/gaussdb-agent-frontend,  newTag: agent-v1.5.1-oc1.18.27}
-  - {name: gaussdb-agent-runtime,   newName: registry.example/gaussdb-agent/gaussdb-agent-runtime,   newTag: agent-v1.5.1-oc1.18.27}
-  - {name: gaussdb-agent-kb-import, newName: registry.example/gaussdb-agent/gaussdb-agent-kb-import, newTag: agent-v1.5.1-oc1.18.27}
-  - {name: gaussdb-agent-kbstd,     newName: registry.example/gaussdb-agent/gaussdb-agent-kbstd,     newTag: agent-v1.5.1-oc1.18.27}
+  - {name: gaussdb-agent-gateway,   newName: registry.example/gaussdb-agent/gaussdb-agent-gateway,   newTag: agent-v1.5.2-oc1.18.27}
+  - {name: gaussdb-agent-frontend,  newName: registry.example/gaussdb-agent/gaussdb-agent-frontend,  newTag: agent-v1.5.2-oc1.18.27}
+  - {name: gaussdb-agent-runtime,   newName: registry.example/gaussdb-agent/gaussdb-agent-runtime,   newTag: agent-v1.5.2-oc1.18.27}
+  - {name: gaussdb-agent-kb-import, newName: registry.example/gaussdb-agent/gaussdb-agent-kb-import, newTag: agent-v1.5.2-oc1.18.27}
+  - {name: gaussdb-agent-kbstd,     newName: registry.example/gaussdb-agent/gaussdb-agent-kbstd,     newTag: agent-v1.5.2-oc1.18.27}
 patches:
   - path: configmap-gateway-site.yaml
   - path: configmap-agent-site.yaml          # 不在 overlay 里改 agent-config 时删掉这一行
@@ -571,13 +571,13 @@ apiVersion: v1
 kind: ConfigMap
 metadata: {name: gateway-config, namespace: gaussdb-agent}
 data:
-  USER_IMAGE_TAG: "agent-v1.5.1-oc1.18.27"
+  USER_IMAGE_TAG: "agent-v1.5.2-oc1.18.27"
   USER_IMAGE_REGISTRY: "registry.example/gaussdb-agent"
   FUYAO_API: "http://opensandbox-server.flux-system.svc:80"
   FUYAO_RUNTIME_GROUP: "sg-gsdb-runtime"
   FUYAO_IMPORT_GROUP: "sg-gsdb-import"
-  FUYAO_RUNTIME_TEMPLATE: "gsdb-runtime-v1-5-1"
-  FUYAO_IMPORT_TEMPLATE: "gsdb-import-v1-5-1"
+  FUYAO_RUNTIME_TEMPLATE: "gsdb-runtime-v1-5-2"
+  FUYAO_IMPORT_TEMPLATE: "gsdb-import-v1-5-2"
   FUYAO_CPU: "2"
   FUYAO_MEMORY: "4Gi"
   PRODUCT_NAME: "XX智能体"
@@ -838,7 +838,7 @@ Fuyao 模式的差异：
 3. 四个 Deployment 换镜像，等滚动完成：
 
    ```bash
-   REG=registry.example/gaussdb-agent; TAG=agent-v1.5.1-oc1.18.27
+   REG=registry.example/gaussdb-agent; TAG=agent-v1.5.2-oc1.18.27
    kubectl -n $NS set image deploy/gateway   gateway=$REG/gaussdb-agent-gateway:$TAG
    kubectl -n $NS set image deploy/frontend  nginx=$REG/gaussdb-agent-frontend:$TAG
    kubectl -n $NS set image deploy/statesvc  statesvc=$REG/gaussdb-agent-runtime:$TAG
@@ -887,9 +887,9 @@ kubectl -n flux-system get ssg | grep sg-gsdb-runtime      # PODS / CAPACITY 变
 虚拟机的 vCPU / 内存由模板决定。**同一版本**要改规格时，用离线包里同一个模板包按新规格另注册一个**新名字**的模板，不要覆盖在用的：
 
 ```bash
-python3 e2b/scripts/build-e2b-template.py --tag agent-v1.5.1-oc1.18.27 --arch arm64 \
-    --from-oci gaussdb-agent-v1.5.1-oc1.18.27-e2b-arm64.oci.tar \
-    --kind runtime --cpu 4 --memory 8192 --template-name gsdb-runtime-v1-5-1-c4m8
+python3 e2b/scripts/build-e2b-template.py --tag agent-v1.5.2-oc1.18.27 --arch arm64 \
+    --from-oci gaussdb-agent-v1.5.2-oc1.18.27-e2b-arm64.oci.tar \
+    --kind runtime --cpu 4 --memory 8192 --template-name gsdb-runtime-v1-5-2-c4m8
 ```
 
 然后：
@@ -1036,7 +1036,7 @@ curl -s -X POST -H "X-Admin-Token: $ADMIN" -H 'Content-Type: application/json' -
 | 架构 | 鲲鹏是 **arm64**。在 arm64 机器上构建最快；在 x86 机器上要交叉构建（`--platform linux/arm64`，需要 buildx 的 QEMU / binfmt 支持），会慢很多 |
 | 磁盘 | 预留 40 GB 以上（两个沙箱镜像各含 6 GB 占位文件，构建过程中要展开） |
 | 外网 | 构建期要访问：Docker Hub（基础镜像 `python:3.12-slim-bookworm`、`nginxinc/nginx-unprivileged:1.27-alpine`、Dockerfile 语法前端 `docker/dockerfile:1.7`）、Debian 软件源、GitHub（opencode 1.18.27 程序包）、`models.dev`（模型清单）、PyPI。**镜像里不保留任何外网依赖**，运行时不联外。内网构建要为以上地址配好代理或镜像源，否则请直接用离线包 |
-| 源码 | 联合仓库 [gh_gs_k8s_agent](https://github.com/sqlrush/gh_gs_k8s_agent) 的发布标签，例如 `agent-v1.5.1`（与离线包同一版本） |
+| 源码 | 联合仓库 [gh_gs_k8s_agent](https://github.com/sqlrush/gh_gs_k8s_agent) 的发布标签，例如 `agent-v1.5.2`（与离线包同一版本） |
 | 标准知识库包 | `kb-std-<代号>-<内容版本>.tar.gz`（官方文档集，如 `kb-std-G25132C-….tar.gz`）。**不在代码仓库里**（官方文档的派生内容），向我方索取；也可以不自己构建 kbstd 镜像，直接用离线包或 GHCR 上的同版本 kbstd 镜像（它的内容只随文档集变化，不随代码变化） |
 
 ### 16.2 取源码
@@ -1044,9 +1044,9 @@ curl -s -X POST -H "X-Admin-Token: $ADMIN" -H 'Content-Type: application/json' -
 ```bash
 git clone https://github.com/sqlrush/gh_gs_k8s_agent.git
 cd gh_gs_k8s_agent
-git checkout agent-v1.5.1
-cat agent/common/VERSION                 # 预期:agent-v1.5.1
-TAG=agent-v1.5.1-oc1.18.27               # 镜像标签 = 发布标签 + opencode 版本
+git checkout agent-v1.5.2
+cat agent/common/VERSION                 # 预期:agent-v1.5.2
+TAG=agent-v1.5.2-oc1.18.27               # 镜像标签 = 发布标签 + opencode 版本
 ```
 
 ### 16.3 制作容器镜像（5 个 + 发版台）
@@ -1071,7 +1071,7 @@ scripts/build-images.sh $TAG-arm64 --platform linux/arm64 --kbstd /path/to/kbstd
 ```bash
 docker image inspect gaussdb-agent-runtime:$TAG --format '{{.Architecture}}'      # 预期 arm64
 docker run --rm --entrypoint cat gaussdb-agent-runtime:$TAG \
-    /opt/agent/config/opencode/skills/common/VERSION                               # 预期 agent-v1.5.1
+    /opt/agent/config/opencode/skills/common/VERSION                               # 预期 agent-v1.5.2
 ```
 
 **推进内网镜像仓库**（任选其一）：
@@ -1090,7 +1090,7 @@ scripts/build-images.sh $TAG --registry registry.example/gaussdb-agent --platfor
 **打成离线包**（可选，格式与我方发布的相同）：
 
 ```bash
-scripts/package-images.sh $TAG --arch arm64 --e2b      # 产物在 dist/gaussdb-agent-v1.5.1-oc1.18.27/,同时做好 §16.4 的沙箱镜像
+scripts/package-images.sh $TAG --arch arm64 --e2b      # 产物在 dist/gaussdb-agent-v1.5.2-oc1.18.27/,同时做好 §16.4 的沙箱镜像
 ```
 
 ### 16.4 制作鲲鹏沙箱镜像（2 个，Fuyao 模板用）
@@ -1121,7 +1121,7 @@ for K in runtime:runtime-e2b kb-import:kbimport-e2b; do
     --build-arg KBSTD_IMAGE=gaussdb-agent-kbstd:$TAG \
     -t gaussdb-agent-${K%%:*}-e2b:$TAG .
 done
-docker save --platform linux/arm64 -o gaussdb-agent-v1.5.1-oc1.18.27-e2b-arm64.oci.tar \
+docker save --platform linux/arm64 -o gaussdb-agent-v1.5.2-oc1.18.27-e2b-arm64.oci.tar \
     gaussdb-agent-runtime-e2b:$TAG gaussdb-agent-kb-import-e2b:$TAG
 ```
 

@@ -55,12 +55,30 @@ def as_bool(value: Any) -> bool:
         return True
     if text in _FALSE:
         return False
+    if is_java_object_text(text):
+        raise ValueError(
+            "布尔列取回来是 %r:中间件把这一列按 Java 对象(字节数组)转成了文字,原值已丢失 —— M 兼容业务库上的布尔列"
+            "就是这样(2026-11-25 现场)。脚本里应把布尔列转成 1/0 输出(CASE WHEN … THEN 1 ELSE 0 END),"
+            "见 agent/tests/test_registry_output_types_units.py;现场请确认白名单已导入最新增量。" % (value,))
     raise ValueError(
         "无法识别的布尔取值 %r。已知形式：%s / %s。"
         "中间件对布尔的渲染形式文档自相矛盾（§3.1 true/false、§3.2 t/f），"
         "遇到新形式请补进 common/grmp/values.py 而不是就地绕过。"
         % (value, "/".join(sorted(_TRUE)), "/".join(sorted(_FALSE - {""})))
     )
+
+
+_JAVA_OBJECT_TEXT = ("[b@", "[c@", "[i@", "[l@")
+
+
+def is_java_object_text(value: Any) -> bool:
+    """形如 [B@276fe535:Java 对数组调 toString() 的样子(类型码 + @ + 对象哈希)。
+
+    现场中间件按 JDBC 类型映射取值再转文字;取出来是字节数组等对象时就成了这样,原值已经丢了,
+    任何解析都只会得到错的结果 —— 调用方遇到它要报错,不能当成某个普通取值(v1.5.2)。
+    """
+    text = str(value or "").strip().lower()
+    return text.startswith(_JAVA_OBJECT_TEXT) and len(text) > 3 and all(c in "0123456789abcdef" for c in text[3:])
 
 
 def as_int(value: Any, default: int = 0) -> int:

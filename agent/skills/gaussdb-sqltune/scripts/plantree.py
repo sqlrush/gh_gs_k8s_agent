@@ -91,9 +91,30 @@ def _as_document(raw: Any) -> Any:
     try:
         return json.loads(text)
     except ValueError as exc:
+        if text.startswith("- Plan:"):
+            return _yaml_document(text)
+        if text.startswith("[B@"):
+            raise PlanParseError(
+                "EXPLAIN 取回来的是 %r —— 中间件把这一列当成字节数组转成了文字(M 兼容业务库上 json 类型的列就是这样),"
+                "原值已丢失。改用 YAML 格式的计划脚本 sqltune.plan_yaml 取" % text[:40]) from exc
         raise PlanParseError(
             "EXPLAIN 输出不是合法 JSON：%s。开头 120 字符：%r"
             % (exc, text[:120])) from exc
+
+
+def _yaml_document(text: str) -> Any:
+    """EXPLAIN (FORMAT YAML) 的输出:与 JSON 同构(同样的键与嵌套),输出列是 text 类型。
+
+    M 兼容业务库上 JSON 计划的列(json 类型)经中间件取不到原值,只能走这一种(v1.5.2)。
+    数据库给 YAML 里的字符串值都加了引号,数值不加,yaml.safe_load 出来的类型与 json.loads 一致。
+    """
+    import yaml
+    try:
+        doc = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise PlanParseError("EXPLAIN 输出不是合法 YAML：%s。开头 120 字符：%r"
+                             % (str(exc).splitlines()[0], text[:120])) from exc
+    return doc
 
 
 def _node(raw: Any, path: str) -> PlanNode:

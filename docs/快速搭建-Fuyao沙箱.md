@@ -1,7 +1,6 @@
 # 快速搭建（鲲鹏 + openFuyao 沙箱，测试环境）
 
-> 适用版本：`agent-v1.5.1`。本文是《Fuyao沙箱部署手册》的**简易版**：只走一条最短的路，按顺序复制命令即可，每条命令下面写着**应该看到的结果**。
-> 本文在该版本发布之后补充，离线包的 `docs/` 目录里没有，以本仓库 main 分支上的这一份为准。
+> 适用版本：`agent-v1.5.2`。本文是《Fuyao沙箱部署手册》的**简易版**：只走一条最短的路，按顺序复制命令即可，每条命令下面写着**应该看到的结果**。
 > 容量规划、升级、扩容、卸载与完整的排障说明，仍以《Fuyao沙箱部署手册》为准。
 >
 > **只用于测试环境。** Fuyao 沙箱模式是预览功能：只接测试数据库、测试账号、测试环境的中间件，不接生产，不填生产令牌。
@@ -136,23 +135,23 @@ timedatectl | grep synchronized
 
 ## 第 1 步：下载安装包并校验
 
-在能上外网的电脑上，打开发布页 <https://github.com/sqlrush/gh_gs_k8s_agent/releases/tag/agent-v1.5.1>，下载这 7 个文件（共约 1.3 GB）：
+在能上外网的电脑上，打开发布页 <https://github.com/sqlrush/gh_gs_k8s_agent/releases/tag/agent-v1.5.2>，下载这 7 个文件（共约 1.3 GB）：
 
 | 文件 | 大小 | 内容 |
 |---|---|---|
-| `gaussdb-agent-v1.5.1-oc1.18.27-arm64.tar.gz` | 459 MB | 5 个 K8s 镜像 |
-| `gaussdb-agent-v1.5.1-oc1.18.27-e2b-arm64.oci.tar` | 843 MB | 2 个沙箱模板镜像 |
-| `gaussdb-agent-v1.5.1-oc1.18.27-k8s.tar.gz` | 1 MB | 部署清单、小工具和全部手册 |
+| `gaussdb-agent-v1.5.2-oc1.18.27-arm64.tar.gz` | 459 MB | 5 个 K8s 镜像 |
+| `gaussdb-agent-v1.5.2-oc1.18.27-e2b-arm64.oci.tar` | 843 MB | 2 个沙箱模板镜像 |
+| `gaussdb-agent-v1.5.2-oc1.18.27-k8s.tar.gz` | 1 MB | 部署清单、小工具和全部手册 |
 | 以上三个文件各自的 `.sha256` | 很小 | 校验值 |
-| `e2b-agent-v1.5.1.tar.gz` | 很小 | 模板注册脚本 |
+| `e2b-agent-v1.5.2.tar.gz` | 很小 | 模板注册脚本 |
 
 用命令下载也可以：
 
 ```bash
-B=https://github.com/sqlrush/gh_gs_k8s_agent/releases/download/agent-v1.5.1
-P=gaussdb-agent-v1.5.1-oc1.18.27
+B=https://github.com/sqlrush/gh_gs_k8s_agent/releases/download/agent-v1.5.2
+P=gaussdb-agent-v1.5.2-oc1.18.27
 for f in $P-arm64.tar.gz $P-e2b-arm64.oci.tar $P-k8s.tar.gz; do curl -fLO $B/$f; curl -fLO $B/$f.sha256; done
-curl -fLO $B/e2b-agent-v1.5.1.tar.gz
+curl -fLO $B/e2b-agent-v1.5.2.tar.gz
 ```
 
 把 7 个文件拷到部署机的同一个目录（本文用 `/root/gsdb`），**拷完先校验**：
@@ -173,14 +172,14 @@ sha256sum -c *.sha256
 
 ```bash
 cd /root/gsdb
-gunzip -c gaussdb-agent-v1.5.1-oc1.18.27-arm64.tar.gz | ctr -n k8s.io images import -
+gunzip -c gaussdb-agent-v1.5.2-oc1.18.27-arm64.tar.gz | ctr -n k8s.io images import -
 ```
 > 若干行 `unpacking … done`，没有 `error`。
 
 ```bash
 ctr -n k8s.io images ls -q | grep gaussdb-agent
 ```
-> 5 行：`runtime`、`kb-import`、`gateway`、`frontend`、`kbstd`，标签都是 `agent-v1.5.1-oc1.18.27`。
+> 5 行：`runtime`、`kb-import`、`gateway`、`frontend`、`kbstd`，标签都是 `agent-v1.5.2-oc1.18.27`。
 
 `-n k8s.io` 不能省：Kubernetes 只认这个命名空间里的镜像，省了会导到别处，Pod 会报找不到镜像。
 
@@ -190,29 +189,29 @@ ctr -n k8s.io images ls -q | grep gaussdb-agent
 
 ## 第 3 步：注册 2 个沙箱模板（模板构建主机，root）
 
-模板构建主机不是部署机时，先把 `gaussdb-agent-v1.5.1-oc1.18.27-e2b-arm64.oci.tar`、它的 `.sha256` 和 `e2b-agent-v1.5.1.tar.gz` 拷到那台主机的 `/root/gsdb`，并再校验一次。
+模板构建主机不是部署机时，先把 `gaussdb-agent-v1.5.2-oc1.18.27-e2b-arm64.oci.tar`、它的 `.sha256` 和 `e2b-agent-v1.5.2.tar.gz` 拷到那台主机的 `/root/gsdb`，并再校验一次。
 
 ```bash
 cd /root/gsdb
-tar xzf e2b-agent-v1.5.1.tar.gz
+tar xzf e2b-agent-v1.5.2.tar.gz
 ls -l /root/.e2b/config.json
 ```
 > 列出这个文件。提示不存在就找平台管理员。**不用打开它**，注册脚本自己会读。
 
 ```bash
-python3 e2b/scripts/build-e2b-template.py --tag agent-v1.5.1-oc1.18.27 --arch arm64 \
-    --from-oci gaussdb-agent-v1.5.1-oc1.18.27-e2b-arm64.oci.tar --cpu 2 --memory 4096
+python3 e2b/scripts/build-e2b-template.py --tag agent-v1.5.2-oc1.18.27 --arch arm64 \
+    --from-oci gaussdb-agent-v1.5.2-oc1.18.27-e2b-arm64.oci.tar --cpu 2 --memory 4096
 ```
 > 先后出现下面四行，中间各隔几分钟：
 
 ```text
-模板构建:注册模板 gsdb-runtime-v1-5-1(…,2 vCPU / 4096 MB)…
-模板构建:模板 gsdb-runtime-v1-5-1 就绪(…秒,templateID …)
-模板构建:注册模板 gsdb-import-v1-5-1(…)…
-模板构建:模板 gsdb-import-v1-5-1 就绪(…秒,templateID …)
+模板构建:注册模板 gsdb-runtime-v1-5-2(…,2 vCPU / 4096 MB)…
+模板构建:模板 gsdb-runtime-v1-5-2 就绪(…秒,templateID …)
+模板构建:注册模板 gsdb-import-v1-5-2(…)…
+模板构建:模板 gsdb-import-v1-5-2 就绪(…秒,templateID …)
 ```
 
-每个模板实测 1 到 6 分钟。得到两个模板名：**`gsdb-runtime-v1-5-1`**（诊断）、**`gsdb-import-v1-5-1`**（导入），第 6 步的配置里已经写好，不用再填。
+每个模板实测 1 到 6 分钟。得到两个模板名：**`gsdb-runtime-v1-5-2`**（诊断）、**`gsdb-import-v1-5-2`**（导入），第 6 步的配置里已经写好，不用再填。
 
 注册期间这台主机的负载会明显升高，**避开别人正在用平台的时段**。脚本可以重复执行。
 
@@ -307,7 +306,7 @@ chmod -R 775 /srv/gaussdb-agent/nas
 ### 6.1 解开清单包
 
 ```bash
-cd /root/gsdb && mkdir -p deploy && tar xzf gaussdb-agent-v1.5.1-oc1.18.27-k8s.tar.gz -C deploy && cd deploy
+cd /root/gsdb && mkdir -p deploy && tar xzf gaussdb-agent-v1.5.2-oc1.18.27-k8s.tar.gz -C deploy && cd deploy
 ls
 ```
 > `docs  k8s`。
@@ -424,8 +423,8 @@ data:
   FUYAO_API: "$FUYAO_API"
   FUYAO_RUNTIME_GROUP: "sg-gsdb-runtime"
   FUYAO_IMPORT_GROUP: "sg-gsdb-import"
-  FUYAO_RUNTIME_TEMPLATE: "gsdb-runtime-v1-5-1"
-  FUYAO_IMPORT_TEMPLATE: "gsdb-import-v1-5-1"
+  FUYAO_RUNTIME_TEMPLATE: "gsdb-runtime-v1-5-2"
+  FUYAO_IMPORT_TEMPLATE: "gsdb-import-v1-5-2"
   PRODUCT_NAME: "$PRODUCT_NAME"
 EOF
 ```
