@@ -11,26 +11,26 @@ GaussDB 数据库智能体的**后端**：把 opencode 与 GaussDB / openGauss �
 
 | 内容 | 位置 | 标签 |
 |---|---|---|
-| 完整源码（构建全部镜像所需） | `main` 的 `agent/`、`docker/`、`frontend/`、`gateway/`、`k8s/`、`release/`、`scripts/`、`acceptance/`、`delivery/` | `agent-v1.5.2` |
-| Fuyao 沙箱模板材料 | `main` 的 [`e2b/`](e2b/)（模板注册脚本、临时仓库、`Dockerfile.e2b`，与离线包的 `e2b/` 逐字节相同） | `agent-v1.5.2` |
-| 面向客户的手册与白名单 | `main` 的 [`docs/`](docs/)（白名单在 `docs/delivery/`） | `agent-v1.5.2` |
-| 诊断技能包 / 知识库导入技能包 | 分支 `diag` / `kbimport`（见下表） | `diag-v1.5.2` / `kbimport-v1.5.2` |
-| 容器镜像与沙箱模板镜像 | `ghcr.io/sqlrush/gaussdb-agent-*:agent-v1.5.2-oc1.18.27`（见下文「Fuyao 沙箱运行模式」） | — |
-| 离线交付包（全部文件：镜像、沙箱模板 OCI 包、K8s 清单与手册、发版台、`release.yaml`、校验文件） | [发布页 agent-v1.5.2](https://github.com/sqlrush/gh_gs_k8s_agent/releases/tag/agent-v1.5.2) 的附件，下载后 `shasum -a 256 -c *.sha256` 核对 | `agent-v1.5.2` |
+| 完整源码（构建全部镜像所需） | `main` 的 `agent/`、`docker/`、`frontend/`、`gateway/`、`k8s/`、`release/`、`scripts/`、`acceptance/`、`delivery/` | `agent-v1.5.3` |
+| Fuyao 沙箱模板材料 | `main` 的 [`e2b/`](e2b/)（模板注册脚本、临时仓库、`Dockerfile.e2b`，与离线包的 `e2b/` 逐字节相同） | `agent-v1.5.3` |
+| 面向客户的手册与白名单 | `main` 的 [`docs/`](docs/)（白名单在 `docs/delivery/`） | `agent-v1.5.3` |
+| 诊断技能包 / 知识库导入技能包 | 分支 `diag` / `kbimport`（见下表） | `diag-v1.5.3` / `kbimport-v1.5.3` |
+| 容器镜像与沙箱模板镜像 | `ghcr.io/sqlrush/gaussdb-agent-*:agent-v1.5.3-oc1.18.27`（见下文「Fuyao 沙箱运行模式」） | — |
+| 离线交付包（全部文件：镜像、沙箱模板 OCI 包、K8s 清单与手册、发版台、`release.yaml`、校验文件） | [发布页 agent-v1.5.3](https://github.com/sqlrush/gh_gs_k8s_agent/releases/tag/agent-v1.5.3) 的附件，下载后 `shasum -a 256 -c *.sha256` 核对 | `agent-v1.5.3` |
 
 代码在开发仓库 [gh_agent_k8s](https://github.com/sqlrush/gh_agent_k8s) 开发，每次发版整体同步到本仓库 `main` 并打同名标签；两个技能包分支由转化脚本 `delivery/transform.py` 从同一发布标签自动生成。**不要在本仓库直接改代码或这两个分支**（转化脚本发现手改会停下），改动在开发仓库做、下次发版同步过来：
 
 | 分支 / 标签 | 内容 | 用在 |
 |---|---|---|
-| [`diag`](https://github.com/sqlrush/gh_gs_k8s_agent/tree/diag) / `diag-v1.5.2` | 诊断技能包：`AGENTS.md`、`common/`、17 个诊断技能 + `gaussdb-kb`、`scripts/registry/`（白名单脚本定义）、`whitelist/`（133 条白名单 DML、历次增量与清单；从 v1.5.1 升级导 `scripts-delta-20261125.sql`（新增 1 条、更新 21 条：在业务库执行的脚本输出列改成 M 兼容库能原样取回的类型，布尔列输出 1/0、名字类列转成文字；新增 YAML 格式执行计划），从 v1.5.0 升级先导 `scripts-delta-20261123.sql` 再导 20261125；从 v1.5.0 升级到 v1.5.1 时导的是 `scripts-delta-20261123.sql`（更新 13 条：M 兼容业务库上报错的脚本改成 A / M 两种兼容模式都能执行的写法，登录探针多取兼容模式），从 v1.4.14 升级先导 `scripts-delta-20261119.sql` 再导 20261123；从 v1.4.14 升级到 v1.5.0 时导的是 `scripts-delta-20261119.sql`（更新 4 条：锁堵塞成对明细、统计信息过期、未使用的索引、内核函数探测的拼接写法），从 v1.4.13 升级先导 `scripts-delta-20261116.sql`（更新 2 条：死元组清单、锁堵塞成对明细的时间差写法）再导 20261119，从 v1.4.11 / v1.4.12 升级先导 `scripts-delta-20261112.sql`（新增 2 条退路脚本；原来 8 条两段 SQL 的脚本不再使用，可以保留）再依次导 20261116、20261119，从 v1.4.10 升级先导 `scripts-delta-20261111.sql`（新增 1、更新 71 条执行库）再导 20261112，从 v1.4.7 ~ v1.4.9 升级依次导 `scripts-delta-20261108.sql`、20261111、20261112，从 v1.4.3 ~ v1.4.6 升级先导 `scripts-delta-20261105.sql`、再依次导 20261108、20261111 与 20261112；更早的版本按上面顺序导完后再依次导 20261116、20261119、20261123、20261125；不确定导到哪一份时，把白名单导出交给我方核对）、`rootspec/search_docs.py`（根规范检索脚本）、`补充说明.md` | 诊断环境 |
-| [`kbimport`](https://github.com/sqlrush/gh_gs_k8s_agent/tree/kbimport) / `kbimport-v1.5.2` | 知识库导入技能包：`AGENTS.md`、`common/`、`gaussdb-kb-import`、`gaussdb-kb-init`、`gaussdb-kb`、`rootspec/search_docs.py`、`补充说明.md` | 知识库导入环境 |
+| [`diag`](https://github.com/sqlrush/gh_gs_k8s_agent/tree/diag) / `diag-v1.5.3` | 诊断技能包：`AGENTS.md`、`common/`、17 个诊断技能 + `gaussdb-kb`、`scripts/registry/`（白名单脚本定义）、`whitelist/`（133 条白名单 DML、历次增量与清单；从 v1.5.2 升级到 v1.5.3 不用导（白名单没变）；从 v1.5.1 升级导 `scripts-delta-20261125.sql`（新增 1 条、更新 21 条：在业务库执行的脚本输出列改成 M 兼容库能原样取回的类型，布尔列输出 1/0、名字类列转成文字；新增 YAML 格式执行计划），从 v1.5.0 升级先导 `scripts-delta-20261123.sql` 再导 20261125；从 v1.5.0 升级到 v1.5.1 时导的是 `scripts-delta-20261123.sql`（更新 13 条：M 兼容业务库上报错的脚本改成 A / M 两种兼容模式都能执行的写法，登录探针多取兼容模式），从 v1.4.14 升级先导 `scripts-delta-20261119.sql` 再导 20261123；从 v1.4.14 升级到 v1.5.0 时导的是 `scripts-delta-20261119.sql`（更新 4 条：锁堵塞成对明细、统计信息过期、未使用的索引、内核函数探测的拼接写法），从 v1.4.13 升级先导 `scripts-delta-20261116.sql`（更新 2 条：死元组清单、锁堵塞成对明细的时间差写法）再导 20261119，从 v1.4.11 / v1.4.12 升级先导 `scripts-delta-20261112.sql`（新增 2 条退路脚本；原来 8 条两段 SQL 的脚本不再使用，可以保留）再依次导 20261116、20261119，从 v1.4.10 升级先导 `scripts-delta-20261111.sql`（新增 1、更新 71 条执行库）再导 20261112，从 v1.4.7 ~ v1.4.9 升级依次导 `scripts-delta-20261108.sql`、20261111、20261112，从 v1.4.3 ~ v1.4.6 升级先导 `scripts-delta-20261105.sql`、再依次导 20261108、20261111 与 20261112；更早的版本按上面顺序导完后再依次导 20261116、20261119、20261123、20261125；不确定导到哪一份时，把白名单导出交给我方核对）、`rootspec/search_docs.py`（根规范检索脚本）、`补充说明.md` | 诊断环境 |
+| [`kbimport`](https://github.com/sqlrush/gh_gs_k8s_agent/tree/kbimport) / `kbimport-v1.5.3` | 知识库导入技能包：`AGENTS.md`、`common/`、`gaussdb-kb-import`、`gaussdb-kb-init`、`gaussdb-kb`、`rootspec/search_docs.py`、`补充说明.md` | 知识库导入环境 |
 
-v1.4.7 起诊断站在应用 DBA / 运维 DBA 的角度（指标异常追到引起它的 SQL、会话、应用、表；处置先改应用、再做运维操作，参数只在典型场景给）。v1.4.8 修复 api 模式登录：中间件按实例 IP 固定连一个库、不按库名切换，原来填业务库名一律登录不了；v1.4.9 起库名与 schema 的限制全部放开（库名核对不拦登录；同名表跨 schema 取一个照常跑），中间件固定连 postgres 时业务库的 SQL 按执行历史调优。v1.4.11 按行方切库方案调用中间件时带 `dbName`：登录时给了业务库（`--database <业务库>`），表、索引、执行计划、统计信息、存储过程就在该业务库上取，SQL 执行历史与 WDR 快照仍在 postgres；白名单要导本版增量，登录看到「已直连」即生效。v1.4.12 起行方白名单没导入该增量时也不报错（取数在 postgres 上），查不到慢存储过程时说清是没切到业务库、参数关着还是还没有调用记录。v1.4.13 是上生产前的稳定版：界面上不出现报错原文（中间件地址、接口路径、实例 ID 不显示，原文进本机诊断日志、报错带详情编号），某一项取不到时写「这一部分无法查询」、其余照常给出；不再发两段 SQL；视图没数据时换 SQL 取。v1.4.14 新增交互耗时分析：`python3 $SK/common/timing/cli.py --last 3 --html /tmp/耗时报告.html` 统计一次提问里每一步（模型等首字、思考与输出、工具中的 GRMP 与数据库、运行时空档）用了多久并写出慢在哪，纯脚本统计、不调模型；修复死元组清单与锁堵塞成对明细在 M 兼容业务库上报 un support type。v1.5.0：部署自检不再中途退出（技能目录里漏放 `scripts/` 时，白名单两项标「无法比对」并说明怎么补，其余照常检查）；4 条在业务库执行的脚本把 `||` 拼接改为 `concat`，修复 M 兼容业务库上报「argument of OR must be type boolean」；安装时 `scripts/` 与 `common/` 放同一层、设置 `GSDB_SKILLS_DIR` 列为必做项；cite-check 认官方文档集的引用；部署自检与发版台按白名单实际缺口列出要依次导入的增量；后端新增 Fuyao 沙箱运行模式（预览）与资源大盘（见下文），只装技能包的环境不受影响。v1.5.1：业务库 M 兼容——现场在 M 兼容业务库上报错的诊断脚本（分区体检、表写入计数、统计信息过期、SQL 审查的表 / 索引清单、过程模糊查找等）改成 A / M 两种兼容模式都能执行的写法；登录识别业务库兼容模式并写进登录输出，M 库上存储过程源码不走 ADM_SOURCE、语句检查与取表名按 MySQL 词法；模型按兼容模式写改写语句（根提示词加 3 行、SQL 调优与存储过程调优的技能说明各加半句、新增 M 兼容写法参考）；部署自检加 `--m-trial`，把 41 条业务库脚本各试跑一次（升级后请跑一次并把输出发回）。v1.5.2：业务库 M 兼容第二轮——M 兼容业务库上中间件把布尔列取成 `[B@…`（原值丢失），健康检查报「无法识别的布尔取值」、SQL 调优与 vacuum 报错、SQL 审查把每张表判成没有主键；在业务库执行的脚本输出列全部改成 M 兼容库能原样取回的类型（布尔输出 1/0、名字类转成文字），新增 YAML 格式执行计划供 M 库上的代价推演用，布尔解析认不出就报错，部署自检 `--m-trial` 检查取回来的值（升级后请在 M 兼容业务库上跑一次并把输出发回）。提示词未改。与 v1.5.1 的代码差异见 [docs/delivery/v1.5.1-v1.5.2-代码差异.md](docs/delivery/v1.5.1-v1.5.2-代码差异.md)；与 v1.5.0 的代码差异见 [docs/delivery/v1.5.0-v1.5.1-代码差异.md](docs/delivery/v1.5.0-v1.5.1-代码差异.md)，v1.4.14 → v1.5.0 见 [docs/delivery/v1.4.14-v1.5.0-代码差异.md](docs/delivery/v1.4.14-v1.5.0-代码差异.md)。每个分支根目录的 `补充说明.md` 写着：版本对应、包内容与技能版本、依赖（Python 包与系统程序）、环境变量（必填 / 默认值）、SQL 白名单与上一版的差异、
+v1.4.7 起诊断站在应用 DBA / 运维 DBA 的角度（指标异常追到引起它的 SQL、会话、应用、表；处置先改应用、再做运维操作，参数只在典型场景给）。v1.4.8 修复 api 模式登录：中间件按实例 IP 固定连一个库、不按库名切换，原来填业务库名一律登录不了；v1.4.9 起库名与 schema 的限制全部放开（库名核对不拦登录；同名表跨 schema 取一个照常跑），中间件固定连 postgres 时业务库的 SQL 按执行历史调优。v1.4.11 按行方切库方案调用中间件时带 `dbName`：登录时给了业务库（`--database <业务库>`），表、索引、执行计划、统计信息、存储过程就在该业务库上取，SQL 执行历史与 WDR 快照仍在 postgres；白名单要导本版增量，登录看到「已直连」即生效。v1.4.12 起行方白名单没导入该增量时也不报错（取数在 postgres 上），查不到慢存储过程时说清是没切到业务库、参数关着还是还没有调用记录。v1.4.13 是上生产前的稳定版：界面上不出现报错原文（中间件地址、接口路径、实例 ID 不显示，原文进本机诊断日志、报错带详情编号），某一项取不到时写「这一部分无法查询」、其余照常给出；不再发两段 SQL；视图没数据时换 SQL 取。v1.4.14 新增交互耗时分析：`python3 $SK/common/timing/cli.py --last 3 --html /tmp/耗时报告.html` 统计一次提问里每一步（模型等首字、思考与输出、工具中的 GRMP 与数据库、运行时空档）用了多久并写出慢在哪，纯脚本统计、不调模型；修复死元组清单与锁堵塞成对明细在 M 兼容业务库上报 un support type。v1.5.0：部署自检不再中途退出（技能目录里漏放 `scripts/` 时，白名单两项标「无法比对」并说明怎么补，其余照常检查）；4 条在业务库执行的脚本把 `||` 拼接改为 `concat`，修复 M 兼容业务库上报「argument of OR must be type boolean」；安装时 `scripts/` 与 `common/` 放同一层、设置 `GSDB_SKILLS_DIR` 列为必做项；cite-check 认官方文档集的引用；部署自检与发版台按白名单实际缺口列出要依次导入的增量；后端新增 Fuyao 沙箱运行模式（预览）与资源大盘（见下文），只装技能包的环境不受影响。v1.5.1：业务库 M 兼容——现场在 M 兼容业务库上报错的诊断脚本（分区体检、表写入计数、统计信息过期、SQL 审查的表 / 索引清单、过程模糊查找等）改成 A / M 两种兼容模式都能执行的写法；登录识别业务库兼容模式并写进登录输出，M 库上存储过程源码不走 ADM_SOURCE、语句检查与取表名按 MySQL 词法；模型按兼容模式写改写语句（根提示词加 3 行、SQL 调优与存储过程调优的技能说明各加半句、新增 M 兼容写法参考）；部署自检加 `--m-trial`，把 41 条业务库脚本各试跑一次（升级后请跑一次并把输出发回）。v1.5.3：老浏览器上的对话页与三条报错提示——Windows 7 上的 Edge 109、Chromium 108 内核的浏览器打开对话页，行内代码显示成黑块（样式用了 111 以上才认的 `color-mix()`），网关给对话页加老浏览器兼容补丁（新浏览器上不起作用，gateway-config 的 `LEGACY_COMPAT` 可关）；中间件回「调用方不存在」时提示核对 `GRMP_APPKEY`，内存分析 WLM 层只回「执行失败」时先说权限并给 DBA 验证 SQL，部署自检 `--m-trial` 标出不交付的脚本。白名单不变（133 条），提示词未改。与 v1.5.2 的代码差异见 [docs/delivery/v1.5.2-v1.5.3-代码差异.md](docs/delivery/v1.5.2-v1.5.3-代码差异.md)。v1.5.2：业务库 M 兼容第二轮——M 兼容业务库上中间件把布尔列取成 `[B@…`（原值丢失），健康检查报「无法识别的布尔取值」、SQL 调优与 vacuum 报错、SQL 审查把每张表判成没有主键；在业务库执行的脚本输出列全部改成 M 兼容库能原样取回的类型（布尔输出 1/0、名字类转成文字），新增 YAML 格式执行计划供 M 库上的代价推演用，布尔解析认不出就报错，部署自检 `--m-trial` 检查取回来的值（升级后请在 M 兼容业务库上跑一次并把输出发回）。提示词未改。与 v1.5.1 的代码差异见 [docs/delivery/v1.5.1-v1.5.2-代码差异.md](docs/delivery/v1.5.1-v1.5.2-代码差异.md)；与 v1.5.0 的代码差异见 [docs/delivery/v1.5.0-v1.5.1-代码差异.md](docs/delivery/v1.5.0-v1.5.1-代码差异.md)，v1.4.14 → v1.5.0 见 [docs/delivery/v1.4.14-v1.5.0-代码差异.md](docs/delivery/v1.4.14-v1.5.0-代码差异.md)。每个分支根目录的 `补充说明.md` 写着：版本对应、包内容与技能版本、依赖（Python 包与系统程序）、环境变量（必填 / 默认值）、SQL 白名单与上一版的差异、
 根规范目录约定、变更摘要。
 
 ```bash
-git clone -b diag-v1.5.2 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-diag          # 诊断技能包
-git clone -b kbimport-v1.5.2 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-kbimport  # 知识库导入技能包
+git clone -b diag-v1.5.3 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-diag          # 诊断技能包
+git clone -b kbimport-v1.5.3 https://github.com/sqlrush/gh_gs_k8s_agent.git gaussdb-kbimport  # 知识库导入技能包
 ```
 
 **拉下来之后要装进正在用的技能目录**，只 clone 不会生效。以技能目录 `/workspace/.opencode/skills` 为例（换成你们环境里的 `$GSDB_SKILLS_DIR`）：
@@ -42,7 +42,7 @@ cp -r gaussdb-diag/common/. $SK/common/
 cp -r gaussdb-diag/scripts/. $SK/scripts/
 cp -r gaussdb-diag/skills/* $SK/
 cp /tmp/config.yaml.bak $SK/common/config.yaml          # 还原本地配置
-cat $SK/common/VERSION                                 # v1.5.2 显示 agent-v1.5.2
+cat $SK/common/VERSION                                 # v1.5.3 显示 agent-v1.5.3
 ```
 
 `AGENTS.md` 放进 opencode 的配置目录。换完**新开对话**（旧对话里读进来的还是旧版技能说明）。
@@ -51,7 +51,7 @@ cat $SK/common/VERSION                                 # v1.5.2 显示 agent-v1.
 
 装完后登录任一实例，在对话里说「做一次部署自检」（或运行 `python3 $SK/gaussdb-login/scripts/selfcheck.py --session <句柄>`）：它核对技能包版本、白名单是否导全、关键脚本能否执行（含执行账号权限）、数据库监控开关，以及（v1.4.11 起）本会话是否切到了业务库、行方白名单里各脚本的执行库与本版是否一致，逐项写明结论和找谁。
 
-`main` 上的代码与发布标签 `agent-v1.5.2` 一致：`git clone -b agent-v1.5.2 https://github.com/sqlrush/gh_gs_k8s_agent.git`，按《[从源码构建到K8s运行-完整手册](docs/从源码构建到K8s运行-完整手册.md)》可以自己构建全部镜像。v1.4.6 及以前的部署上线方案照旧按各自的标签使用。
+`main` 上的代码与发布标签 `agent-v1.5.3` 一致：`git clone -b agent-v1.5.3 https://github.com/sqlrush/gh_gs_k8s_agent.git`，按《[从源码构建到K8s运行-完整手册](docs/从源码构建到K8s运行-完整手册.md)》可以自己构建全部镜像。v1.4.6 及以前的部署上线方案照旧按各自的标签使用。
 
 | 文档 | 给谁 | 内容 |
 |---|---|---|
@@ -86,8 +86,8 @@ cat $SK/common/VERSION                                 # v1.5.2 显示 agent-v1.
 
 | 交付物 | 内容 | 用在 |
 |---|---|---|
-| 5 个 Docker 镜像 + 发版台 | `ghcr.io/sqlrush/gaussdb-agent-{gateway,frontend,runtime,kb-import,kbstd}:agent-v1.5.2-oc1.18.27`（amd64 / arm64 双架构），发版台 `gaussdb-agent-release`；离线包里同样有 | K8s 集群：网关、前端、状态服务与凭据代理服务（runtime 镜像不同入口）、标准知识库安装 Job |
-| 2 个沙箱模板镜像 | `ghcr.io/sqlrush/gaussdb-agent-{runtime-e2b,kb-import-e2b}:agent-v1.5.2-oc1.18.27`（本版只出 arm64）；离线包里是同内容的 OCI 包 `gaussdb-agent-v1.5.2-oc1.18.27-e2b-arm64.oci.tar`。从 GHCR 拉的要先导出成 OCI 包，做法见部署手册 §2.3 | 在平台的模板构建主机上注册成诊断、导入两种沙箱模板 |
+| 5 个 Docker 镜像 + 发版台 | `ghcr.io/sqlrush/gaussdb-agent-{gateway,frontend,runtime,kb-import,kbstd}:agent-v1.5.3-oc1.18.27`（amd64 / arm64 双架构），发版台 `gaussdb-agent-release`；离线包里同样有 | K8s 集群：网关、前端、状态服务与凭据代理服务（runtime 镜像不同入口）、标准知识库安装 Job |
+| 2 个沙箱模板镜像 | `ghcr.io/sqlrush/gaussdb-agent-{runtime-e2b,kb-import-e2b}:agent-v1.5.3-oc1.18.27`（本版只出 arm64）；离线包里是同内容的 OCI 包 `gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64.oci.tar`。从 GHCR 拉的要先导出成 OCI 包，做法见部署手册 §2.3 | 在平台的模板构建主机上注册成诊断、导入两种沙箱模板 |
 | 模板注册脚本 | 本仓库 [`e2b/`](e2b/)（与离线包 `e2b/` 相同）：`e2b/scripts/build-e2b-template.py`、`e2b/scripts/oci-serve.py`、`e2b/docker/Dockerfile.e2b`（`--from-oci` 用上面的 OCI 包，本机起临时只读仓库供平台拉取） | 模板构建主机（root） |
 
 | 文档 | 给谁 | 内容 |

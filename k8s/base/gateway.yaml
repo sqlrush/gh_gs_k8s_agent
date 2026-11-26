@@ -95,7 +95,7 @@ spec:
         - name: gateway
           # base 是直接 kubectl apply -k 的,**不做占位符渲染** —— 这里写具体标签,
           # 平台按实际版本改(和 configmap-agent.yaml 里的样例值一个道理)。
-          image: gaussdb-agent-gateway:agent-v1.5.2-oc1.18.27
+          image: gaussdb-agent-gateway:agent-v1.5.3-oc1.18.27
           imagePullPolicy: IfNotPresent
           securityContext:
             readOnlyRootFilesystem: true        # 网关不写任何东西
@@ -114,6 +114,8 @@ spec:
             # 资源大盘(2026-11-18):运维管理员的角色值;产品名(大盘标题、logo、日报报头)
             - {name: GATEWAY_OPS_ADMIN_ROLES, valueFrom: {configMapKeyRef: {name: gateway-config, key: OPS_ADMIN_ROLES, optional: true}}}
             - {name: GATEWAY_PRODUCT_NAME, valueFrom: {configMapKeyRef: {name: gateway-config, key: PRODUCT_NAME, optional: true}}}
+            # 对话页注入老浏览器兼容补丁(v1.5.3,默认开;填 "0" 关)
+            - {name: GATEWAY_LEGACY_COMPAT, valueFrom: {configMapKeyRef: {name: gateway-config, key: LEGACY_COMPAT, optional: true}}}
             - {name: GATEWAY_REAP_MODE, valueFrom: {configMapKeyRef: {name: gateway-config, key: REAP_MODE, optional: true}}}
             - {name: GATEWAY_IDLE_SECONDS, valueFrom: {configMapKeyRef: {name: gateway-config, key: IDLE_SECONDS, optional: true}}}
             - {name: GATEWAY_TRUST_CIDRS, valueFrom: {configMapKeyRef: {name: gateway-config, key: TRUST_CIDRS, optional: true}}}

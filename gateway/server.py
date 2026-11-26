@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional, Tuple
 
 from . import identity as idt
-from . import kbclip, pods, poolrouter, proxy
+from . import kbclip, legacy, pods, poolrouter, proxy
 from .diagnose import NotReady
 
 _MAX_BODY = 64 * 1024 * 1024        # 上传走网关的话,单请求上限;超过直接 413
@@ -301,6 +301,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._text(403, "无法确认身份。请经统一认证入口访问。")
 
         bare = self.path.split("?", 1)[0]
+        if bare == legacy.SCRIPT_PATH and self.app.cfg.legacy_compat:
+            return self._legacy_script()                # 老浏览器兼容补丁:网关自己出,不进用户环境
         if bare.startswith(DASH_API):
             return self._dash_api(who, bare)            # 大盘的数据接口:网关自己答,不转前端、不建沙箱、不记活动
         if kbclip.handles(bare):
@@ -364,9 +366,34 @@ class _Handler(BaseHTTPRequestHandler):
                               else "无法连接到您的环境,请稍后重试。")
         # 建连时先记一次,免得长连接期间被判闲置;静态页除外
         touch = (lambda: self.app.mgr.touch(who.user_id, kind=kind)) if route != ROUTE_DASH else (lambda: None)
-        self._relay(resp, who, touch, per_bytes=True)
+        self._relay(resp, who, touch, per_bytes=True, compat=route == ROUTE_OPENCODE)
 
-    def _relay(self, resp, who: idt.Identity, touch, per_bytes: bool) -> None:
+    def _legacy_script(self) -> None:
+        data = legacy.script()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/javascript; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
+    def _relay(self, resp, who: idt.Identity, touch, per_bytes: bool, compat: bool = False) -> None:
+        """compat:对话路由上的页面要不要注入老浏览器兼容补丁(见 legacy.py;只改 GET 200 的未压缩 HTML)。"""
+        prefix = b""
+        if compat and self.app.cfg.legacy_compat and legacy.applies(
+                self.command, resp.status, resp.getheader("Content-Type"), resp.getheader("Content-Encoding")):
+            prefix = resp.read(legacy.MAX_HTML + 1)       # 对话页入口约 3 KB;整页读进来才能改
+            if len(prefix) <= legacy.MAX_HTML:
+                resp.close()
+                try:
+                    touch()
+                except pods.EnvironmentGone:
+                    pass                                  # 页面已经取到了,照样给出去
+                # _complete 去掉上游的 Content-Length / Transfer-Encoding,按改过的长度重写
+                return self._complete(resp.status, resp.getheaders(), legacy.inject(prefix))
+            # 超过上限的页面不改:已经读出来的这段先发,其余照常转发
         self.send_response(resp.status)
         for k, v in proxy.response_headers(resp.getheaders()):
             self.send_header(k, v)
@@ -383,6 +410,9 @@ class _Handler(BaseHTTPRequestHandler):
         self._streaming = True
         try:
             touch()
+            if prefix:
+                self._write_chunk(prefix)
+                self.wfile.flush()
             proxy.pump(resp, self._write_chunk, self.wfile.flush, on_bytes=(lambda _n: touch()) if per_bytes else None)
             self.wfile.write(b"0\r\n\r\n")
             self.wfile.flush()
@@ -469,7 +499,7 @@ class _Handler(BaseHTTPRequestHandler):
                     if attempt == 0:
                         continue
                 return self._complete(503, resp.getheaders(), data)
-            return self._relay(resp, who, lambda: None, per_bytes=False)
+            return self._relay(resp, who, lambda: None, per_bytes=False, compat=route == ROUTE_OPENCODE)
 
     def _json_retry(self, code: int, payload: dict, retry_after: int) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")

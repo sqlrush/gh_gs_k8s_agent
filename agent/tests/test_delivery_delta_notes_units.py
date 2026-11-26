@@ -26,7 +26,7 @@ def test_the_notes_in_the_repo_have_no_duplicates_and_cover_this_round():
     notes = dd.load_notes(dd.NOTES.read_text(encoding="utf-8"))
     for name in ("lockwait.pairs", "health.stale_stats", "perf.table_stat", "explain.kernel_funcs"):
         assert "concat" in notes["changed"][name], name
-    # v1.5.2 这一轮:布尔列改 1/0、名字类改 ::text(M 兼容库上取值形态),新增 YAML 计划
+    # v1.5.3 这一轮:布尔列改 1/0、名字类改 ::text(M 兼容库上取值形态),新增 YAML 计划
     for name in ("health.unused_index", "sqltune.indexes", "proctune.indexes", "vacuum.dead_tuples"):
         assert "1/0" in notes["changed"][name] and "::text" in notes["changed"][name], name
     for name in ("sqlreview.tables", "sqlreview.indexes", "health.table_writes"):

@@ -108,6 +108,8 @@ class Config:
     # 沙箱里访问的两个集群服务:虚拟机的 DNS 解析不了集群域名(平台实测),网关下发前解析成 ClusterIP
     fuyao_state_url: str = ""
     fuyao_credproxy_url: str = ""
+    # 对话页注入老浏览器兼容补丁(gateway/legacy.py;v1.5.3,现场 Edge 109 / Chromium 108 行内代码黑块)。默认开,新浏览器上不起作用
+    legacy_compat: bool = True
 
     @property
     def trust_configured(self) -> bool:
@@ -211,6 +213,9 @@ def load(env: Mapping[str, str]) -> Config:
                           "满员时提前转保留就永远轮不到" % (early, idle))
 
     fy = _fuyao(env, runtime_mode == RUNTIME_FUYAO, low, ns)
+    compat = (env.get("GATEWAY_LEGACY_COMPAT") or "1").strip().lower()
+    if compat not in ("1", "0", "true", "false", "yes", "no"):
+        raise ConfigError("GATEWAY_LEGACY_COMPAT=%r 不认识,只能是 1 / 0" % compat)
     product = (env.get("GATEWAY_PRODUCT_NAME") or "").strip() or DEFAULT_PRODUCT_NAME
     if len(product) > PRODUCT_NAME_MAX or any(ord(c) < 32 or c in "<>\"'&" for c in product):
         raise ConfigError("PRODUCT_NAME=%r 不对:至多 %d 个字符,不含控制字符与 < > \" ' &" % (product, PRODUCT_NAME_MAX))
@@ -244,6 +249,7 @@ def load(env: Mapping[str, str]) -> Config:
         pool_wait_seconds=_int(env, "GATEWAY_POOL_WAIT_SECONDS", 60, minimum=low(10)),
         kb_clip_origins=_clip_origins(env.get("GATEWAY_KB_CLIP_ORIGINS") or ""),
         kb_clip_max_mb=clip_mb,
+        legacy_compat=compat in ("1", "true", "yes"),
         **fy,
     )
 

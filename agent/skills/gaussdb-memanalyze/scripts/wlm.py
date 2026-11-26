@@ -29,14 +29,38 @@ from util import f, human_mb, i64, trunc
 _WLM_DENIED = re.compile(r"permission denied for function|permission denied|insufficient privilege|42501", re.I)
 
 
-def _wlm_why(exc) -> str:
+# 中间件执行失败时只回这一句,数据库的原始报错只记在中间件自己的日志里(与 common/grmp/hints.py 同一模式)
+_OPAQUE_FAILURE = "agent诊断脚本执行失败"
+
+# 各脚本读的视图:原因说不清时,让 DBA 用执行账号对这个视图试一条最小的查询
+WLM_VIEWS = {
+    "memanalyze.wlm_sql": "gs_wlm_session_statistics",
+    "memanalyze.wlm_sql_hist": "gs_wlm_session_history",
+    "memanalyze.wlm_operator": "gs_wlm_operator_statistics",
+    "memanalyze.wlm_operator_hist": "gs_wlm_operator_history",
+}
+
+
+def _wlm_why(exc, script: str = "memanalyze.wlm_sql") -> str:
     """WLM 资源跟踪取不到的原因。函数权限不足(2026-11-20 现场:Permission denied for function
-    pg_stat_get_wlm_realtime_session_info)单独说清:不是内核没有这一层,是执行账号没授权 —— DBA 授权后就能看。"""
-    from util import summarize_err
+    pg_stat_get_wlm_realtime_session_info)单独说清:不是内核没有这一层,是执行账号没授权 —— DBA 授权后就能看。
+
+    中间件只回「agent诊断脚本执行失败」(HTTP 400,不带数据库原文)时认不出是不是权限:通用提示列的三种原因里
+    「没切到业务库」对系统视图不成立,而现场实际碰到的正是权限(11-20 直连原文是 permission denied,
+    11-25 经中间件就只剩这一句)。所以这里把权限放在第一位,并给 DBA 一条能当场验证的最小查询。"""
+    from util import HINT_MARK, summarize_err
     raw = summarize_err(exc)
-    if _WLM_DENIED.search(str(exc)):
+    text = str(exc)
+    if _WLM_DENIED.search(text):
         return ("执行账号没有 WLM 资源跟踪函数的执行权限(%s);需 DBA 授权(一般为监控管理员或系统管理员)后才能看这一层"
                 % raw.rstrip("。."))
+    if _OPAQUE_FAILURE in text:
+        view = WLM_VIEWS.get(script, "gs_wlm_session_statistics")
+        first = raw.partition(HINT_MARK)[0].rstrip("。.")
+        return ("中间件只回了「执行失败」,没有带数据库的原始报错(%s)。这一层最常见的原因是执行账号没有 WLM 资源跟踪函数的"
+                "执行权限(已有现场就是这种情况):请 DBA 用中间件的执行账号执行 SELECT count(*) FROM %s —— "
+                "报 permission denied 就是权限问题,授权(一般为监控管理员或系统管理员)后就能看这一层;"
+                "能正常返回则把出错时间交给中间件团队查日志" % (first, view))
     return raw
 
 _SQL_COLS = ("queryid", "query", "start_time", "duration", "estimate_memory",
@@ -198,10 +222,10 @@ def collect_sql(runner, cat: Catalog, cap: Capability, th: Thresholds, top: int,
         return _from_history(runner, th, top, vi.reason)
 
     try:
-        rows = runner.run("memanalyze.wlm_sql_hist" if historical
-                          else "memanalyze.wlm_sql", {"limit": int(top)})
+        script = "memanalyze.wlm_sql_hist" if historical else "memanalyze.wlm_sql"
+        rows = runner.run(script, {"limit": int(top)})
     except access.QueryError as exc:
-        return _from_history(runner, th, top, _wlm_why(exc))
+        return _from_history(runner, th, top, _wlm_why(exc, script))
 
     d = DimResult(dimension=DIM_SQL, available=True,
                   headers=["query_id", "耗时(ms)", "估算内存", "峰值内存",
@@ -286,10 +310,10 @@ def collect_operator(runner, cat: Catalog, cap: Capability, th: Thresholds, top:
         return _l5_unavailable(vi.reason)
 
     try:
-        rows = runner.run("memanalyze.wlm_operator_hist" if historical
-                          else "memanalyze.wlm_operator", {"limit": int(top)})
+        script = "memanalyze.wlm_operator_hist" if historical else "memanalyze.wlm_operator"
+        rows = runner.run(script, {"limit": int(top)})
     except access.QueryError as exc:
-        return _l5_unavailable(_wlm_why(exc))
+        return _l5_unavailable(_wlm_why(exc, script))
 
     d = DimResult(dimension=DIM_OPERATOR, available=True,
                   headers=["query_id", "node_id", "算子", "耗时(ms)", "估算行",

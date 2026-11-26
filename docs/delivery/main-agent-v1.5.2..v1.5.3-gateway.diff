@@ -1,0 +1,1023 @@
+diff --git a/gateway/config.py b/gateway/config.py
+index 7d3ee1b..4033358 100644
+--- a/gateway/config.py
++++ b/gateway/config.py
+@@ -110,2 +110,4 @@ class Config:
+     fuyao_credproxy_url: str = ""
++    # 对话页注入老浏览器兼容补丁(gateway/legacy.py;v1.5.3,现场 Edge 109 / Chromium 108 行内代码黑块)。默认开,新浏览器上不起作用
++    legacy_compat: bool = True
+ 
+@@ -213,2 +215,5 @@ def load(env: Mapping[str, str]) -> Config:
+     fy = _fuyao(env, runtime_mode == RUNTIME_FUYAO, low, ns)
++    compat = (env.get("GATEWAY_LEGACY_COMPAT") or "1").strip().lower()
++    if compat not in ("1", "0", "true", "false", "yes", "no"):
++        raise ConfigError("GATEWAY_LEGACY_COMPAT=%r 不认识,只能是 1 / 0" % compat)
+     product = (env.get("GATEWAY_PRODUCT_NAME") or "").strip() or DEFAULT_PRODUCT_NAME
+@@ -246,2 +251,3 @@ def load(env: Mapping[str, str]) -> Config:
+         kb_clip_max_mb=clip_mb,
++        legacy_compat=compat in ("1", "true", "yes"),
+         **fy,
+diff --git a/gateway/legacy.py b/gateway/legacy.py
+new file mode 100644
+index 0000000..3ad0a62
+--- /dev/null
++++ b/gateway/legacy.py
+@@ -0,0 +1,59 @@
++"""老浏览器兼容补丁(v1.5.3):转发对话页时注入 static/legacy-compat.js,脚本由网关自己出。
++
++现场 Windows 7 上的 Edge 109、360 企业安全浏览器 V13(Chromium 108 内核)打开对话页,行内代码(SQL 编号、函数名、
++技能名)显示成黑块:opencode 网页的样式先把背景设成与文字同色兜底,再用 color-mix() 调浅;color-mix 要 Chrome 111+,
++老内核丢掉这一句只剩兜底 —— 黑底黑字(2026-11-26 两张现场照片,内容没丢,选中可见)。opencode 1.18.27 的样式里
++这样的 color-mix() 有 94 处,另有 18 处 light-dark()(123+)。补丁在老浏览器上把它们换算成老内核认的颜色,
++新浏览器上什么都不做。不改 opencode、不改技能,只在网关这一层。
++
++只动一种响应:对话路由上 GET 回来的 200、``text/html``、未压缩的页面(opencode 的单页入口,约 3 KB)。
++接口、事件流、报告页、大盘、带 Content-Encoding 的响应一律原样转发。
++
++- 引用放在 ``<head>`` **前**:head 里有 opencode 自己的主题预载脚本(从本地存储装主题样式),补丁要先于它执行;
++  HTML 解析器会把它归进 head,行为与写在 head 里一致(dsh-docker 的兼容版同样做法,真 Chromium 108 上验过)。
++- 同源外链、不内联:opencode 的 CSP 是 ``script-src 'self'`` 加一个固定 hash,内联脚本会被浏览器拦下。
++- 关:``GATEWAY_LEGACY_COMPAT=0``(默认开)。
++"""
++from __future__ import annotations
++
++import pathlib
++import re
++from typing import Optional
++
++SCRIPT_PATH = "/__agent/legacy-compat.js"
++TAG = ('<script src="%s"></script>' % SCRIPT_PATH).encode("ascii")
++MAX_HTML = 2 * 1024 * 1024          # 超过这个大小的页面不改(对话页入口约 3 KB;大的多半不是入口页)
++_SCRIPT_FILE = pathlib.Path(__file__).with_name("static") / "legacy-compat.js"
++_HEAD = re.compile(rb"<head(?:\s[^>]*)?>", re.I)
++_DOCTYPE = re.compile(rb"\s*<!doctype[^>]*>", re.I)
++_script_cache: Optional[bytes] = None
++
++
++def script() -> bytes:
++    """补丁脚本的内容(读一次缓存)。文件随网关镜像发布,读不到说明镜像不完整,让它报错。"""
++    global _script_cache
++    if _script_cache is None:
++        _script_cache = _SCRIPT_FILE.read_bytes()
++    return _script_cache
++
++
++def applies(method: str, status: int, content_type: Optional[str], content_encoding: Optional[str]) -> bool:
++    """这个响应要不要改:GET、200、HTML、未压缩。"""
++    if method != "GET" or status != 200:
++        return False
++    if not (content_type or "").lower().startswith("text/html"):
++        return False
++    return (content_encoding or "identity").strip().lower() in ("", "identity")
++
++
++def inject(html: bytes) -> bytes:
++    """在第一个 ``<head>`` 标签前插一行引用;没有 head 就插在 doctype 之后(再没有就放最前)。已经有了不重复插。"""
++    if SCRIPT_PATH.encode("ascii") in html:
++        return html
++    m = _HEAD.search(html)
++    if m:
++        at = m.start()
++    else:
++        d = _DOCTYPE.match(html)
++        at = d.end() if d else 0
++    return html[:at] + TAG + b"\n" + html[at:]
+diff --git a/gateway/server.py b/gateway/server.py
+index 53f51dc..3d9538e 100644
+--- a/gateway/server.py
++++ b/gateway/server.py
+@@ -24,3 +24,3 @@ from typing import Optional, Tuple
+ from . import identity as idt
+-from . import kbclip, pods, poolrouter, proxy
++from . import kbclip, legacy, pods, poolrouter, proxy
+ from .diagnose import NotReady
+@@ -303,2 +303,4 @@ class _Handler(BaseHTTPRequestHandler):
+         bare = self.path.split("?", 1)[0]
++        if bare == legacy.SCRIPT_PATH and self.app.cfg.legacy_compat:
++            return self._legacy_script()                # 老浏览器兼容补丁:网关自己出,不进用户环境
+         if bare.startswith(DASH_API):
+@@ -366,5 +368,30 @@ class _Handler(BaseHTTPRequestHandler):
+         touch = (lambda: self.app.mgr.touch(who.user_id, kind=kind)) if route != ROUTE_DASH else (lambda: None)
+-        self._relay(resp, who, touch, per_bytes=True)
++        self._relay(resp, who, touch, per_bytes=True, compat=route == ROUTE_OPENCODE)
++
++    def _legacy_script(self) -> None:
++        data = legacy.script()
++        self.send_response(200)
++        self.send_header("Content-Type", "text/javascript; charset=utf-8")
++        self.send_header("Cache-Control", "no-cache")
++        self.send_header("X-Content-Type-Options", "nosniff")
++        self.send_header("Content-Length", str(len(data)))
++        self.end_headers()
++        if self.command != "HEAD":
++            self.wfile.write(data)
+ 
+-    def _relay(self, resp, who: idt.Identity, touch, per_bytes: bool) -> None:
++    def _relay(self, resp, who: idt.Identity, touch, per_bytes: bool, compat: bool = False) -> None:
++        """compat:对话路由上的页面要不要注入老浏览器兼容补丁(见 legacy.py;只改 GET 200 的未压缩 HTML)。"""
++        prefix = b""
++        if compat and self.app.cfg.legacy_compat and legacy.applies(
++                self.command, resp.status, resp.getheader("Content-Type"), resp.getheader("Content-Encoding")):
++            prefix = resp.read(legacy.MAX_HTML + 1)       # 对话页入口约 3 KB;整页读进来才能改
++            if len(prefix) <= legacy.MAX_HTML:
++                resp.close()
++                try:
++                    touch()
++                except pods.EnvironmentGone:
++                    pass                                  # 页面已经取到了,照样给出去
++                # _complete 去掉上游的 Content-Length / Transfer-Encoding,按改过的长度重写
++                return self._complete(resp.status, resp.getheaders(), legacy.inject(prefix))
++            # 超过上限的页面不改:已经读出来的这段先发,其余照常转发
+         self.send_response(resp.status)
+@@ -385,2 +412,5 @@ class _Handler(BaseHTTPRequestHandler):
+             touch()
++            if prefix:
++                self._write_chunk(prefix)
++                self.wfile.flush()
+             proxy.pump(resp, self._write_chunk, self.wfile.flush, on_bytes=(lambda _n: touch()) if per_bytes else None)
+@@ -471,3 +501,3 @@ class _Handler(BaseHTTPRequestHandler):
+                 return self._complete(503, resp.getheaders(), data)
+-            return self._relay(resp, who, lambda: None, per_bytes=False)
++            return self._relay(resp, who, lambda: None, per_bytes=False, compat=route == ROUTE_OPENCODE)
+ 
+diff --git a/gateway/static/legacy-compat.js b/gateway/static/legacy-compat.js
+new file mode 100644
+index 0000000..287cfe8
+--- /dev/null
++++ b/gateway/static/legacy-compat.js
+@@ -0,0 +1,600 @@
++/*
++ * 老浏览器兼容补丁(网关在转发对话页时于 <head> 前引用,见 gateway/legacy.py)。
++ *
++ * 现场 Windows 7 上的 Edge 109、360 企业安全浏览器 V13(Chromium 108 内核)打开对话页,行内代码显示成黑块:
++ * opencode 网页的样式先把背景设成与文字同色兜底,再用 color-mix() 调浅;color-mix 要 Chrome 111+,
++ * 老内核丢掉这一句,只剩兜底 —— 黑底黑字。样式里另有 light-dark()(Chrome 123+)。
++ * 这里只补「缺了才补」的东西,新浏览器上什么都不做:
++ *
++ * - CSS:color-mix() 换成运行时算好的颜色变量;light-dark() 按页面当前的深浅色取对应的值。
++ * - JS 接口:Promise.withResolvers、AbortSignal.any、Set 集合运算、Array 的 toSorted 等不改原数组的方法、
++ *   Symbol.dispose、URL.canParse / URL.parse、ReadableStream 的 for await、Iterator 辅助方法、
++ *   Object.groupBy / Map.groupBy、Array.fromAsync、Promise.try、String 的 isWellFormed / toWellFormed、
++ *   crypto.randomUUID(http 访问时浏览器不提供)。
++ *
++ * 与 dsh-docker 的 compat/legacy-compat.js 同源(那边在真 Chromium 108 上验过 dsh 网页),这一份另把 light-dark()
++ * 改成跟随深浅色。结果写在 window.__legacyCompat,便于排查。
++ */
++(function () {
++  "use strict";
++  var report = { version: "2", js: [], css: { colorMix: false, lightDark: false, dark: false, styles: 0, links: 0, colors: 0, unresolved: 0 }, errors: [] };
++  window.__legacyCompat = report;
++
++  function warn(what, err) {
++    report.errors.push(what + ": " + (err && err.message ? err.message : String(err)));
++    try { console.warn("[legacy-compat] " + what, err); } catch (_) { /* 没有 console 也不影响页面 */ }
++  }
++
++  function define(target, name, value, label) {
++    if (target == null || name in target) return;
++    try {
++      Object.defineProperty(target, name, { value: value, writable: true, configurable: true, enumerable: false });
++      report.js.push(label || name);
++    } catch (err) { warn("补 " + (label || name) + " 失败", err); }
++  }
++
++  function guarded(label, fn) {
++    try { fn(); } catch (err) { warn(label, err); }
++  }
++
++  // ---------------------------------------------------------------- Promise
++  guarded("Promise", function () {
++    define(Promise, "withResolvers", function withResolvers() {
++      var out = {};
++      out.promise = new this(function (resolve, reject) { out.resolve = resolve; out.reject = reject; });
++      return out;
++    }, "Promise.withResolvers");
++    define(Promise, "try", function (fn) {
++      var args = Array.prototype.slice.call(arguments, 1);
++      return new this(function (resolve) { resolve(fn.apply(undefined, args)); });
++    }, "Promise.try");
++  });
++
++  // ---------------------------------------------------------------- AbortSignal.any
++  // 合成的信号只弱引用:合成信号被回收后,从各个源信号上摘掉监听,避免长寿命信号上越挂越多。
++  guarded("AbortSignal.any", function () {
++    if (typeof AbortSignal === "undefined" || typeof AbortController === "undefined") return;
++    var controllers = new WeakMap();
++    var cleanup = typeof FinalizationRegistry === "function"
++      ? new FinalizationRegistry(function (held) { held.forEach(function (p) { p[0].removeEventListener("abort", p[1]); }); })
++      : null;
++    define(AbortSignal, "any", function any(signals) {
++      var list = Array.from(signals);
++      var controller = new AbortController();
++      var combined = controller.signal;
++      for (var i = 0; i < list.length; i++) {
++        if (list[i].aborted) { controller.abort(list[i].reason); return combined; }
++      }
++      controllers.set(combined, controller);
++      var ref = typeof WeakRef === "function" ? new WeakRef(combined) : { deref: function () { return combined; } };
++      var pairs = [];
++      var onAbort = function () {
++        var target = ref.deref();
++        pairs.forEach(function (p) { p[0].removeEventListener("abort", p[1]); });
++        if (target && !target.aborted) controllers.get(target).abort(this.reason);
++      };
++      list.forEach(function (s) { s.addEventListener("abort", onAbort); pairs.push([s, onAbort]); });
++      if (cleanup) cleanup.register(combined, pairs);
++      return combined;
++    }, "AbortSignal.any");
++  });
++
++  // ---------------------------------------------------------------- Set 集合运算(参数是「类集合」:有 size / has / keys)
++  guarded("Set", function () {
++    function record(other) {
++      if (other == null || typeof other !== "object" && typeof other !== "function") throw new TypeError("参数不是集合");
++      var size = Number(other.size);
++      if (size !== size) throw new TypeError("集合的 size 不是数字");
++      if (typeof other.has !== "function" || typeof other.keys !== "function") throw new TypeError("集合缺少 has / keys");
++      return { size: size, has: function (v) { return other.has(v); }, each: function (fn) {
++        var it = other.keys(), r;
++        while (!(r = it.next()).done) { if (fn(r.value) === false) { if (typeof it.return === "function") it.return(); return false; } }
++        return true;
++      } };
++    }
++    var P = Set.prototype;
++    define(P, "union", function (other) { var o = record(other), out = new Set(this); o.each(function (v) { out.add(v); }); return out; }, "Set.prototype.union");
++    define(P, "intersection", function (other) {
++      var o = record(other), self = this, out = new Set();
++      if (this.size <= o.size) this.forEach(function (v) { if (o.has(v)) out.add(v); });
++      else o.each(function (v) { if (self.has(v)) out.add(v); });
++      return out;
++    }, "Set.prototype.intersection");
++    define(P, "difference", function (other) {
++      var o = record(other), out = new Set(this);
++      if (this.size <= o.size) this.forEach(function (v) { if (o.has(v)) out.delete(v); });
++      else o.each(function (v) { out.delete(v); });
++      return out;
++    }, "Set.prototype.difference");
++    define(P, "symmetricDifference", function (other) {
++      var o = record(other), self = this, out = new Set(this);
++      o.each(function (v) { if (self.has(v)) out.delete(v); else out.add(v); });
++      return out;
++    }, "Set.prototype.symmetricDifference");
++    define(P, "isSubsetOf", function (other) {
++      var o = record(other), ok = true;
++      if (this.size > o.size) return false;
++      this.forEach(function (v) { if (ok && !o.has(v)) ok = false; });
++      return ok;
++    }, "Set.prototype.isSubsetOf");
++    define(P, "isSupersetOf", function (other) {
++      var o = record(other), self = this;
++      if (this.size < o.size) return false;
++      return o.each(function (v) { return self.has(v); });
++    }, "Set.prototype.isSupersetOf");
++    define(P, "isDisjointFrom", function (other) {
++      var o = record(other), self = this, ok = true;
++      if (this.size <= o.size) { this.forEach(function (v) { if (ok && o.has(v)) ok = false; }); return ok; }
++      return o.each(function (v) { return !self.has(v); });
++    }, "Set.prototype.isDisjointFrom");
++  });
++
++  // ---------------------------------------------------------------- 不改原数组的 Array / TypedArray 方法(Chrome 110)
++  guarded("Array", function () {
++    function copy(arr) { var n = arr.length >>> 0, out = new Array(n); for (var i = 0; i < n; i++) out[i] = arr[i]; return out; }
++    function index(arr, i) { var n = arr.length >>> 0, k = Math.trunc(Number(i)) || 0; k = k < 0 ? n + k : k; if (k < 0 || k >= n) throw new RangeError("下标越界"); return k; }
++    var A = Array.prototype;
++    define(A, "toSorted", function (cmp) {
++      if (cmp !== undefined && typeof cmp !== "function") throw new TypeError("比较函数必须是函数");
++      return copy(this).sort(cmp);
++    }, "Array.prototype.toSorted");
++    define(A, "toReversed", function () { return copy(this).reverse(); }, "Array.prototype.toReversed");
++    define(A, "toSpliced", function () { var out = copy(this); A.splice.apply(out, arguments); return out; }, "Array.prototype.toSpliced");
++    define(A, "with", function (i, value) { var k = index(this, i), out = copy(this); out[k] = value; return out; }, "Array.prototype.with");
++    var TA = typeof Uint8Array === "function" ? Object.getPrototypeOf(Uint8Array.prototype) : null;
++    if (TA) {
++      define(TA, "toSorted", function (cmp) { return this.slice().sort(cmp); }, "TypedArray.prototype.toSorted");
++      define(TA, "toReversed", function () { return this.slice().reverse(); }, "TypedArray.prototype.toReversed");
++      define(TA, "with", function (i, value) { var k = index(this, i), out = this.slice(); out[k] = value; return out; }, "TypedArray.prototype.with");
++    }
++    define(Array, "fromAsync", async function (items, mapFn, thisArg) {
++      var out = [], i = 0, v;
++      if (items != null && typeof items[Symbol.asyncIterator] === "function") {
++        for await (v of items) out.push(mapFn ? await mapFn.call(thisArg, v, i++) : v);
++      } else {
++        var src = items != null && typeof items[Symbol.iterator] === "function" ? items : Array.from(items);
++        for (v of src) { v = await v; out.push(mapFn ? await mapFn.call(thisArg, v, i++) : v); }
++      }
++      return out;
++    }, "Array.fromAsync");
++    function groupInto(items, cb, add) { var i = 0; for (var v of items) add(cb(v, i++), v); }
++    define(Object, "groupBy", function (items, cb) {
++      var out = Object.create(null);
++      groupInto(items, cb, function (k, v) { k = typeof k === "symbol" ? k : String(k); (out[k] || (out[k] = [])).push(v); });
++      return out;
++    }, "Object.groupBy");
++    define(Map, "groupBy", function (items, cb) {
++      var out = new Map();
++      groupInto(items, cb, function (k, v) { if (!out.has(k)) out.set(k, []); out.get(k).push(v); });
++      return out;
++    }, "Map.groupBy");
++  });
++
++  // ---------------------------------------------------------------- String
++  guarded("String", function () {
++    var lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/;
++    define(String.prototype, "isWellFormed", function () { return !lone.test(String(this)); }, "String.prototype.isWellFormed");
++    define(String.prototype, "toWellFormed", function () {
++      return String(this).replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|([^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]/g, function (m, pre) {
++        return pre === undefined ? "\uFFFD" : pre + "\uFFFD";
++      });
++    }, "String.prototype.toWellFormed");
++  });
++
++  // ---------------------------------------------------------------- Symbol.dispose / asyncDispose
++  guarded("Symbol", function () {
++    define(Symbol, "dispose", Symbol("Symbol.dispose"), "Symbol.dispose");
++    define(Symbol, "asyncDispose", Symbol("Symbol.asyncDispose"), "Symbol.asyncDispose");
++  });
++
++  // ---------------------------------------------------------------- URL.canParse / URL.parse
++  guarded("URL", function () {
++    define(URL, "canParse", function (url, base) { try { new URL(url, base); return true; } catch (_) { return false; } }, "URL.canParse");
++    define(URL, "parse", function (url, base) { try { return new URL(url, base); } catch (_) { return null; } }, "URL.parse");
++  });
++
++  // ---------------------------------------------------------------- ReadableStream 的 for await(Chrome 124)
++  guarded("ReadableStream", function () {
++    if (typeof ReadableStream === "undefined") return;
++    var P = ReadableStream.prototype;
++    var values = function (options) {
++      var reader = this.getReader(), preventCancel = !!(options && options.preventCancel);
++      return (async function* () {
++        var finished = false;
++        try {
++          for (;;) {
++            var r = await reader.read();
++            if (r.done) { finished = true; return; }
++            yield r.value;
++          }
++        } finally {
++          if (!finished && !preventCancel) { try { await reader.cancel(); } catch (_) { /* 已经出错的流取消失败无妨 */ } }
++          try { reader.releaseLock(); } catch (_) { /* 锁已释放 */ }
++        }
++      })();
++    };
++    define(P, "values", values, "ReadableStream.prototype.values");
++    define(P, Symbol.asyncIterator, values, "ReadableStream.prototype[Symbol.asyncIterator]");
++  });
++
++  // ---------------------------------------------------------------- Iterator 辅助方法(Chrome 122)
++  guarded("Iterator", function () {
++    var IP = Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]()));
++    function close(it) { if (typeof it.return === "function") { try { it.return(); } catch (_) { /* 关闭失败不影响结果 */ } } }
++    function lazy(it, step) {
++      return (function* () {
++        var done = false;
++        try {
++          for (var i = 0; ; i++) { var r = it.next(); if (r.done) { done = true; return; } var out = step(r.value, i); if (out === STOP) return; if (out !== SKIP) yield* out; }
++        } finally { if (!done) close(it); }
++      })();
++    }
++    var SKIP = {}, STOP = {};
++    function fn(f) { if (typeof f !== "function") throw new TypeError("参数必须是函数"); return f; }
++    define(IP, "map", function (f) { fn(f); return lazy(this, function (v, i) { return [f(v, i)]; }); }, "Iterator.prototype.map");
++    define(IP, "filter", function (f) { fn(f); return lazy(this, function (v, i) { return f(v, i) ? [v] : SKIP; }); }, "Iterator.prototype.filter");
++    define(IP, "take", function (n) { var left = Number(n); return lazy(this, function (v) { return left-- > 0 ? [v] : STOP; }); }, "Iterator.prototype.take");
++    define(IP, "drop", function (n) { var left = Number(n); return lazy(this, function (v) { return left-- > 0 ? SKIP : [v]; }); }, "Iterator.prototype.drop");
++    define(IP, "flatMap", function (f) { fn(f); return lazy(this, function (v, i) { return { [Symbol.iterator]: function () { var r = f(v, i); return r[Symbol.iterator] ? r[Symbol.iterator]() : r; } }; }); }, "Iterator.prototype.flatMap");
++    function each(it, f) { for (var i = 0; ; i++) { var r = it.next(); if (r.done) return true; if (f(r.value, i) === false) { close(it); return false; } } }
++    define(IP, "toArray", function () { var out = []; each(this, function (v) { out.push(v); }); return out; }, "Iterator.prototype.toArray");
++    define(IP, "forEach", function (f) { fn(f); each(this, function (v, i) { f(v, i); }); }, "Iterator.prototype.forEach");
++    define(IP, "some", function (f) { fn(f); var hit = false; each(this, function (v, i) { if (f(v, i)) { hit = true; return false; } }); return hit; }, "Iterator.prototype.some");
++    define(IP, "every", function (f) { fn(f); return each(this, function (v, i) { return !!f(v, i); }); }, "Iterator.prototype.every");
++    define(IP, "find", function (f) { fn(f); var found; each(this, function (v, i) { if (f(v, i)) { found = v; return false; } }); return found; }, "Iterator.prototype.find");
++    define(IP, "reduce", function (f) {
++      fn(f); var hasInit = arguments.length > 1, acc = arguments[1], first = !hasInit;
++      each(this, function (v, i) { if (first) { acc = v; first = false; } else acc = f(acc, v, i); });
++      if (first) throw new TypeError("空迭代器且没有初始值");
++      return acc;
++    }, "Iterator.prototype.reduce");
++    if (typeof globalThis.Iterator === "undefined") {
++      var Iterator = function Iterator() { if (new.target === undefined || new.target === Iterator) throw new TypeError("Iterator 不能直接构造"); };
++      Iterator.prototype = IP;
++      Iterator.from = function (o) {
++        var it = typeof o[Symbol.iterator] === "function" ? o[Symbol.iterator]() : o;
++        if (IP.isPrototypeOf(it)) return it;
++        return (function* () { yield* { [Symbol.iterator]: function () { return it; } }; })();
++      };
++      define(globalThis, "Iterator", Iterator, "Iterator");
++    }
++  });
++
++  // ---------------------------------------------------------------- crypto.randomUUID(非 https 页面上浏览器不提供)
++  guarded("crypto.randomUUID", function () {
++    var c = globalThis.crypto;
++    if (!c || typeof c.getRandomValues !== "function" || typeof c.randomUUID === "function") return;
++    var target = typeof Crypto === "function" && c instanceof Crypto ? Crypto.prototype : c;
++    define(target, "randomUUID", function () {
++      var b = c.getRandomValues(new Uint8Array(16));
++      b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
++      var h = Array.from(b, function (x) { return (x + 0x100).toString(16).slice(1); }).join("");
++      return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
++    }, "crypto.randomUUID");
++  });
++
++  // ================================================================ CSS:color-mix() / light-dark()
++  var supports = function (decl) { try { return CSS.supports(decl); } catch (_) { return true; } };
++  var lowerMix = !supports("color: color-mix(in srgb, red 50%, blue)");
++  var lowerLightDark = !supports("color: light-dark(red, blue)");
++  report.css.colorMix = lowerMix;
++  report.css.lightDark = lowerLightDark;
++  if (!lowerMix && !lowerLightDark) return;
++
++  var NEEDS = new RegExp((lowerMix ? ["color-mix\\("] : []).concat(lowerLightDark ? ["light-dark\\("] : []).join("|"), "i");
++  var mixes = [];            // [{ id, space, c1, p1, c2, p2 }]
++  var mixIds = new Map();    // 归一后的表达式 → 编号
++  var lds = [];              // light-dark():[{ id, light, dark }]
++  var ldIds = new Map();
++
++  function closeParen(text, open) {
++    var depth = 0, quote = null;
++    for (var i = open; i < text.length; i++) {
++      var ch = text[i];
++      if (quote) { if (ch === "\\") i++; else if (ch === quote) quote = null; continue; }
++      if (ch === "'" || ch === '"') quote = ch;
++      else if (ch === "(") depth++;
++      else if (ch === ")" && --depth === 0) return i;
++    }
++    return -1;
++  }
++
++  function splitTop(text) {
++    var parts = [], depth = 0, start = 0;
++    for (var i = 0; i < text.length; i++) {
++      var ch = text[i];
++      if (ch === "(") depth++;
++      else if (ch === ")") depth--;
++      else if (ch === "," && depth === 0) { parts.push(text.slice(start, i).trim()); start = i + 1; }
++    }
++    parts.push(text.slice(start).trim());
++    return parts;
++  }
++
++  // 找下一个函数调用 name(...);内层不再含同名调用的才处理(由内向外)
++  function replaceCalls(text, name, render) {
++    var re = new RegExp("(^|[^\\w-])" + name + "\\(", "gi"), changed = true, guard = 0;
++    while (changed && guard++ < 50) {
++      changed = false;
++      re.lastIndex = 0;
++      var out = "", last = 0, m;
++      while ((m = re.exec(text))) {
++        var start = m.index + m[1].length, open = start + name.length, end = closeParen(text, open);
++        if (end < 0) break;
++        var inner = text.slice(open + 1, end);
++        if (new RegExp("(^|[^\\w-])" + name + "\\(", "i").test(inner)) continue;  // 先处理里层
++        var rep = render(inner, text, start);
++        if (rep === null) continue;
++        out += text.slice(last, start) + rep;
++        last = end + 1;
++        re.lastIndex = last;
++        changed = true;
++      }
++      text = out + text.slice(last);
++    }
++    return text;
++  }
++
++  // 「颜色 百分比」或「百分比 颜色」。压缩过的样式里两者之间可能没有空格(var(--x)25%);
++  // 百分比也可能是变量(var(--x)var(--mix-pct),opencode 行内代码的底色就是这样),留到运行时再取值。
++  // rgb(0 0 0 / 50%) 这类以括号结尾的颜色不会被误认成「颜色 + 百分比」。
++  var VAR_TAIL = /^([\s\S]*\))\s*(var\(\s*--[\w-]+\s*(?:,[^()]*)?\))$/;
++  function parsePart(part) {
++    var m = /^(\d*\.?\d+)%\s*([\s\S]+)$/.exec(part);
++    if (m) return { color: m[2].trim(), pct: parseFloat(m[1]) / 100 };
++    m = /^([\s\S]*?\))\s*(\d*\.?\d+)%$/.exec(part) || /^([\s\S]+?)\s+(\d*\.?\d+)%$/.exec(part);
++    if (m) return { color: m[1].trim(), pct: parseFloat(m[2]) / 100 };
++    m = VAR_TAIL.exec(part);
++    if (m && /^(var|rgb|rgba|hsl|hsla|color-mix)\(/i.test(m[1].trim())) return { color: m[1].trim(), pct: null, pctVar: m[2] };
++    return { color: part, pct: null };
++  }
++
++  // 这个位置所在规则的选择器(不在声明块里 —— 比如 @supports 的条件里 —— 返回空串)。
++  // 变量只在某个区域里定义时(opencode 的行内代码底色比例只在消息区里有),要在那个区域的元素上取值。
++  function ruleSelector(text, pos) {
++    var depth = 0, i = pos - 1;
++    for (; i >= 0; i--) {
++      var ch = text[i];
++      if (ch === ")") depth++;
++      else if (ch === "(") depth--;
++      else if (depth <= 0 && (ch === "{" || ch === "}")) break;
++    }
++    if (i < 0 || text[i] !== "{") return "";
++    var j = i - 1;
++    while (j >= 0 && text[j] !== "{" && text[j] !== "}" && text[j] !== ";") j--;
++    var sel = text.slice(j + 1, i).trim();
++    return sel && sel.charAt(0) !== "@" ? sel : "";
++  }
++
++  function mixVar(inner, text, pos) {
++    var parts = splitTop(inner);
++    if (parts.length !== 3 || !/^in\s/i.test(parts[0])) return null;
++    var key = inner.replace(/\s+/g, " ").trim();
++    if (!mixIds.has(key)) {
++      var a = parsePart(parts[1]), b = parsePart(parts[2]);
++      mixIds.set(key, mixes.length);
++      mixes.push({ id: mixes.length, space: parts[0].slice(3).trim(), c1: a.color, p1: a.pct, v1: a.pctVar || null,
++                   c2: b.color, p2: b.pct, v2: b.pctVar || null, sel: text ? ruleSelector(text, pos) : "" });
++    }
++    return "var(--legacy-compat-mix-" + mixIds.get(key) + ")";
++  }
++
++  function lowerMixOnly(text) {
++    return lowerMix ? replaceCalls(text, "color-mix", mixVar) : text;
++  }
++
++  // light-dark(浅, 深) → var(--legacy-compat-ld-N);两个值里的 color-mix 先换掉(变量的值原样代入,老内核不认就整句失效)
++  function ldVar(inner) {
++    var p = splitTop(inner);
++    if (p.length !== 2) return null;
++    var key = inner.replace(/\s+/g, " ").trim();
++    if (!ldIds.has(key)) {
++      ldIds.set(key, lds.length);
++      lds.push({ id: lds.length, light: lowerMixOnly(p[0]), dark: lowerMixOnly(p[1]) });
++    }
++    return "var(--legacy-compat-ld-" + ldIds.get(key) + ")";
++  }
++
++  function lowerCss(text) {
++    if (lowerLightDark) text = replaceCalls(text, "light-dark", ldVar);
++    return lowerMixOnly(text);
++  }
++
++  // 页面当前是不是深色:看根元素实际的 color-scheme(opencode 切主题时改它);「light dark」跟随系统
++  function isDark() {
++    var cs = "";
++    try { cs = getComputedStyle(document.documentElement).colorScheme || ""; } catch (_) { /* 取不到按浅色 */ }
++    var hasDark = /\bdark\b/.test(cs), hasLight = /\blight\b/.test(cs);
++    if (hasDark && !hasLight) return true;
++    if (hasDark && hasLight) return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
++    return false;
++  }
++
++  // ---- 运行时求值:在 body 里放一个隐藏探针,让 var() 按当前主题展开,再按 srgb 预乘 alpha 混合
++  var probe = null, colorsStyle = null;
++
++  function rgba(probeEl, colorText) {
++    probeEl.style.setProperty("--legacy-compat-probe", colorText);
++    var raw = getComputedStyle(probeEl).getPropertyValue("--legacy-compat-probe").trim();
++    if (!raw || NEEDS.test(raw) || !supports("color: " + raw)) return null;
++    probeEl.style.color = "";
++    probeEl.style.color = raw;
++    var m = /rgba?\(([^)]+)\)/.exec(getComputedStyle(probeEl).color);
++    if (!m) return null;
++    var n = m[1].split(/[\s,\/]+/).filter(Boolean).map(parseFloat);
++    return [n[0], n[1], n[2], n.length > 3 ? n[3] : 1];
++  }
++
++  // 在区域元素上展开 var(--x[, 兜底]);不是单个 var() 的原样返回(交给探针按全局展开)
++  var SINGLE_VAR = /^var\(\s*(--[\w-]+)\s*(?:,\s*([\s\S]*))?\)$/;
++  function inScope(el, expr) {
++    var m = el && SINGLE_VAR.exec(expr);
++    if (!m) return expr;
++    var v = getComputedStyle(el).getPropertyValue(m[1]).trim();
++    return v || (m[2] || "").trim() || expr;
++  }
++
++  // 变量给的百分比:按当前主题展开后取数(「8%」→ 0.08);取不到返回 undefined
++  function pctOf(expr, el) {
++    probe.style.setProperty("--legacy-compat-probe", inScope(el, expr));
++    var raw = getComputedStyle(probe).getPropertyValue("--legacy-compat-probe").trim();
++    var m = /^(\d*\.?\d+)%$/.exec(raw);
++    return m ? parseFloat(m[1]) / 100 : undefined;
++  }
++
++  // 规则选择器对应的页面元素(去掉 :hover、::before 这类当前匹配不上的伪类 / 伪元素);没有就返回 null
++  function scopeOf(sel) {
++    var tries = [sel, sel.replace(/::?(hover|focus-visible|focus-within|focus|active|visited|before|after|placeholder|selection|marker|first-line|first-letter)\b/g, "")];
++    for (var i = 0; i < tries.length; i++) {
++      try { var el = document.querySelector(tries[i]); if (el) return el; } catch (_) { /* 老内核不认的选择器 */ }
++    }
++    return null;
++  }
++
++  function mixOne(e, el) {
++    var c1 = rgba(probe, inScope(el, e.c1)), c2 = rgba(probe, inScope(el, e.c2));
++    if (!c1 || !c2) return null;
++    var p1 = e.v1 ? pctOf(e.v1, el) : e.p1, p2 = e.v2 ? pctOf(e.v2, el) : e.p2;
++    if (p1 === undefined || p2 === undefined) return null;
++    if (p1 == null && p2 == null) { p1 = 0.5; p2 = 0.5; } else if (p1 == null) p1 = 1 - p2; else if (p2 == null) p2 = 1 - p1;
++    var sum = p1 + p2;
++    if (!(sum > 0)) return null;
++    var scale = sum < 1 ? sum : 1;
++    p1 /= sum; p2 /= sum;
++    var a = c1[3] * p1 + c2[3] * p2;
++    if (a === 0) return "rgba(0, 0, 0, 0)";
++    var ch = function (i) { return Math.round((c1[i] * c1[3] * p1 + c2[i] * c2[3] * p2) / a); };
++    return "rgba(" + ch(0) + ", " + ch(1) + ", " + ch(2) + ", " + +(a * scale).toFixed(4) + ")";
++  }
++
++  function computeColors() {
++    if ((!mixes.length && !lds.length) || !document.body) return;
++    if (!probe) {
++      probe = document.createElement("span");
++      probe.setAttribute("aria-hidden", "true");
++      probe.style.display = "none";
++    }
++    if (probe.parentNode !== document.body) document.body.appendChild(probe);
++    if (!colorsStyle) {
++      colorsStyle = document.createElement("style");
++      colorsStyle.setAttribute("data-legacy-compat", "colors");
++      own.add(colorsStyle);
++    }
++    if (!colorsStyle.isConnected) document.head.appendChild(colorsStyle);
++    var dark = isDark();
++    report.css.dark = dark;
++    var ldDecls = lds.map(function (e) { return "--legacy-compat-ld-" + e.id + ":" + (dark ? e.dark : e.light); });
++    var bad = 0;
++    for (var pass = 0; pass < 4; pass++) {   // 颜色变量互相引用时多算几轮;结果不再变化就停
++      var decls = ldDecls.slice(), missed = [];
++      bad = 0;
++      mixes.forEach(function (e) {
++        var v = mixOne(e, null);
++        if (!v && e.sel) { var el = scopeOf(e.sel); if (el) v = mixOne(e, el); }
++        if (v) decls.push("--legacy-compat-mix-" + e.id + ":" + v);
++        else { bad++; if (missed.length < 12) missed.push(e.c1 + " | " + e.c2 + (e.sel ? " @ " + e.sel.slice(0, 80) : "")); }
++      });
++      report.css.unresolvedSamples = missed;   // 排查用:算不出来的前几条(两个颜色参数原文与所在规则)
++      report.css.colors = decls.length - ldDecls.length;
++      report.css.unresolved = bad;
++      var text = ":root{" + decls.join(";") + "}";
++      if (text === colorsStyle.textContent) break;
++      colorsStyle.textContent = text;
++    }
++    clearTimeout(retry);
++    if (bad) retry = setTimeout(schedule, 3000);
++  }
++  var retry = 0;
++
++  var pending = 0;
++  function schedule() {
++    if (pending) return;
++    pending = setTimeout(function () { pending = 0; guarded("计算颜色", computeColors); }, 30);
++  }
++
++  // ---- 样式来源:<style>(插件运行时插入)和 <link rel=stylesheet>(打包的静态样式,取回文本改写后替换)
++  var own = new WeakSet(), lastText = new WeakMap(), seenLinks = new WeakSet(), watched = new WeakSet();
++  var styles = null;         // 盯样式的观察者(下面创建)
++
++  function handleStyle(st) {
++    if (own.has(st)) return;
++    if (styles && !watched.has(st)) {
++      watched.add(st);
++      styles.observe(st, { childList: true, characterData: true, subtree: true });
++    }
++    var text = st.textContent;
++    if (lastText.get(st) === text || !NEEDS.test(text)) return;
++    var lowered = lowerCss(text);
++    lastText.set(st, lowered);
++    st.textContent = lowered;
++    report.css.styles++;
++    schedule();
++  }
++
++  function rebase(css, href) {
++    return css.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, function (all, q, u) {
++      if (/^(data:|[a-z][a-z0-9+.-]*:|#|\/)/i.test(u)) return all;
++      try { return "url(" + q + new URL(u, href).href + q + ")"; } catch (_) { return all; }
++    });
++  }
++
++  function handleLink(link) {
++    if (seenLinks.has(link) || !/(^|\s)stylesheet(\s|$)/i.test(link.rel || "") || !link.href) return;
++    seenLinks.add(link);
++    var href = link.href;
++    fetch(href, { credentials: "same-origin" })
++      .then(function (r) { return r.ok ? r.text() : null; })
++      .then(function (text) {
++        if (!text || !NEEDS.test(text)) return;
++        var st = document.createElement("style");
++        st.setAttribute("data-legacy-compat", href);
++        own.add(st);
++        st.textContent = rebase(lowerCss(text), href);
++        link.parentNode.insertBefore(st, link.nextSibling);
++        link.disabled = true;
++        report.css.links++;
++        schedule();
++      })
++      .catch(function (err) { warn("改写样式 " + href + " 失败", err); });
++  }
++
++  // 只看直接插入的 <style> / <link>(插件样式都直接插进 head),不遍历新增节点的子树,免得聊天流式输出时白耗
++  function visit(node) {
++    if (node.nodeType !== 1) return;
++    if (node.nodeName === "STYLE") handleStyle(node);
++    else if (node.nodeName === "LINK") handleLink(node);
++  }
++
++  guarded("监听样式", function () {
++    styles = new MutationObserver(function (records) {
++      for (var i = 0; i < records.length; i++) {
++        var r = records[i], t = r.target;
++        if (r.type === "childList") {
++          for (var j = 0; j < r.addedNodes.length; j++) visit(r.addedNodes[j]);
++          if (t.nodeName === "STYLE") handleStyle(t);
++        } else if (r.type === "characterData" && t.parentNode && t.parentNode.nodeName === "STYLE") {
++          handleStyle(t.parentNode);
++        }
++      }
++    });
++    // 从 document 本身看起:补丁可能早于 <html> 节点执行(此时 documentElement 还是 null)。
++    // 每个 <style> 的文字改动在 handleStyle 里单独盯,不对整页看文字改动(对话流式输出时那会很频繁)。
++    styles.observe(document, { childList: true, subtree: true });
++    // 主题切换:只看 html / body 自身的属性(不限属性名:各家切深浅色改的属性不同)
++    var themeAttrs = { attributes: true };
++    var theme = new MutationObserver(schedule);
++    if (document.documentElement) theme.observe(document.documentElement, themeAttrs);
++    var watchBody = function () {
++      if (document.documentElement) theme.observe(document.documentElement, themeAttrs);
++      if (document.body) theme.observe(document.body, themeAttrs);
++      document.querySelectorAll("style, link[rel~=stylesheet]").forEach(visit);
++      schedule();
++    };
++    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", watchBody); else watchBody();
++    window.addEventListener("load", schedule);
++    if (window.matchMedia) {
++      var mq = window.matchMedia("(prefers-color-scheme: dark)");
++      if (mq.addEventListener) mq.addEventListener("change", schedule);
++    }
++  });
++})();
+diff --git a/gateway/tests/test_legacy_units.py b/gateway/tests/test_legacy_units.py
+new file mode 100644
+index 0000000..0315dd7
+--- /dev/null
++++ b/gateway/tests/test_legacy_units.py
+@@ -0,0 +1,269 @@
++"""对话页注入老浏览器兼容补丁(v1.5.3,gateway/legacy.py)。
++
++现场 Edge 109 / 360 企业安全浏览器(Chromium 108)上对话页的行内代码是黑块(color-mix() 要 111+)。网关转发 opencode 的
++单页入口时在 <head> 前插一行同源脚本引用,脚本由网关自己出。要钉住的:
++① 只改对话路由上 GET 200 的未压缩 HTML,长度按改过的重写;接口、事件流、压缩过的、报告页一律原样;
++② 引用在 opencode 主题预载脚本之前(<head> 前),且是同源外链(opencode 的 CSP 拦内联脚本);
++③ 固定池化(含 Fuyao)与按需建两条转发路径都生效;④ GATEWAY_LEGACY_COMPAT=0 能关。
++"""
++import dataclasses
++import gzip
++import pathlib
++import sys
++import threading
++import urllib.error
++import urllib.request
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++
++import pytest
++
++_ROOT = pathlib.Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(_ROOT))
++
++from gateway import config as gwconfig  # noqa: E402
++from gateway import legacy, pods, server  # noqa: E402
++from gateway.tests.test_pods_units import FakeKube  # noqa: E402
++from gateway.tests.test_server_pool_units import Router  # noqa: E402
++
++SECRET = "s" * 32
++# opencode 1.18.27 单页入口的开头(真实形态:html 上有 style,head 里先是 meta,再是主题预载脚本)
++INDEX = (b'<!doctype html>\n<html lang="en" style="background-color: var(--v2-background-bg-deep, #fafafa)">\n'
++         b'  <head>\n    <meta charset="utf-8" />\n    <title>OpenCode</title>\n'
++         b'    <script id="oc-theme-preload-script">;(function(){})()</script>\n'
++         b'    <script type="module" crossorigin src="/assets/index-Cfi2YXOE.js"></script>\n'
++         b'  </head>\n  <body><div id="root"></div></body>\n</html>\n')
++CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-x'; style-src 'self' 'unsafe-inline'"
++
++
++class _Opencode(BaseHTTPRequestHandler):
++    protocol_version = "HTTP/1.1"
++
++    def _send(self, body: bytes, ctype: str, extra=(), chunked=False):
++        self.send_response(200)
++        self.send_header("Content-Type", ctype)
++        for k, v in extra:
++            self.send_header(k, v)
++        if chunked:
++            self.send_header("Transfer-Encoding", "chunked")
++            self.end_headers()
++            for i in range(0, len(body), 40):
++                part = body[i:i + 40]
++                self.wfile.write(b"%x\r\n" % len(part) + part + b"\r\n")
++            self.wfile.write(b"0\r\n\r\n")
++            return
++        self.send_header("Content-Length", str(len(body)))
++        self.end_headers()
++        if self.command != "HEAD":
++            self.wfile.write(body)
++
++    def do_GET(self):
++        p = self.path
++        if p == "/gz":
++            return self._send(gzip.compress(INDEX), "text/html", [("Content-Encoding", "gzip")])
++        if p == "/chunked":
++            return self._send(INDEX, "text/html; charset=utf-8", chunked=True)
++        if p == "/api":
++            return self._send(b'{"html": "<head>"}', "application/json")
++        if p == "/event":
++            return self._send(b"data: <head>\n\n", "text/event-stream")
++        if p == "/big":
++            return self._send(b"<html><head></head><body>" + b"x" * (legacy.MAX_HTML + 10) + b"</body></html>",
++                              "text/html")
++        return self._send(INDEX, "text/html", [("Content-Security-Policy", CSP), ("ETag", '"v1"')])
++
++    do_HEAD = do_GET
++
++    def do_POST(self):
++        return self._send(INDEX, "text/html")
++
++    def log_message(self, *a):
++        pass
++
++
++def _serve(handler):
++    srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
++    threading.Thread(target=srv.serve_forever, daemon=True).start()
++    return srv
++
++
++def _gateway(env_extra=None):
++    oc = _serve(_Opencode)
++    env = {"GATEWAY_NAMESPACE": "ns", "GATEWAY_IMAGE_TAG": "t", "GATEWAY_TRUST_SECRET": SECRET}
++    env.update(env_extra or {})
++    cfg = dataclasses.replace(gwconfig.load(env), port=0)
++    mgr = pods.Manager(FakeKube(), namespace="ns", image_tag="t", pull_policy="IfNotPresent",
++                       templates=_ROOT / "k8s" / "templates")
++    app = server.App(cfg, mgr, log=lambda m: None, pool=Router(oc.server_address[1], oc.server_address[1]))
++    g = server.serve(app)
++    threading.Thread(target=g.serve_forever, daemon=True).start()
++    return "http://127.0.0.1:%d" % g.socket.getsockname()[1], (g, oc)
++
++
++@pytest.fixture()
++def gw():
++    base, servers = _gateway()
++    yield base
++    for s in servers:
++        s.shutdown()
++        s.server_close()
++
++
++def _get(base, path, method="GET", user="u1234", headers=None):
++    h = {"X-Agent-User": user, "X-Agent-Trust": SECRET, "Accept": "text/html"}
++    h.update(headers or {})
++    r = urllib.request.Request(base + path, headers=h, method=method, data=b"{}" if method == "POST" else None)
++    try:
++        with urllib.request.urlopen(r, timeout=10) as resp:
++            return resp.status, resp.headers, resp.read()
++    except urllib.error.HTTPError as exc:
++        return exc.code, exc.headers, exc.read()
++
++
++# ---------------------------------------------------------------- 纯函数
++
++def test_inject_puts_the_tag_before_head_and_only_once():
++    out = legacy.inject(INDEX)
++    tag = legacy.TAG
++    assert out.count(tag) == 1 and out.index(tag) < out.index(b"<head>") < out.index(b"oc-theme-preload-script")
++    assert out.replace(tag + b"\n", b"") == INDEX, "除了插一行,一字不改"
++    assert legacy.inject(out) == out, "已经注入过的不重复"
++
++
++def test_inject_without_head_goes_after_the_doctype_or_first():
++    assert legacy.inject(b"<!doctype html><p>x</p>").startswith(b"<!doctype html>" + legacy.TAG)
++    assert legacy.inject(b"<p>x</p>").startswith(legacy.TAG)
++    assert b"<header>" in legacy.inject(b"<html><header>a</header>"), "<header> 不是 <head>"
++    assert legacy.inject(b"<html><header>a</header>").index(legacy.TAG) == 0
++
++
++@pytest.mark.parametrize("method,status,ctype,enc,want", [
++    ("GET", 200, "text/html", None, True),
++    ("GET", 200, "text/html; charset=utf-8", "identity", True),
++    ("HEAD", 200, "text/html", None, False),
++    ("POST", 200, "text/html", None, False),
++    ("GET", 304, "text/html", None, False),
++    ("GET", 200, "text/html", "gzip", False),
++    ("GET", 200, "application/json", None, False),
++    ("GET", 200, "text/event-stream", None, False),
++    ("GET", 200, None, None, False),
++])
++def test_applies_only_to_plain_html_pages(method, status, ctype, enc, want):
++    assert legacy.applies(method, status, ctype, enc) is want
++
++
++def test_the_script_ships_with_the_gateway_and_is_the_compat_patch():
++    js = legacy.script().decode("utf-8")
++    assert "color-mix" in js and "light-dark" in js and "withResolvers" in js and "__legacyCompat" in js
++    assert "dsh" not in js.split("*/", 1)[1], "名字已改成通用的(dsh 只在注释里说明来源)"
++
++
++# ---------------------------------------------------------------- 经网关(固定池化 / Fuyao 走这条)
++
++def test_chat_page_gets_the_reference_with_a_correct_length_and_keeps_its_csp(gw):
++    code, headers, body = _get(gw, "/")
++    assert code == 200 and body == legacy.inject(INDEX)
++    assert int(headers["Content-Length"]) == len(body) and "chunked" not in (headers.get("Transfer-Encoding") or "")
++    assert headers["Content-Security-Policy"] == CSP, "CSP 不动:补丁是同源脚本,script-src 'self' 放行"
++    assert headers["ETag"] == '"v1"'
++
++
++def test_chunked_chat_page_is_injected_too(gw):
++    code, _h, body = _get(gw, "/chunked")
++    assert code == 200 and body == legacy.inject(INDEX)
++
++
++@pytest.mark.parametrize("path", ["/api", "/event", "/gz"])
++def test_apis_event_streams_and_compressed_pages_pass_through_untouched(gw, path):
++    _code, _h, body = _get(gw, path)
++    assert legacy.TAG not in body
++    if path == "/gz":
++        assert gzip.decompress(body) == INDEX
++
++
++def test_head_and_post_pass_through(gw):
++    code, _headers, body = _get(gw, "/", method="HEAD")
++    assert code == 200 and body == b"", "HEAD 照原样转发(没有消息体,也就无从注入)"
++    _c, _h, body = _get(gw, "/", method="POST")
++    assert legacy.TAG not in body
++
++
++def test_oversized_html_is_forwarded_whole_and_unchanged(gw):
++    code, _h, body = _get(gw, "/big")
++    assert code == 200 and legacy.TAG not in body and len(body) == len(b"<html><head></head><body></body></html>") + legacy.MAX_HTML + 10
++
++
++def test_report_pages_are_not_touched(gw):
++    _c, _h, body = _get(gw, "/reports/x.html")
++    assert legacy.TAG not in body and body == INDEX
++
++
++def test_the_gateway_serves_the_script_itself(gw):
++    code, headers, body = _get(gw, legacy.SCRIPT_PATH)
++    assert code == 200 and body == legacy.script()
++    assert headers["Content-Type"].startswith("text/javascript") and headers["X-Content-Type-Options"] == "nosniff"
++    code, _h, body = _get(gw, legacy.SCRIPT_PATH, method="HEAD")
++    assert code == 200 and body == b""
++
++
++def test_the_script_still_needs_a_trusted_request():
++    """与其它路径一样先认人:不可信来源拿不到(网关不对外说任何东西)。"""
++    base, servers = _gateway()
++    try:
++        r = urllib.request.Request(base + legacy.SCRIPT_PATH, headers={"X-Agent-User": "u1234"})
++        with pytest.raises(urllib.error.HTTPError) as ei:
++            urllib.request.urlopen(r, timeout=10)
++        assert ei.value.code == 403
++    finally:
++        for s in servers:
++            s.shutdown()
++            s.server_close()
++
++
++def test_it_can_be_switched_off():
++    base, servers = _gateway({"GATEWAY_LEGACY_COMPAT": "0"})
++    try:
++        _c, _h, body = _get(base, "/")
++        assert body == INDEX
++        _c, _h, body = _get(base, legacy.SCRIPT_PATH)
++        assert body == INDEX, "关掉后这个路径不归网关,照常转给 opencode"
++    finally:
++        for s in servers:
++            s.shutdown()
++            s.server_close()
++
++
++def test_config_rejects_a_typo():
++    with pytest.raises(gwconfig.ConfigError):
++        gwconfig.load({"GATEWAY_NAMESPACE": "ns", "GATEWAY_IMAGE_TAG": "t", "GATEWAY_TRUST_SECRET": SECRET,
++                       "GATEWAY_LEGACY_COMPAT": "on"})
++    assert gwconfig.load({"GATEWAY_NAMESPACE": "ns", "GATEWAY_IMAGE_TAG": "t",
++                          "GATEWAY_TRUST_SECRET": SECRET}).legacy_compat is True
++
++
++# ---------------------------------------------------------------- 按需建 Pod 的转发路径
++
++def test_on_demand_path_injects_too(monkeypatch):
++    oc = _serve(_Opencode)
++    cfg = dataclasses.replace(gwconfig.load({"GATEWAY_NAMESPACE": "ns", "GATEWAY_IMAGE_TAG": "t",
++                                             "GATEWAY_TRUST_SECRET": SECRET}), port=0)
++    mgr = pods.Manager(FakeKube(), namespace="ns", image_tag="t", pull_policy="IfNotPresent",
++                       templates=_ROOT / "k8s" / "templates")
++    monkeypatch.setattr(pods.Manager, "state", lambda self, uid, kind=pods.KIND_RUNTIME:
++                        pods.PodState(uid, kind, exists=True, ready=True))
++    port = oc.server_address[1]
++    monkeypatch.setattr("gateway.proxy.Upstream.__init__",
++                        lambda self, host, port_=4096, connect_timeout=10.0, retries=4:
++                        (setattr(self, "host", "127.0.0.1"), setattr(self, "port", port),
++                         setattr(self, "connect_timeout", 2.0), setattr(self, "retries", 1)) and None)
++    g = server.serve(server.App(cfg, mgr, log=lambda m: None))
++    threading.Thread(target=g.serve_forever, daemon=True).start()
++    try:
++        base = "http://127.0.0.1:%d" % g.socket.getsockname()[1]
++        _c, _h, body = _get(base, "/")
++        assert body == legacy.inject(INDEX)
++        _c, _h, body = _get(base, "/dash/index.html")
++        assert legacy.TAG not in body, "大盘是我们自己的页面,不注入"
++    finally:
++        for s in (g, oc):
++            s.shutdown()
++            s.server_close()

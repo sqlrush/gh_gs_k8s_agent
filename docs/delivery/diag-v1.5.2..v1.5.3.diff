@@ -1,0 +1,151 @@
+diff --git a/.delivery.json b/.delivery.json
+index b20e657..b6de844 100644
+--- a/.delivery.json
++++ b/.delivery.json
+@@ -3,16 +3,16 @@
+   "package": "diag",
+-  "version": "diag-v1.5.2",
++  "version": "diag-v1.5.3",
+   "source": {
+     "repo": "gh_agent_k8s",
+-    "ref": "agent-v1.5.2",
+-    "commit": "9f501ff55e669c51456c5b3b6dd48e225de326c8",
+-    "date": "2026-11-25T17:22:34+08:00"
++    "ref": "agent-v1.5.3",
++    "commit": "0eb959432915f8ec4f8d0fcdb29b9707e42be2e9",
++    "date": "2026-11-26T23:50:34+08:00"
+   },
+   "base": {
+-    "version": "diag-v1.5.1",
++    "version": "diag-v1.5.2",
+     "source": {
+       "repo": "gh_agent_k8s",
+-      "ref": "agent-v1.5.1",
+-      "commit": "a91425d72c649ed5ba75d4a9b04312f47c7a1986",
+-      "date": "2026-11-23T18:41:49+08:00"
++      "ref": "agent-v1.5.2",
++      "commit": "9f501ff55e669c51456c5b3b6dd48e225de326c8",
++      "date": "2026-11-25T17:22:34+08:00"
+     }
+@@ -20,3 +20,3 @@
+   "files": 438,
+-  "digest": "beecad7e485fb8ce21b7bbc54e50d657001aae640f13aaa13ffabe9769c2783b"
++  "digest": "46bc4ac2ebd84860f3cc9218e2b237482c8e17f6d0d727f70e73aa458ca0c72f"
+ }
+diff --git a/common/VERSION b/common/VERSION
+index 870a221..13ad4af 100644
+--- a/common/VERSION
++++ b/common/VERSION
+@@ -1 +1 @@
+-agent-v1.5.2
++agent-v1.5.3
+diff --git a/common/grmp/hints.py b/common/grmp/hints.py
+index 523727c..b6d8d2a 100644
+--- a/common/grmp/hints.py
++++ b/common/grmp/hints.py
+@@ -30,2 +30,9 @@ _HINTS: Sequence[Tuple[Tuple[str, ...], str]] = (
+     (("在目标高斯实例中不存在",), ""),                 # 占位:文案由 _db_missing_hint 按库名空 / 非空生成
++    # 中间件认不出调用方(2026-11-26 现场:新部署的容器版登录失败,模型把它猜成「库名不被受理」)。现场 09-18 加固后
++    # 中间件按三道门验请求:调用方范围(Appkey 已登记)→ 重放(Timestamp)→ 签名;第一道不过就回这一句。
++    # 客户端在 GRMP_APPKEY 为空时根本不带 Appkey / Timestamp / Signature 三个头,新部署漏填它是最常见的成因
++    (("调用方不存在",),
++     "中间件认不出调用方:请求里没带 Appkey,或带的 Appkey 没在中间件登记。这与库名、实例、SQL 都无关,不要让 DBA 改库。"
++     "请部署人员核对智能体配置(K8s 部署是 agent-config)里的 GRMP_APPKEY:整个智能体共用一个,由中间件团队分配,"
++     "照原来能用的那套配置填,不能留空;同时确认本人的中间件令牌(grmp-token-<工号>)已配置。改完重新打开对话再登录"),
+     (("查询不到对应高斯实例", "instance not found"),
+diff --git a/skills/gaussdb-login/scripts/selfcheck.py b/skills/gaussdb-login/scripts/selfcheck.py
+index 3711fd9..8ee0402 100644
+--- a/skills/gaussdb-login/scripts/selfcheck.py
++++ b/skills/gaussdb-login/scripts/selfcheck.py
+@@ -283,2 +283,18 @@ M_JSON_FALLBACK = {"sqltune.plan_json": "sqltune.plan_yaml"}
+ 
++NOT_DELIVERED = "本版不交付:没有技能调用这条脚本,不用试跑(中间件白名单里留着也无妨)"
++
++
++def _used_or_none(registry) -> Optional[set]:
++    """本版有技能调用的脚本;本地脚本定义整个读不到时返回 None(那时谁交付、谁不交付都判断不了)。
++
++    业务库名单(common/grmp/routing.py)是数据,里面有 2 条不交付的(v1.5.3 起按这里跳过):技能包只带交付的定义,
++    原先这 2 条会被报成「读不到本地脚本定义(scripts/ 没放进技能目录)」,原因写错(1.5.1 起);
++    容器里带着全部定义,原先会真去试跑 —— 两种部署结论不一致。"""
++    try:
++        if registry is None or not registry.names():
++            return None
++        return used_names(registry)
++    except Exception:  # noqa: BLE001 —— 判断不了就按原样逐条试跑
++        return None
++
+ 
+@@ -292,2 +308,3 @@ def trial_business(conn, runner, registry) -> List[List[str]]:
+     mysql = compat.is_mysql_like(conn)
++    used = _used_or_none(registry)
+     rows = []
+@@ -297,2 +314,5 @@ def trial_business(conn, runner, registry) -> List[List[str]]:
+             continue
++        if used is not None and name not in used:
++            rows.append([name, SKIP, NOT_DELIVERED])
++            continue
+         if client is not None and not client.registered(name):
+diff --git a/skills/gaussdb-memanalyze/scripts/wlm.py b/skills/gaussdb-memanalyze/scripts/wlm.py
+index 348e1a0..9a59745 100644
+--- a/skills/gaussdb-memanalyze/scripts/wlm.py
++++ b/skills/gaussdb-memanalyze/scripts/wlm.py
+@@ -31,10 +31,34 @@ _WLM_DENIED = re.compile(r"permission denied for function|permission denied|insu
+ 
+-def _wlm_why(exc) -> str:
++# 中间件执行失败时只回这一句,数据库的原始报错只记在中间件自己的日志里(与 common/grmp/hints.py 同一模式)
++_OPAQUE_FAILURE = "agent诊断脚本执行失败"
++
++# 各脚本读的视图:原因说不清时,让 DBA 用执行账号对这个视图试一条最小的查询
++WLM_VIEWS = {
++    "memanalyze.wlm_sql": "gs_wlm_session_statistics",
++    "memanalyze.wlm_sql_hist": "gs_wlm_session_history",
++    "memanalyze.wlm_operator": "gs_wlm_operator_statistics",
++    "memanalyze.wlm_operator_hist": "gs_wlm_operator_history",
++}
++
++
++def _wlm_why(exc, script: str = "memanalyze.wlm_sql") -> str:
+     """WLM 资源跟踪取不到的原因。函数权限不足(2026-11-20 现场:Permission denied for function
+-    pg_stat_get_wlm_realtime_session_info)单独说清:不是内核没有这一层,是执行账号没授权 —— DBA 授权后就能看。"""
+-    from util import summarize_err
++    pg_stat_get_wlm_realtime_session_info)单独说清:不是内核没有这一层,是执行账号没授权 —— DBA 授权后就能看。
++
++    中间件只回「agent诊断脚本执行失败」(HTTP 400,不带数据库原文)时认不出是不是权限:通用提示列的三种原因里
++    「没切到业务库」对系统视图不成立,而现场实际碰到的正是权限(11-20 直连原文是 permission denied,
++    11-25 经中间件就只剩这一句)。所以这里把权限放在第一位,并给 DBA 一条能当场验证的最小查询。"""
++    from util import HINT_MARK, summarize_err
+     raw = summarize_err(exc)
+-    if _WLM_DENIED.search(str(exc)):
++    text = str(exc)
++    if _WLM_DENIED.search(text):
+         return ("执行账号没有 WLM 资源跟踪函数的执行权限(%s);需 DBA 授权(一般为监控管理员或系统管理员)后才能看这一层"
+                 % raw.rstrip("。."))
++    if _OPAQUE_FAILURE in text:
++        view = WLM_VIEWS.get(script, "gs_wlm_session_statistics")
++        first = raw.partition(HINT_MARK)[0].rstrip("。.")
++        return ("中间件只回了「执行失败」,没有带数据库的原始报错(%s)。这一层最常见的原因是执行账号没有 WLM 资源跟踪函数的"
++                "执行权限(已有现场就是这种情况):请 DBA 用中间件的执行账号执行 SELECT count(*) FROM %s —— "
++                "报 permission denied 就是权限问题,授权(一般为监控管理员或系统管理员)后就能看这一层;"
++                "能正常返回则把出错时间交给中间件团队查日志" % (first, view))
+     return raw
+@@ -200,6 +224,6 @@ def collect_sql(runner, cat: Catalog, cap: Capability, th: Thresholds, top: int,
+     try:
+-        rows = runner.run("memanalyze.wlm_sql_hist" if historical
+-                          else "memanalyze.wlm_sql", {"limit": int(top)})
++        script = "memanalyze.wlm_sql_hist" if historical else "memanalyze.wlm_sql"
++        rows = runner.run(script, {"limit": int(top)})
+     except access.QueryError as exc:
+-        return _from_history(runner, th, top, _wlm_why(exc))
++        return _from_history(runner, th, top, _wlm_why(exc, script))
+ 
+@@ -288,6 +312,6 @@ def collect_operator(runner, cat: Catalog, cap: Capability, th: Thresholds, top:
+     try:
+-        rows = runner.run("memanalyze.wlm_operator_hist" if historical
+-                          else "memanalyze.wlm_operator", {"limit": int(top)})
++        script = "memanalyze.wlm_operator_hist" if historical else "memanalyze.wlm_operator"
++        rows = runner.run(script, {"limit": int(top)})
+     except access.QueryError as exc:
+-        return _l5_unavailable(_wlm_why(exc))
++        return _l5_unavailable(_wlm_why(exc, script))
+ 

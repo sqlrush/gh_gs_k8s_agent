@@ -281,6 +281,22 @@ def _trial_params(registry, name: str):
 # M 兼容库上 json 类型的列经中间件取不到原值(v1.5.2):这几条有 text 类型的替身,调用方遇到时自动改用替身
 M_JSON_FALLBACK = {"sqltune.plan_json": "sqltune.plan_yaml"}
 
+NOT_DELIVERED = "本版不交付:没有技能调用这条脚本,不用试跑(中间件白名单里留着也无妨)"
+
+
+def _used_or_none(registry) -> Optional[set]:
+    """本版有技能调用的脚本;本地脚本定义整个读不到时返回 None(那时谁交付、谁不交付都判断不了)。
+
+    业务库名单(common/grmp/routing.py)是数据,里面有 2 条不交付的(v1.5.3 起按这里跳过):技能包只带交付的定义,
+    原先这 2 条会被报成「读不到本地脚本定义(scripts/ 没放进技能目录)」,原因写错(1.5.1 起);
+    容器里带着全部定义,原先会真去试跑 —— 两种部署结论不一致。"""
+    try:
+        if registry is None or not registry.names():
+            return None
+        return used_names(registry)
+    except Exception:  # noqa: BLE001 —— 判断不了就按原样逐条试跑
+        return None
+
 
 def trial_business(conn, runner, registry) -> List[List[str]]:
     """--m-trial:业务库脚本各跑一次。返回表格行 [脚本, 结果, 说明]。只读:目录查询与不执行的估算计划。
@@ -290,10 +306,14 @@ def trial_business(conn, runner, registry) -> List[List[str]]:
     """
     client = getattr(runner, "client", None)
     mysql = compat.is_mysql_like(conn)
+    used = _used_or_none(registry)
     rows = []
     for name in sorted(routing.BUSINESS_DB_SCRIPTS):
         if mysql and name in M_NOT_APPLICABLE:
             rows.append([name, SKIP, "不适用:" + M_NOT_APPLICABLE[name]])
+            continue
+        if used is not None and name not in used:
+            rows.append([name, SKIP, NOT_DELIVERED])
             continue
         if client is not None and not client.registered(name):
             rows.append([name, WARN, "中间件白名单里没有这条脚本(按本版增量导入)"])

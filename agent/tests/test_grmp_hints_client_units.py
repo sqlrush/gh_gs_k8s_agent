@@ -184,3 +184,26 @@ def test_the_bank_middlewares_opaque_failure_gets_an_honest_hint():
     assert "这一项无法查询" in h and "不影响其余部分" in h
     assert "中间件日志" in h and "未直连" in h and "权限" in h
     assert "改库" not in h and "授权" not in h, "生产权限与参数固定,不能把动作指向改库 / 授权"
+
+
+def test_unknown_caller_points_at_the_appkey_not_at_the_database():
+    """2026-11-26 现场:新部署的容器版登录失败,中间件只回「调用方不存在」,模型把它猜成「库名不被受理」。
+    中间件第一道门(调用方范围)认的是 Appkey,与库名无关;GRMP_APPKEY 留空时客户端根本不带 Appkey 头。"""
+    for raw in ("查询命令清单失败：调用方不存在",
+                "调用中间件失败：HTTP 403 Forbidden；中间件返回：调用方不存在"):
+        h = hints.explain(raw)
+        assert "GRMP_APPKEY" in h and "不能留空" in h and "grmp-token-<工号>" in h, h
+        assert "与库名、实例、SQL 都无关" in h and "不要让 DBA 改库" in h
+    shown = hints.with_hint("查询命令清单失败：调用方不存在")
+    assert shown.startswith("查询命令清单失败：调用方不存在\n提示:"), "原文一字不动,提示跟在后面"
+
+
+def test_unknown_caller_reaches_the_user_through_the_list_call(monkeypatch):
+    """接口一业务错误也是 HTTP 200 + code≠0:这条路同样要带上提示。"""
+    c = GrmpClient.__new__(GrmpClient)
+    c.list_path, c.data_ip = "/list", "10.0.0.1"
+    monkeypatch.setattr(c, "_post", lambda path, payload: {"code": "1", "msg": "调用方不存在"}, raising=False)
+    with pytest.raises(GrmpError) as ei:
+        c.list_operations()
+    assert "调用方不存在" in str(ei.value) and "GRMP_APPKEY" in str(ei.value)
+

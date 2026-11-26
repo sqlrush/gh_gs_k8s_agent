@@ -684,6 +684,29 @@ def test_sql_layer_falls_back_when_the_wlm_query_fails():
     assert d.available is True and d.rows[0][0] == "11" and "取不到" in d.note
 
 
+class _OpaqueRunner:
+    """WLM 视图经中间件只回「agent诊断脚本执行失败」(11-25 现场 L4 / L5 的样子);其余脚本返回空。"""
+    OPAQUE = "调用中间件失败：HTTP 400 Bad Request；中间件返回：agent诊断脚本执行失败"
+
+    def run(self, script, values=None):
+        from common import access
+        if "wlm_" in script:
+            raise access.QueryError(self.OPAQUE)
+        return []
+
+
+def test_opaque_wlm_failure_tells_the_dba_which_view_to_try():
+    """原先这两层只剩通用提示(头一条「没切到业务库」对系统视图不成立),权限提示一次也没出现过。"""
+    cap = capability.assess(dict(_PREREQ_ON), _catalog(wlm_session="gs_wlm_session_statistics",
+                                                       wlm_operator="gs_wlm_operator_statistics"))
+    cat = _catalog(wlm_session="gs_wlm_session_statistics", wlm_operator="gs_wlm_operator_statistics")
+    l4 = wlm.collect_sql(_OpaqueRunner(), cat, cap, TH, 10)
+    assert "WLM 资源跟踪函数的执行权限" in l4.note and "SELECT count(*) FROM gs_wlm_session_statistics" in l4.note
+    assert "这一项无法查询" in l4.note, "历史也取不到时照旧兜底"
+    l5 = wlm.collect_operator(_OpaqueRunner(), cat, cap, TH, 10)
+    assert "SELECT count(*) FROM gs_wlm_operator_statistics" in l5.note
+
+
 def test_sql_layer_without_any_source_says_this_part_cannot_be_queried():
     """openGauss 没有 used_memory 列:两条路都取不到 → 如实写「这一项无法查询,不影响其余结论」,不报错退出。"""
     r = _FakeRunner(fail=("sql_mem_history",))

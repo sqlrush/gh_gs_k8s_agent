@@ -87,6 +87,26 @@ def test_wlm_permission_denied_is_explained(wlm):
     assert "执行权限" not in other
 
 
+# 中间件执行失败的原样形态:原文 + common/grmp/hints.py 追加的通用提示(11-25 现场照片里 L4 / L5 就是这样)
+_OPAQUE = ("调用中间件失败：HTTP 400 Bad Request；中间件返回：agent诊断脚本执行失败\n"
+           "提示:这一项无法查询,不影响其余部分的结论与报告。常见原因:① SQL 用到的表在业务库里……")
+
+
+@pytest.mark.parametrize("script,view", [
+    ("memanalyze.wlm_sql", "gs_wlm_session_statistics"),
+    ("memanalyze.wlm_sql_hist", "gs_wlm_session_history"),
+    ("memanalyze.wlm_operator", "gs_wlm_operator_statistics"),
+    ("memanalyze.wlm_operator_hist", "gs_wlm_operator_history"),
+])
+def test_wlm_opaque_middleware_failure_puts_permission_first(wlm, script, view):
+    """11-25 现场:L4 / L5 经中间件只回「agent诊断脚本执行失败」,原先只有通用提示(头一条是「没切到业务库」,
+    对系统视图不成立),权限提示一次也没出现过 —— 而 11-20 直连时原文正是 permission denied。"""
+    why = wlm._wlm_why(QueryError(_OPAQUE), script)
+    assert "WLM 资源跟踪函数的执行权限" in why and ("SELECT count(*) FROM %s" % view) in why, why
+    assert "中间件团队查日志" in why and "agent诊断脚本执行失败" in why, "原文照旧带上"
+    assert "业务库" not in why, "通用提示里「没切到业务库」对系统视图不成立,不再跟着出现"
+
+
 # ---------------- 部署自检 ----------------
 _LOGIN = _ROOT / "skills" / "gaussdb-login" / "scripts"
 
@@ -135,6 +155,50 @@ def test_m_trial_runs_all_business_scripts_readonly(sc):
     assert summary[0].mark == sc.FAIL and "health.partitions" in summary[0].detail
     report = sc.render_report(summary, rows)
     assert "## 业务库脚本试跑(42 条)" in report and sc.TRIAL_OBJECT in report
+
+
+class _DeliveredRegistry:
+    """技能包里的脚本定义:只带交付的(没有技能调用的 perf.locks / perf.table_stat 不在里面)。"""
+    HIDDEN = ("perf.locks", "perf.table_stat")
+
+    def __init__(self):
+        self._reg = Registry()
+
+    def names(self):
+        return [n for n in self._reg.names() if n not in self.HIDDEN]
+
+    def find(self, name):
+        if name in self.HIDDEN:
+            raise KeyError(name)
+        return self._reg.find(name)
+
+
+@pytest.mark.parametrize("registry", [Registry, _DeliveredRegistry], ids=["容器(全部定义)", "技能包(只带交付的)"])
+def test_m_trial_marks_undelivered_scripts_instead_of_blaming_the_package_layout(sc, registry):
+    """1.5.1 起:技能包里 perf.locks / perf.table_stat 被报「读不到本地脚本定义(scripts/ 没放进技能目录)」,原因写错;
+    容器里却真去试跑。两种部署都应标「本版不交付、技能不调用」,也不去中间件跑它们。"""
+    runner = _TrialRunner()
+    by = {r[0]: r for r in sc.trial_business(replace(CONN, compat="M"), runner, registry())}
+    for name in ("perf.locks", "perf.table_stat"):
+        assert by[name][1] == sc.SKIP and "本版不交付" in by[name][2], by[name]
+        assert "scripts/" not in by[name][2]
+        assert name not in runner.calls
+    assert by["health.invalid_index"][1] == sc.OK, "交付的照常试跑"
+    assert sum(1 for r in by.values() if r[1] == sc.WARN) == 0
+
+
+def test_m_trial_without_any_local_definitions_still_says_so(sc):
+    """本地脚本定义整个读不到(scripts/ 真没放进去):谁交付谁不交付都判断不了,照旧逐条报读不到。"""
+    class _Empty:
+        def names(self):
+            return []
+
+        def find(self, name):
+            raise KeyError(name)
+
+    by = {r[0]: r for r in sc.trial_business(replace(CONN, compat="M"), _TrialRunner(), _Empty())}
+    assert by["perf.locks"][1] == sc.WARN and "读不到本地脚本定义" in by["perf.locks"][2]
+    assert by["health.invalid_index"][1] == sc.WARN
 
 
 def test_m_trial_flags_values_that_came_back_as_java_objects(sc):

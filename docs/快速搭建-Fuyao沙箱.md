@@ -1,6 +1,6 @@
 # 快速搭建（鲲鹏 + openFuyao 沙箱，测试环境）
 
-> 适用版本：`agent-v1.5.2`。本文是《Fuyao沙箱部署手册》的**简易版**：只走一条最短的路，按顺序复制命令即可，每条命令下面写着**应该看到的结果**。
+> 适用版本：`agent-v1.5.3`。本文是《Fuyao沙箱部署手册》的**简易版**：只走一条最短的路，按顺序复制命令即可，每条命令下面写着**应该看到的结果**。
 > 容量规划、升级、扩容、卸载与完整的排障说明，仍以《Fuyao沙箱部署手册》为准。
 >
 > **只用于测试环境。** Fuyao 沙箱模式是预览功能：只接测试数据库、测试账号、测试环境的中间件，不接生产，不填生产令牌。
@@ -81,6 +81,9 @@
 | 只要 Appkey 和时间戳 | 填中间件给的 Appkey | `headers-only` | 无 |
 | 要完整签名 | 填中间件给的 Appkey | `full` | 中间件签发的 SM2 私钥文件（第 6.3 步的可选项） |
 
+> **拿不准就按「要 Appkey」处理。** 这套环境之前装过非容器版或 K8s 版、能正常诊断的，照原来那套配置填同一个 Appkey。
+> Appkey 留空时智能体根本不带它，而中间件要求它的话，登录数据库会报「**调用方不存在**」——这与库名、令牌都无关。
+
 **令牌从哪来**
 
 - 令牌由中间件按工号签发。本产品不生成它，也没有命令能替你申请，只能找中间件团队要。
@@ -135,23 +138,23 @@ timedatectl | grep synchronized
 
 ## 第 1 步：下载安装包并校验
 
-在能上外网的电脑上，打开发布页 <https://github.com/sqlrush/gh_gs_k8s_agent/releases/tag/agent-v1.5.2>，下载这 7 个文件（共约 1.3 GB）：
+在能上外网的电脑上，打开发布页 <https://github.com/sqlrush/gh_gs_k8s_agent/releases/tag/agent-v1.5.3>，下载这 7 个文件（共约 1.3 GB）：
 
 | 文件 | 大小 | 内容 |
 |---|---|---|
-| `gaussdb-agent-v1.5.2-oc1.18.27-arm64.tar.gz` | 504 MB | 5 个 K8s 镜像 |
-| `gaussdb-agent-v1.5.2-oc1.18.27-e2b-arm64.oci.tar` | 843 MB | 2 个沙箱模板镜像 |
-| `gaussdb-agent-v1.5.2-oc1.18.27-k8s.tar.gz` | 1 MB | 部署清单、小工具和全部手册 |
+| `gaussdb-agent-v1.5.3-oc1.18.27-arm64.tar.gz` | 504 MB | 5 个 K8s 镜像 |
+| `gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64.oci.tar` | 843 MB | 2 个沙箱模板镜像 |
+| `gaussdb-agent-v1.5.3-oc1.18.27-k8s.tar.gz` | 1 MB | 部署清单、小工具和全部手册 |
 | 以上三个文件各自的 `.sha256` | 很小 | 校验值 |
-| `e2b-agent-v1.5.2.tar.gz` | 很小 | 模板注册脚本 |
+| `e2b-agent-v1.5.3.tar.gz` | 很小 | 模板注册脚本 |
 
 用命令下载也可以：
 
 ```bash
-B=https://github.com/sqlrush/gh_gs_k8s_agent/releases/download/agent-v1.5.2
-P=gaussdb-agent-v1.5.2-oc1.18.27
+B=https://github.com/sqlrush/gh_gs_k8s_agent/releases/download/agent-v1.5.3
+P=gaussdb-agent-v1.5.3-oc1.18.27
 for f in $P-arm64.tar.gz $P-e2b-arm64.oci.tar $P-k8s.tar.gz; do curl -fLO $B/$f; curl -fLO $B/$f.sha256; done
-curl -fLO $B/e2b-agent-v1.5.2.tar.gz
+curl -fLO $B/e2b-agent-v1.5.3.tar.gz
 ```
 
 把 7 个文件拷到部署机的同一个目录（本文用 `/root/gsdb`），**拷完先校验**：
@@ -172,14 +175,14 @@ sha256sum -c *.sha256
 
 ```bash
 cd /root/gsdb
-gunzip -c gaussdb-agent-v1.5.2-oc1.18.27-arm64.tar.gz | ctr -n k8s.io images import -
+gunzip -c gaussdb-agent-v1.5.3-oc1.18.27-arm64.tar.gz | ctr -n k8s.io images import -
 ```
 > 若干行 `unpacking … done`，没有 `error`。
 
 ```bash
 ctr -n k8s.io images ls -q | grep gaussdb-agent
 ```
-> 5 行：`runtime`、`kb-import`、`gateway`、`frontend`、`kbstd`，标签都是 `agent-v1.5.2-oc1.18.27`。
+> 5 行：`runtime`、`kb-import`、`gateway`、`frontend`、`kbstd`，标签都是 `agent-v1.5.3-oc1.18.27`。
 
 `-n k8s.io` 不能省：Kubernetes 只认这个命名空间里的镜像，省了会导到别处，Pod 会报找不到镜像。
 
@@ -189,29 +192,29 @@ ctr -n k8s.io images ls -q | grep gaussdb-agent
 
 ## 第 3 步：注册 2 个沙箱模板（模板构建主机，root）
 
-模板构建主机不是部署机时，先把 `gaussdb-agent-v1.5.2-oc1.18.27-e2b-arm64.oci.tar`、它的 `.sha256` 和 `e2b-agent-v1.5.2.tar.gz` 拷到那台主机的 `/root/gsdb`，并再校验一次。
+模板构建主机不是部署机时，先把 `gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64.oci.tar`、它的 `.sha256` 和 `e2b-agent-v1.5.3.tar.gz` 拷到那台主机的 `/root/gsdb`，并再校验一次。
 
 ```bash
 cd /root/gsdb
-tar xzf e2b-agent-v1.5.2.tar.gz
+tar xzf e2b-agent-v1.5.3.tar.gz
 ls -l /root/.e2b/config.json
 ```
 > 列出这个文件。提示不存在就找平台管理员。**不用打开它**，注册脚本自己会读。
 
 ```bash
-python3 e2b/scripts/build-e2b-template.py --tag agent-v1.5.2-oc1.18.27 --arch arm64 \
-    --from-oci gaussdb-agent-v1.5.2-oc1.18.27-e2b-arm64.oci.tar --cpu 2 --memory 4096
+python3 e2b/scripts/build-e2b-template.py --tag agent-v1.5.3-oc1.18.27 --arch arm64 \
+    --from-oci gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64.oci.tar --cpu 2 --memory 4096
 ```
 > 先后出现下面四行，中间各隔几分钟：
 
 ```text
-模板构建:注册模板 gsdb-runtime-v1-5-2(…,2 vCPU / 4096 MB)…
-模板构建:模板 gsdb-runtime-v1-5-2 就绪(…秒,templateID …)
-模板构建:注册模板 gsdb-import-v1-5-2(…)…
-模板构建:模板 gsdb-import-v1-5-2 就绪(…秒,templateID …)
+模板构建:注册模板 gsdb-runtime-v1-5-3(…,2 vCPU / 4096 MB)…
+模板构建:模板 gsdb-runtime-v1-5-3 就绪(…秒,templateID …)
+模板构建:注册模板 gsdb-import-v1-5-3(…)…
+模板构建:模板 gsdb-import-v1-5-3 就绪(…秒,templateID …)
 ```
 
-每个模板实测 1 到 6 分钟。得到两个模板名：**`gsdb-runtime-v1-5-2`**（诊断）、**`gsdb-import-v1-5-2`**（导入），第 6 步的配置里已经写好，不用再填。
+每个模板实测 1 到 6 分钟。得到两个模板名：**`gsdb-runtime-v1-5-3`**（诊断）、**`gsdb-import-v1-5-3`**（导入），第 6 步的配置里已经写好，不用再填。
 
 注册期间这台主机的负载会明显升高，**避开别人正在用平台的时段**。脚本可以重复执行。
 
@@ -306,7 +309,7 @@ chmod -R 775 /srv/gaussdb-agent/nas
 ### 6.1 解开清单包
 
 ```bash
-cd /root/gsdb && mkdir -p deploy && tar xzf gaussdb-agent-v1.5.2-oc1.18.27-k8s.tar.gz -C deploy && cd deploy
+cd /root/gsdb && mkdir -p deploy && tar xzf gaussdb-agent-v1.5.3-oc1.18.27-k8s.tar.gz -C deploy && cd deploy
 ls
 ```
 > `docs  k8s`。
@@ -330,7 +333,7 @@ MODEL_NET=10.0.0.0/8
 GRMP_API_HOST=填中间件主机名或IP
 GRMP_API_PORT=8080
 GRMP_PATH_PREFIX=/填接口路径前缀
-GRMP_APPKEY=
+GRMP_APPKEY=填中间件给的Appkey
 GRMP_SIGN_MODE=headers-only
 GRMP_SIGN_TIMESTAMP=ms
 GRMP_NET=10.0.0.0/8
@@ -354,7 +357,7 @@ vi site.env
 | `FUYAO_API`、`POD_CIDR` | 第 0.2 步查到的 OpenSandbox 地址、Pod 网段 |
 | `MODEL_BASE_URL`、`MODEL_ID` | 模型服务的地址（以 `/v1` 结尾）和模型名 |
 | `GRMP_API_HOST`、`GRMP_API_PORT`、`GRMP_PATH_PREFIX` | 中间件的主机、端口、接口路径前缀 |
-| `GRMP_APPKEY`、`GRMP_SIGN_MODE` | 按第 0.1 步「中间件签名的三种情况」填。不校验就保持 `GRMP_APPKEY=` 为空 |
+| `GRMP_APPKEY`、`GRMP_SIGN_MODE` | 按第 0.1 步「中间件签名的三种情况」填，**一般都要填 Appkey**（整个智能体共用一个，照原来能用的那套配置填）。只有中间件团队明确说不校验调用方时，才改成 `GRMP_APPKEY=` 留空 |
 | `GRMP_SIGN_TIMESTAMP` | 时间戳单位：`ms` 毫秒，`s` 秒，问中间件团队。`GRMP_APPKEY` 为空时不起作用 |
 | `MODEL_NET`、`GRMP_NET` | 模型服务、中间件的 IP 所在网段，例如 `10.1.2.3/32`。网络插件是 Flannel 时不起作用，不用改；其他插件见 6.6 |
 | `NAS_MODE` 等 | 第 5 步选的哪种情形。情形 B 写 `NAS_MODE=local`，两项 `NFS_` 不用管 |
@@ -366,7 +369,7 @@ vi site.env
 ```bash
 grep -v '^#' site.env | grep '填' || echo "都填好了"
 ```
-> `都填好了`。`NAS_MODE=local` 时 `NFS_SERVER` 那一行还带「填」字是正常的。
+> `都填好了`。`NAS_MODE=local` 时 `NFS_SERVER` 那一行还带「填」字是正常的；中间件不校验调用方而把 Appkey 清空了的，`GRMP_APPKEY=` 那一行不会再出现。
 
 ### 6.3 建命名空间和密钥
 
@@ -423,8 +426,8 @@ data:
   FUYAO_API: "$FUYAO_API"
   FUYAO_RUNTIME_GROUP: "sg-gsdb-runtime"
   FUYAO_IMPORT_GROUP: "sg-gsdb-import"
-  FUYAO_RUNTIME_TEMPLATE: "gsdb-runtime-v1-5-2"
-  FUYAO_IMPORT_TEMPLATE: "gsdb-import-v1-5-2"
+  FUYAO_RUNTIME_TEMPLATE: "gsdb-runtime-v1-5-3"
+  FUYAO_IMPORT_TEMPLATE: "gsdb-import-v1-5-3"
   PRODUCT_NAME: "$PRODUCT_NAME"
 EOF
 ```
@@ -663,6 +666,7 @@ pkill -f 'port-forward svc/gateway 18089:80'; pkill -f 'k8s/tools/sso-sim.py'
 | 登录后一直「正在为您准备环境」 | 模板名不存在、沙箱组没建好 | 网关日志里 `Fuyao:` 开头的行；核对第 3、4 步 |
 | 「当前使用人数已满」 | 沙箱组的名额用完了 | 等别人闲置（默认 30 分钟后自动暂停让出名额），或请平台管理员把第 4 步的容量调大 |
 | 「您的环境尚未开通」 | 这个工号没有令牌 Secret | 做第 7.1 步 |
+| 登录数据库报「调用方不存在」 | 中间件认不出调用方：`GRMP_APPKEY` 没填或填错（与库名、令牌无关） | 照原来能用的那套配置填 `site.env` 的 `GRMP_APPKEY`，重做 6.4、6.5，再 `kubectl -n gaussdb-agent rollout restart deploy/credproxy`；已建好的沙箱要重建（见本表下面那段） |
 | 能对话，但登录数据库失败 | 令牌不对，或中间件地址、路径前缀、签名配置不对 | 核对第 0.1 步的第 2 到 4 项；改了 `site.env` 后重做 6.4、6.5，再 `kubectl -n gaussdb-agent rollout restart deploy/credproxy` |
 | 对话卡住很久后超时 | 模型服务不通 | 做第 6.6 步的自检 |
 | 资源大盘显示「需授权只读」 | 两个只读授权没建上 | 见第 6.5 步末尾 |
