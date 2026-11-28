@@ -138,22 +138,25 @@ timedatectl | grep synchronized
 
 ## 第 1 步：下载安装包并校验
 
-在能上外网的电脑上，打开发布页 <https://github.com/sqlrush/gh_gs_k8s_agent/releases/tag/agent-v1.5.3>，下载这 7 个文件（共约 1.3 GB）：
+在能上外网的电脑上，打开发布页 <https://github.com/sqlrush/gh_gs_k8s_agent/releases/tag/agent-v1.5.3>，下载这 7 个文件（共约 1.4 GB）：
 
 | 文件 | 大小 | 内容 |
 |---|---|---|
 | `gaussdb-agent-v1.5.3-oc1.18.27-arm64.tar.gz` | 504 MB | 5 个 K8s 镜像 |
-| `gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64.oci.tar` | 843 MB | 2 个沙箱模板镜像 |
+| `gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64-offline.oci.tar` | 935 MB | 2 个沙箱模板镜像（已预装平台建模板要的系统包，平台不通外网也能建） |
 | `gaussdb-agent-v1.5.3-oc1.18.27-k8s.tar.gz` | 1 MB | 部署清单、小工具和全部手册 |
 | 以上三个文件各自的 `.sha256` | 很小 | 校验值 |
 | `e2b-agent-v1.5.3.tar.gz` | 很小 | 模板注册脚本 |
+
+> 发布页上还有一个不带 `-offline` 的 `gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64.oci.tar`（843 MB），是首发时的模板包：
+> 平台建模板时要现场上外网给它补装系统包，模板构建主机不通外网就会失败。**用带 `-offline` 的这个。**
 
 用命令下载也可以：
 
 ```bash
 B=https://github.com/sqlrush/gh_gs_k8s_agent/releases/download/agent-v1.5.3
 P=gaussdb-agent-v1.5.3-oc1.18.27
-for f in $P-arm64.tar.gz $P-e2b-arm64.oci.tar $P-k8s.tar.gz; do curl -fLO $B/$f; curl -fLO $B/$f.sha256; done
+for f in $P-arm64.tar.gz $P-e2b-arm64-offline.oci.tar $P-k8s.tar.gz; do curl -fLO $B/$f; curl -fLO $B/$f.sha256; done
 curl -fLO $B/e2b-agent-v1.5.3.tar.gz
 ```
 
@@ -192,7 +195,7 @@ ctr -n k8s.io images ls -q | grep gaussdb-agent
 
 ## 第 3 步：注册 2 个沙箱模板（模板构建主机，root）
 
-模板构建主机不是部署机时，先把 `gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64.oci.tar`、它的 `.sha256` 和 `e2b-agent-v1.5.3.tar.gz` 拷到那台主机的 `/root/gsdb`，并再校验一次。
+模板构建主机不是部署机时，先把 `gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64-offline.oci.tar`、它的 `.sha256` 和 `e2b-agent-v1.5.3.tar.gz` 拷到那台主机的 `/root/gsdb`，并再校验一次。
 
 ```bash
 cd /root/gsdb
@@ -203,7 +206,7 @@ ls -l /root/.e2b/config.json
 
 ```bash
 python3 e2b/scripts/build-e2b-template.py --tag agent-v1.5.3-oc1.18.27 --arch arm64 \
-    --from-oci gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64.oci.tar --cpu 2 --memory 4096
+    --from-oci gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64-offline.oci.tar --cpu 2 --memory 4096
 ```
 > 先后出现下面四行，中间各隔几分钟：
 
@@ -666,6 +669,8 @@ pkill -f 'port-forward svc/gateway 18089:80'; pkill -f 'k8s/tools/sso-sim.py'
 | 登录后一直「正在为您准备环境」 | 模板名不存在、沙箱组没建好 | 网关日志里 `Fuyao:` 开头的行；核对第 3、4 步 |
 | 「当前使用人数已满」 | 沙箱组的名额用完了 | 等别人闲置（默认 30 分钟后自动暂停让出名额），或请平台管理员把第 4 步的容量调大 |
 | 「您的环境尚未开通」 | 这个工号没有令牌 Secret | 做第 7.1 步 |
+| 注册模板报 `模板 gsdb-runtime-v1-5-3 构建失败`，平台的构建日志里有 `Temporary failure resolving 'deb.debian.org'`、`Unable to locate package systemd` | 用的是不带 `-offline` 的首发模板包：平台建模板时要给镜像补装 systemd、SSH 等系统包，模板构建主机不通外网 | 换成 `gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64-offline.oci.tar`，重做第 3 步（校验、注册两步）。模板名不变，其他步骤不用重做；不用开外网、不用搭 Debian 源 |
+| 重新注册时报 `建模板 gsdb-runtime-v1-5-3 失败(HTTP …)`，提示名字已存在 | 之前失败的同名模板还在 | 换个名字只注册诊断模板：第 3 步的命令末尾加 `--kind runtime --template-name gsdb-runtime-v1-5-3b`（导入模板还没注册上的，再加 `--kind kb-import` 单独注册一次）；把 `k8s/overlays/site/configmap-gateway-site.yaml` 里的 `FUYAO_RUNTIME_TEMPLATE` 改成 `gsdb-runtime-v1-5-3b`（直接改这个文件，不要重做 6.4，会改回去），重做 6.5，再 `kubectl -n gaussdb-agent rollout restart deploy/gateway` |
 | 登录数据库报「调用方不存在」 | 中间件认不出调用方：`GRMP_APPKEY` 没填或填错（与库名、令牌无关） | 照原来能用的那套配置填 `site.env` 的 `GRMP_APPKEY`，重做 6.4、6.5，再 `kubectl -n gaussdb-agent rollout restart deploy/credproxy`；已建好的沙箱要重建（见本表下面那段） |
 | 能对话，但登录数据库失败 | 令牌不对，或中间件地址、路径前缀、签名配置不对 | 核对第 0.1 步的第 2 到 4 项；改了 `site.env` 后重做 6.4、6.5，再 `kubectl -n gaussdb-agent rollout restart deploy/credproxy` |
 | 对话卡住很久后超时 | 模型服务不通 | 做第 6.6 步的自检 |

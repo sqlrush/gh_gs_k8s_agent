@@ -185,11 +185,11 @@ Fuyao 模式里出现的「承载 Pod」是**平台的**对象（每个承载 Po
 | 文件 | 内容 | 用在哪一步 |
 |---|---|---|
 | `<包名>-<架构>.tar.gz` | 五个 K8s 镜像：runtime、kb-import、gateway、frontend、kbstd | §3 |
-| `<包名>-e2b-<架构>.oci.tar` | 两个模板镜像：`gaussdb-agent-runtime-e2b`、`gaussdb-agent-kb-import-e2b`（OCI 格式，已压成一层，不再 gzip） | §4 |
+| `<包名>-e2b-<架构>.oci.tar` | 两个模板镜像：`gaussdb-agent-runtime-e2b`、`gaussdb-agent-kb-import-e2b`（OCI 格式，已压成一层，不再 gzip）。v1.5.3 用发布页补发的 `gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64-offline.oci.tar`（预装了平台建模板要的系统包，见 §4.1） | §4 |
 | `e2b/` | 模板注册脚本 `e2b/scripts/build-e2b-template.py`、临时仓库 `e2b/scripts/oci-serve.py`、`e2b/docker/Dockerfile.e2b` | §4 |
 | `<包名>-k8s.tar.gz` | `k8s/` 清单与 `docs/` 交付文档 | §6–§7 |
 | `gaussdb-agent-release-…-<架构>.tar.gz`、`release.yaml`、`release-console.sh` | 发版台（升级用） | §10 |
-| `rootspec-overlay.sh` | 换根规范；包里有模板 OCI 包时一并重建模板 | 按需 |
+| `rootspec-overlay.sh` | 换根规范；包里有模板 OCI 包时在它上面换规范、重新压层（不重装系统包、不联网） | 按需 |
 | `*.sha256`、`MANIFEST.txt` | 校验和、实际镜像标签 | 全程 |
 
 `<包名>`：标签以 `agent-` 开头时为 `gaussdb-<标签>`，例如标签 `agent-v1.5.3-oc1.18.27` 的包名是 `gaussdb-agent-v1.5.3-oc1.18.27`。
@@ -237,7 +237,7 @@ done
 ```
 
 **沙箱模板镜像**：平台的模板构建服务拉不了公网仓库（§4.1），要先在一台能连外网的机器上把两个镜像导出成 OCI 包，
-得到的文件与离线包里的 `<包名>-e2b-arm64.oci.tar` 等价，再按 §4.1 用 `--from-oci` 注册。下面两种工具任选一种：
+得到的文件与离线包里的 `<包名>-e2b-arm64.oci.tar` 等价，再按 §4.1 用 `--from-oci` 注册。（v1.5.3 GHCR 上的两个模板镜像是首发版，没有预装平台建模板要的系统包：模板构建主机不通外网时改用发布页的 `gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64-offline.oci.tar`，见 §4.1。）下面两种工具任选一种：
 
 ```bash
 TAG=agent-v1.5.3-oc1.18.27
@@ -314,10 +314,12 @@ root 权限；`/root/.e2b/config.json` 里有团队 API Key（`teamApiKey`）；
 
 把离线包里的 `e2b/` 目录与 `<包名>-e2b-<架构>.oci.tar` 拷到构建主机（从 GHCR 拉的，按 §2.3 导出 OCI 包、取脚本），例如 `/root/gsdb-e2b/`：
 
+> **v1.5.3 用 `gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64-offline.oci.tar`**（2026-11-28 补发，在同一发布页）。平台建模板时逐个检查镜像里有没有 systemd、openssh-server、sudo、chrony 等系统包，缺的现场去 Debian 官方源下载（新版平台还从 S3 下载 mount-s3）。首发的 `…-e2b-arm64.oci.tar` 没有预装这些包，模板构建主机不通外网时模板 error，构建日志里是 `Temporary failure resolving 'deb.debian.org'`、`Unable to locate package systemd`。补发包里预先装好，平台检查都在就不联网；业务代码、技能、文档集与首发包相同，五个 K8s 镜像不变。
+
 ```bash
 cd /root/gsdb-e2b
 python3 e2b/scripts/build-e2b-template.py --tag agent-v1.5.3-oc1.18.27 --arch arm64 \
-    --from-oci gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64.oci.tar --cpu 2 --memory 4096
+    --from-oci gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64-offline.oci.tar --cpu 2 --memory 4096
 ```
 
 | 参数 | 默认 | 说明 |
@@ -888,7 +890,7 @@ kubectl -n flux-system get ssg | grep sg-gsdb-runtime      # PODS / CAPACITY 变
 
 ```bash
 python3 e2b/scripts/build-e2b-template.py --tag agent-v1.5.3-oc1.18.27 --arch arm64 \
-    --from-oci gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64.oci.tar \
+    --from-oci gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64-offline.oci.tar \
     --kind runtime --cpu 4 --memory 8192 --template-name gsdb-runtime-v1-5-3-c4m8
 ```
 
@@ -1111,7 +1113,7 @@ scripts/package-images.sh $TAG --arch arm64 --e2b      # 产物在 dist/gaussdb-
 | `runtime-e2b` | `gaussdb-agent-runtime-e2b`（诊断沙箱） |
 | `kbimport-e2b` | `gaussdb-agent-kb-import-e2b`（导入沙箱） |
 
-**做法一：在构建机上做成 OCI 包，再到模板构建主机注册（推荐，与离线包一致）**
+**做法一：在能上外网的构建机上做成 OCI 包，再到模板构建主机注册（推荐，与离线包一致）**
 
 ```bash
 for K in runtime:runtime-e2b kb-import:kbimport-e2b; do
@@ -1130,7 +1132,7 @@ docker save --platform linux/arm64 -o gaussdb-agent-v1.5.3-oc1.18.27-e2b-arm64.o
 
 **做法二：在模板构建主机上直接构建并注册**
 
-模板构建主机装有 `nerdctl` 与 buildkit、并且能从某个仓库拉到同版本的三个容器镜像时，可以一步完成：
+模板构建主机装有 `nerdctl` 与 buildkit、能从某个仓库拉到同版本的三个容器镜像、**并且能连 Debian 官方源**时，可以一步完成：
 
 ```bash
 python3 scripts/build-e2b-template.py --tag $TAG --arch arm64 --registry registry.example/gaussdb-agent
@@ -1152,4 +1154,5 @@ docker run --rm --user root --entrypoint sh gaussdb-agent-runtime-e2b:$TAG -c 'l
 
 - 沙箱镜像**不要**推进 K8s 用的镜像仓库、也不要拿来跑 Pod：它压成了一层，内容比容器镜像多几个 GB，只用于注册模板。
 - 每个版本要重新做两个沙箱镜像并重新注册模板（模板名随版本变，§10）；只换虚拟机规格不用重做（§11.3）。
-- 现场换根规范时，`rootspec-overlay.sh` 会在离线包里一并重建沙箱镜像（包里有 OCI 包时），换完同样要重新注册模板。
+- 现场换根规范时，`rootspec-overlay.sh` 会在离线包里的沙箱镜像上换规范、重新压层（包里有 OCI 包时；不重装系统包、不联网），换完同样要重新注册模板。
+- `Dockerfile.e2b` 的准备阶段要 `apt-get` 装平台建模板要的系统包（文件头 `E2B_BASE_PACKAGES`），**构建机要能连 Debian 官方源**；走代理时加 `--build-arg http_proxy=<代理> --build-arg https_proxy=<代理>`（不进镜像）。

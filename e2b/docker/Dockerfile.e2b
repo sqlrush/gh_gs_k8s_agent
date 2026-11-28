@@ -1,7 +1,8 @@
 # Fuyao 运行模式(2026-11-17):构建 E2B 模板用的镜像。由 scripts/build-e2b-template.py 在构建服务所在的主机上构建,
 # 不推任何仓库 —— 导出成 OCI 目录后由 scripts/oci-serve.py 只读端出(127.0.0.1),平台的模板构建服务从那里拉。
 #
-# 在已发布的镜像上只加两样(业务代码与技能不变,模板与同版本的容器版逐字节同源):
+# 在已发布的镜像上只加三样(业务代码与技能不变,模板与同版本的容器版逐字节同源):
+#   0. 平台构建模板要的系统包(systemd、SSH、chrony、sudo、mount-s3 等)预先装好,不通外网的现场也能构建(见下);
 #   1. 磁盘占位文件:平台按「镜像大小 + 固定余量」定模板磁盘,模板参数里的 diskSizeMB 不生效(平台实测);
 #      全零文件撑大磁盘,沙箱启动时 podctl fuyao-start 删掉它,空间留给用户状态。全零数据压缩后只有几 MB。
 #   2. 两种模板都内置官方文档集(kb/docsets):沙箱挂不了 NAS,文档集随版本走,不必每台沙箱都从状态服务拉一遍
@@ -16,10 +17,25 @@
 # 构建参数:
 #   RUNTIME_IMAGE / KBIMPORT_IMAGE / KBSTD_IMAGE   同一版本的三个镜像(本机 containerd 里已有,或可拉取)
 #   RESERVE_MB                                     占位文件大小,默认 6144(模板磁盘约 9.3GB,删后可用约 8GB)
+#   E2B_BASE_PACKAGES / MOUNTPOINT_BASE_URL        预装的系统包与 mount-s3 下载地址(见下),一般不用改
+#   RUNTIME_PREP / KBIMPORT_PREP                   压层来源,默认两个准备阶段;换根规范时由 rootspec-overlay.sh 指定(见下)
 # 目标:runtime-e2b(诊断)、kbimport-e2b(导入)
 ARG RUNTIME_IMAGE
 ARG KBIMPORT_IMAGE
 ARG KBSTD_IMAGE
+# 平台的模板构建(E2B provision.sh)先逐个 dpkg-query 检查下面这组包,缺的才现场 apt-get update + install,
+# 新版还从 S3 下载 mount-s3 —— 都要外网。2026-11-27 现场:构建主机不通外网,模板构建报 Temporary failure resolving
+# 'deb.debian.org'、Unable to locate package systemd …,模板 error。这里在能上网的构建机上先装好,平台检查全在就不联网。
+# 清单取 E2B 各版本的并集:2025 版 systemd systemd-sysv openssh-server sudo chrony linuxptp socat curl;
+# 2026-01 版加 ca-certificates fuse3 iptables git 并另装 mount-s3;当前版加 nfs-common less nftables iputils-ping jq
+# iproute2(去掉了 linuxptp,多装无害)。平台对这些包只查不改,与平台现场装的是同一批 Debian 包。
+ARG E2B_BASE_PACKAGES="systemd systemd-sysv openssh-server sudo chrony linuxptp socat curl ca-certificates fuse3 iptables git nfs-common less nftables iputils-ping jq iproute2"
+ARG MOUNTPOINT_BASE_URL=https://s3.amazonaws.com/mountpoint-s3-release/latest
+# 压成一层的来源。默认是下面两个准备阶段(从已发布镜像起:装系统包、文档集、占位文件 —— 装包要外网)。
+# scripts/rootspec-overlay.sh 换根规范时改成「已出的模板镜像 + 换规范的一层」:系统包、文档集、占位文件都已在里面,
+# 准备阶段整段不执行(BuildKit 只建目标用到的阶段),不通外网的现场也能重建。
+ARG RUNTIME_PREP=runtime-prep
+ARG KBIMPORT_PREP=kbimport-prep
 
 FROM ${KBSTD_IMAGE} AS kbstd
 
@@ -33,6 +49,19 @@ RUN mkdir -p /out/kb \
 FROM ${RUNTIME_IMAGE} AS runtime-prep
 ARG RESERVE_MB=6144
 USER root
+# 预装平台模板构建要的系统包(说明见文件头 E2B_BASE_PACKAGES);两个准备阶段这一段逐字相同(守卫测试核对)
+ARG E2B_BASE_PACKAGES
+ARG MOUNTPOINT_BASE_URL
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $E2B_BASE_PACKAGES \
+    && case "$(dpkg --print-architecture)" in arm64) a=arm64 ;; amd64) a=x86_64 ;; *) echo "不支持的架构" >&2; exit 1 ;; esac \
+    && curl -fsSL "$MOUNTPOINT_BASE_URL/$a/mount-s3.deb" -o /tmp/mount-s3.deb \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends /tmp/mount-s3.deb \
+    && rm -f /tmp/mount-s3.deb && rm -rf /var/lib/apt/lists/* \
+    && for p in $E2B_BASE_PACKAGES mount-s3; do \
+         dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "install ok installed" || { echo "预装失败:$p" >&2; exit 1; }; \
+       done \
+    && test -x /lib/systemd/systemd
 COPY --from=docsets /out/kb/docsets /data/kb/docsets
 RUN mkdir -p /var/lib/gsdb && chmod 0700 /var/lib/gsdb \
     && dd if=/dev/zero of=/var/lib/gsdb/disk-reserve bs=1M count=${RESERVE_MB} status=none
@@ -40,12 +69,29 @@ RUN mkdir -p /var/lib/gsdb && chmod 0700 /var/lib/gsdb \
 FROM ${KBIMPORT_IMAGE} AS kbimport-prep
 ARG RESERVE_MB=6144
 USER root
+# 预装平台模板构建要的系统包(说明见文件头 E2B_BASE_PACKAGES);两个准备阶段这一段逐字相同(守卫测试核对)
+ARG E2B_BASE_PACKAGES
+ARG MOUNTPOINT_BASE_URL
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $E2B_BASE_PACKAGES \
+    && case "$(dpkg --print-architecture)" in arm64) a=arm64 ;; amd64) a=x86_64 ;; *) echo "不支持的架构" >&2; exit 1 ;; esac \
+    && curl -fsSL "$MOUNTPOINT_BASE_URL/$a/mount-s3.deb" -o /tmp/mount-s3.deb \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends /tmp/mount-s3.deb \
+    && rm -f /tmp/mount-s3.deb && rm -rf /var/lib/apt/lists/* \
+    && for p in $E2B_BASE_PACKAGES mount-s3; do \
+         dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "install ok installed" || { echo "预装失败:$p" >&2; exit 1; }; \
+       done \
+    && test -x /lib/systemd/systemd
 COPY --from=docsets /out/kb/docsets /data/kb/docsets
 RUN mkdir -p /var/lib/gsdb && chmod 0700 /var/lib/gsdb \
     && dd if=/dev/zero of=/var/lib/gsdb/disk-reserve bs=1M count=${RESERVE_MB} status=none
 
+FROM ${RUNTIME_PREP} AS runtime-src
+
+FROM ${KBIMPORT_PREP} AS kbimport-src
+
 FROM scratch AS runtime-e2b
-COPY --from=runtime-prep / /
+COPY --from=runtime-src / /
 ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 \
     PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TZ=Asia/Shanghai GSDB_ROOTSPEC_HOME=/workspace
 USER agent
@@ -53,7 +99,7 @@ WORKDIR /data
 ENTRYPOINT ["/opt/agent/entrypoint.sh"]
 
 FROM scratch AS kbimport-e2b
-COPY --from=kbimport-prep / /
+COPY --from=kbimport-src / /
 ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 \
     PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TZ=Asia/Shanghai GSDB_ROOTSPEC_HOME=/workspace \
     GSDB_KB_INBOX=/nas/kb/inbox/uploads AGENT_ROLE=kb-import

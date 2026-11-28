@@ -2,7 +2,8 @@
 # 把镜像里预留的三份根规范模板换成行内正式规范(行内部署时用)。在离线包上做,原包不动,另出一个新包目录:
 #   runtime 与 kb-import 两个镜像各加一层,/workspace/docs/ 里的模板换成你给的文件;标签不变,其余镜像原样;
 #   重新导出镜像包,用包里的发版台镜像刷新 release.yaml(镜像 digest、sha256)。新包手工部署(docker load)与发版台都能用。
-#   包里有 Fuyao 模板镜像(<包名>-e2b-<架构>.oci.tar)时一并按新镜像重建 —— 模板里是镜像的整份文件系统,不重建就还是模板规范。
+#   包里有 Fuyao 模板镜像(<包名>-e2b-<架构>[-…].oci.tar)时一并重建 —— 模板里是镜像的整份文件系统,不重建就还是模板规范。
+#   重建是在包里已出的模板镜像上换同样的规范、再压回一层:模板里预装的系统包、文档集、占位文件原样保留,不联网。
 #
 # 用法: <离线包目录>/rootspec-overlay.sh --docs <放根规范的目录> [--package <离线包目录>] [--arch amd64|arm64] [--out <新包目录>]
 #   --package 默认本脚本所在目录(脚本随离线包发出)
@@ -92,23 +93,39 @@ for img in "${IMGS[@]}"; do
 done
 
 echo "== 3/4 导出新包 $OUT …"
-ETAR="$PKG/$NAME-e2b-$ARCH.oci.tar"
+# 模板镜像包:标准名或带后缀的补发包(如 -offline),只能有一个
+ETARS=()
+for f in "$PKG/$NAME-e2b-$ARCH.oci.tar" "$PKG/$NAME-e2b-$ARCH"-*.oci.tar; do [ -f "$f" ] && ETARS+=("$f"); done
+[ "${#ETARS[@]}" -le 1 ] || { echo "包里有 ${#ETARS[@]} 个 Fuyao 模板镜像包:只留要注册的那一个" >&2; exit 1; }
+ETAR=${ETARS[0]:-}
 mkdir -p "$OUT"
 for f in "$PKG"/*; do
   case "$f" in "$TAR"|"$TAR.sha256"|"$ETAR"|"$ETAR.sha256") continue ;; esac
   cp -Rp "$f" "$OUT/"
 done
 docker save "${IMGS[@]}" | gzip -6 > "$OUT/$(basename "$TAR")"
-if [ -f "$ETAR" ]; then
+if [ -n "$ETAR" ]; then
   [ -f "$PKG/e2b/docker/Dockerfile.e2b" ] || { echo "包里有 $(basename "$ETAR") 却没有 e2b/docker/Dockerfile.e2b" >&2; exit 1; }
+  grep -q "^ARG RUNTIME_PREP=" "$PKG/e2b/docker/Dockerfile.e2b" \
+    || { echo "e2b/docker/Dockerfile.e2b 是旧版(不能在已出的模板镜像上换规范):用联合仓库 main 的 e2b/ 目录替换" >&2; exit 1; }
   img_of() { for i in "${IMGS[@]}"; do case "$i" in *"gaussdb-agent-$1:"*) echo "$i"; return ;; esac; done; }
   RI=$(img_of runtime); KI=$(img_of kb-import); SI=$(img_of kbstd)
   [ -n "$RI" ] && [ -n "$KI" ] && [ -n "$SI" ] || { echo "重建 Fuyao 模板要 runtime、kb-import、kbstd 三个镜像" >&2; exit 1; }
+  # 在已出的模板镜像上加同一层换规范,再按 Dockerfile.e2b 压回一层(RUNTIME_PREP / KBIMPORT_PREP 指向它)。
+  # 不从头重建:从头建要现场 apt-get 装平台要的系统包,现场不通外网(2026-11-28)
+  EIN=()
+  while IFS= read -r i; do EIN+=("$i"); done < <(docker load -i "$ETAR" | sed -n 's/^Loaded image: //p')
+  e2b_of() { for i in "${EIN[@]}"; do case "$i" in *"gaussdb-agent-$1-e2b:"*) echo "$i"; return ;; esac; done; }
   EIMGS=()
-  for K in runtime:runtime-e2b kb-import:kbimport-e2b; do
-    T="gaussdb-agent-${K%%:*}-e2b:${RI##*:}"
-    docker build -q --platform "linux/$ARCH" -f "$PKG/e2b/docker/Dockerfile.e2b" --target "${K#*:}" \
-      --build-arg "RUNTIME_IMAGE=$RI" --build-arg "KBIMPORT_IMAGE=$KI" --build-arg "KBSTD_IMAGE=$SI" -t "$T" "$CTX" >/dev/null
+  for K in runtime:runtime-e2b:RUNTIME_PREP kb-import:kbimport-e2b:KBIMPORT_PREP; do
+    k=${K%%:*}; rest=${K#*:}; target=${rest%%:*}; prep=${rest#*:}
+    SRC=$(e2b_of "$k"); [ -n "$SRC" ] || { echo "$(basename "$ETAR") 里没有 gaussdb-agent-$k-e2b 镜像" >&2; exit 1; }
+    docker build -q --platform "linux/$ARCH" --build-arg "BASE=$SRC" -t "$SRC-rootspec-src" "$CTX" >/dev/null
+    T="gaussdb-agent-$k-e2b:${RI##*:}"
+    docker build -q --platform "linux/$ARCH" -f "$PKG/e2b/docker/Dockerfile.e2b" --target "$target" \
+      --build-arg "RUNTIME_IMAGE=$RI" --build-arg "KBIMPORT_IMAGE=$KI" --build-arg "KBSTD_IMAGE=$SI" \
+      --build-arg "$prep=$SRC-rootspec-src" -t "$T" "$CTX" >/dev/null
+    docker rmi "$SRC-rootspec-src" >/dev/null || echo "  (中间镜像 $SRC-rootspec-src 没删掉,可手工 docker rmi)"
     EIMGS+=("$T")
   done
   docker save --platform "linux/$ARCH" -o "$OUT/$(basename "$ETAR")" "${EIMGS[@]}"
